@@ -2,6 +2,8 @@
 import { Storage } from "./storage.js";
 import { auth, googleProvider, signInWithPopup, signOut, onAuthStateChanged } from "./firebase-init.js";
 
+const APP_VERSION = 'v12';
+
 // ---------- DOM refs ----------
 const listView = document.getElementById('list-view');
 const customersView = document.getElementById('customers-view');
@@ -1115,6 +1117,10 @@ onAuthStateChanged(auth, async (user) => {
 window.addEventListener('beforeunload', () => {
   if (currentId) commitSave();
 });
+
+// Display app version in the home toolbar
+const appVersionEl = document.getElementById('app-version');
+if (appVersionEl) appVersionEl.textContent = APP_VERSION;
 
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('sw.js').catch(() => {});

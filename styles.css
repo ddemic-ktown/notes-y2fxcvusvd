@@ -80,6 +80,7 @@ body { min-height: 100vh; }
   padding-top: max(14px, env(safe-area-inset-top));
 }
 .app-header h1 { margin: 0; font-size: 18px; font-weight: 600; }
+.app-version { font-size: 12px; color: var(--ink-soft); margin-right: 8px; }
 /* Editor header — stacked into two rows: nav row + tools row */
 .editor-header {
   flex-direction: column;
@@ -520,8 +521,13 @@ body { min-height: 100vh; }
 }
 .fab:active { transform: scale(0.96); }
 
-/* Editor — full-viewport flex column so toolbar never scrolls away */
+/* Editor — fixed overlay so the toolbar is always visible at the top.
+   This sidesteps page-level scroll from body padding / browser focus-into-view. */
 #editor-view.active {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: var(--surface);
   display: flex;
   flex-direction: column;
   height: 100vh;
