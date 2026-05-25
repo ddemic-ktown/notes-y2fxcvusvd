@@ -22,6 +22,15 @@ html, body {
   -webkit-text-size-adjust: 100%;
 }
 body { min-height: 100vh; }
+body.editor-open {
+  overflow: hidden;
+  height: 100vh;
+  height: 100dvh;
+  max-height: 100dvh;
+  padding-bottom: 0;
+  position: fixed;
+  width: 100%;
+}
 
 /* Screens */
 .screen { display: none; min-height: 100vh; flex-direction: column; }

@@ -2,7 +2,7 @@
 import { Storage } from "./storage.js";
 import { auth, googleProvider, signInWithPopup, signOut, onAuthStateChanged } from "./firebase-init.js";
 
-const APP_VERSION = 'v13';
+const APP_VERSION = 'v14';
 
 // ---------- DOM refs ----------
 const listView = document.getElementById('list-view');
@@ -254,6 +254,8 @@ function hideAllScreens() {
   aggregatorView.classList.remove('active');
   editorView.classList.remove('active');
   if (signinView) signinView.classList.remove('active');
+  // Body class controls page-level scroll lock for editor screen
+  document.body.classList.remove('editor-open');
 }
 
 function showAggregator(keyword) {
@@ -405,6 +407,9 @@ function showEditor(record, type, cursorHint) {
 
   hideAllScreens();
   editorView.classList.add('active');
+  document.body.classList.add('editor-open');
+  // Ensure page-level scroll is reset so the toolbar is at the top
+  window.scrollTo(0, 0);
 
   setTimeout(() => {
     // If a cursor hint was passed (e.g. came from an aggregator match), jump
