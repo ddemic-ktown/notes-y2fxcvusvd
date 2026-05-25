@@ -89,7 +89,6 @@ body { min-height: 100vh; }
   padding: 8px 12px;
 }
 .editor-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
-.editor-row-nav .icon-btn.danger { margin-left: auto; }
 .editor-row-tools { width: 100%; }
 .editor-header .note-search-input { font-size: 13px; padding: 7px 12px; flex: 1; min-width: 0; }
 .editor-header .search-count { font-size: 12px; color: var(--ink-soft); min-width: 30px; text-align: center; flex-shrink: 0; }
