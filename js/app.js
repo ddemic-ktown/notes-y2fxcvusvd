@@ -269,12 +269,12 @@ function renderAggregatorList(keyword) {
     aggregatorList.innerHTML = `<p class="empty-state">No paragraphs starting with “${escapeHtml(keyword)}” yet.</p>`;
     return;
   }
-  aggregatorList.innerHTML = matches.map(m => {
+  aggregatorList.innerHTML = matches.map((m, idx) => {
     const def = Storage.getDefaultNoteForCustomer(m.customerId);
     const customerName = def ? (splitTitleAndBody(def.body).title || '').trim() : '';
     const tag = customerName ? escapeHtml(customerName) : 'Unnamed customer';
     return `
-      <article class="note-card aggregator-match" data-note-id="${m.noteId}">
+      <article class="note-card aggregator-match" data-note-id="${m.noteId}" data-match-idx="${idx}">
         <span class="customer-tag">${tag}</span>
         <p class="match-body">${escapeHtml(m.paragraph)}</p>
         <p class="note-date" style="margin-top:6px">${formatDateTime(m.updated)}</p>
@@ -284,10 +284,10 @@ function renderAggregatorList(keyword) {
   aggregatorList.querySelectorAll('.note-card').forEach(card => {
     card.addEventListener('click', () => {
       const note = Storage.getNote(card.dataset.noteId);
-      if (note) {
-        returnScreen = 'aggregator';
-        showEditor(note, 'note');
-      }
+      if (!note) return;
+      const match = matches[parseInt(card.dataset.matchIdx, 10)];
+      returnScreen = 'aggregator';
+      showEditor(note, 'note', match ? { paragraph: match.paragraph } : undefined);
     });
   });
 }
@@ -340,7 +340,7 @@ function showCustomerNotes(customerId, returnTo) {
   renderCustomerNotesList(customerId);
 }
 
-function showEditor(record, type) {
+function showEditor(record, type, cursorHint) {
   currentId = record.id;
   currentType = type;
   currentIsDefault = !!record.isDefault;
@@ -405,6 +405,32 @@ function showEditor(record, type) {
   editorView.classList.add('active');
 
   setTimeout(() => {
+    // If a cursor hint was passed (e.g. came from an aggregator match), jump
+    // to the matching paragraph inside the body textarea.
+    if (cursorHint && cursorHint.paragraph && type === 'note') {
+      const bodyVal = bodyInput.value;
+      const lines = cursorHint.paragraph.split('\n');
+      // Try progressively shorter suffixes — if the paragraph straddles the
+      // title (line 1) and body, dropping leading lines lets us find the body part.
+      for (let start = 0; start < lines.length; start++) {
+        const candidate = lines.slice(start).join('\n');
+        if (!candidate) continue;
+        const idx = bodyVal.indexOf(candidate);
+        if (idx !== -1) {
+          bodyInput.focus();
+          bodyInput.setSelectionRange(idx, idx);
+          const before = bodyVal.substring(0, idx);
+          const lineHeight = parseFloat(getComputedStyle(bodyInput).lineHeight) || 22;
+          const lineCount = (before.match(/\n/g) || []).length;
+          const target = lineCount * lineHeight - bodyInput.clientHeight / 2 + lineHeight;
+          bodyInput.scrollTop = Math.max(0, target);
+          return;
+        }
+      }
+      // Fallback: paragraph was entirely on the title line — focus that.
+      titleInput.focus();
+      return;
+    }
     const titleEmpty = !titleInput.value;
     const bodyEmpty = !bodyInput.value;
     if (titleEmpty && bodyEmpty) titleInput.focus();

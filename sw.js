@@ -1,5 +1,5 @@
 // Service worker — offline cache for Note Aggregator
-const VERSION = 'na-v4';
+const VERSION = 'na-v5';
 const CORE = [
   './',
   './index.html',
