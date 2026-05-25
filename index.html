@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#1f2937" />
+  <title>Note Aggregator</title>
+  <link rel="manifest" href="manifest.json" />
+  <link rel="icon" type="image/png" href="icons/favicon.png" />
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <!-- LIST VIEW -->
+  <section id="list-view" class="screen active">
+    <header class="app-header">
+      <h1>Notes</h1>
+      <button id="settings-btn" class="icon-btn" style="margin-left:auto" aria-label="Settings">⚙</button>
+    </header>
+    <main id="notes-list" class="notes-list">
+      <p class="empty-state">No notes yet. Tap <strong>+</strong> to add one.</p>
+    </main>
+    <button id="fab" class="fab" aria-label="New note">+</button>
+  </section>
+
+  <!-- CUSTOMERS LIST VIEW -->
+  <section id="customers-view" class="screen">
+    <header class="app-header">
+      <button class="icon-btn home-btn" aria-label="Home">⌂</button>
+      <input id="customer-search" class="search-input" type="search" placeholder="Search customers" autocomplete="off" />
+      <div class="sort-group" role="group" aria-label="Sort customers">
+        <button id="sort-alpha" class="sort-btn" aria-pressed="true">A–Z</button>
+        <button id="sort-recent" class="sort-btn" aria-pressed="false">Recent</button>
+      </div>
+    </header>
+    <main id="customers-list" class="notes-list">
+      <p class="empty-state">No customers yet. Tap <strong>+</strong> to add one.</p>
+    </main>
+    <button id="customers-fab" class="fab" aria-label="New customer">+</button>
+  </section>
+
+  <!-- CUSTOMER NOTES VIEW -->
+  <section id="customer-notes-view" class="screen">
+    <header class="app-header">
+      <button id="customer-notes-back-btn" class="icon-btn back-btn" aria-label="Back to Customers">← Customers</button>
+      <button class="icon-btn home-btn" aria-label="Home">⌂</button>
+      <h1 id="customer-notes-title">Customer</h1>
+    </header>
+    <main id="customer-notes-list" class="notes-list"></main>
+    <button id="customer-notes-fab" class="fab" aria-label="New note for this customer">+</button>
+  </section>
+
+  <!-- AGGREGATOR VIEW (one per keyword) -->
+  <section id="aggregator-view" class="screen">
+    <header class="app-header">
+      <button class="icon-btn home-btn" aria-label="Home">⌂</button>
+      <h1 id="aggregator-title">Keyword</h1>
+    </header>
+    <main id="aggregator-list" class="notes-list"></main>
+  </section>
+
+  <!-- SETTINGS VIEW -->
+  <section id="settings-view" class="screen">
+    <header class="app-header">
+      <button class="icon-btn home-btn" aria-label="Home">⌂</button>
+      <h1>Settings</h1>
+    </header>
+    <main class="settings-main">
+      <div class="setting-row">
+        <label for="setting-recent-count">Recent customer notes on home</label>
+        <input id="setting-recent-count" type="number" min="0" max="20" />
+      </div>
+
+      <div class="setting-row">
+        <label for="setting-aggregator-count">Aggregator notes on home</label>
+        <input id="setting-aggregator-count" type="number" min="0" max="50" />
+      </div>
+
+      <div class="setting-row setting-list-row">
+        <h3 class="setting-list-title">Pinned section order</h3>
+        <ul id="pinned-order-list" class="reorder-list"></ul>
+      </div>
+
+      <div class="setting-row setting-list-row">
+        <h3 class="setting-list-title">Aggregator Keywords</h3>
+        <div class="keyword-add">
+          <input id="keyword-input" type="text" placeholder="Add a keyword" autocomplete="off" />
+          <button id="keyword-add-btn">Add</button>
+        </div>
+        <ul id="keyword-list" class="keyword-list"></ul>
+      </div>
+    </main>
+  </section>
+
+  <!-- EDITOR VIEW -->
+  <section id="editor-view" class="screen">
+    <header class="app-header editor-header">
+      <button id="back-btn" class="icon-btn back-btn" aria-label="Back">←</button>
+      <button id="editor-home-btn" class="icon-btn home-btn" aria-label="Home">⌂</button>
+      <button id="customer-link-btn" class="customer-link-btn" aria-label="Go to customer notes" hidden></button>
+      <input id="note-search-input" class="search-input note-search-input" type="search" placeholder="Find in note" autocomplete="off" />
+      <span id="note-search-count" class="search-count"></span>
+      <button id="search-prev-btn" class="icon-btn" aria-label="Previous match">↑</button>
+      <button id="search-next-btn" class="icon-btn" aria-label="Next match">↓</button>
+      <button id="checkbox-btn" class="icon-btn" aria-label="Toggle checkbox on line(s)">☐</button>
+      <button id="date-today-btn" class="icon-btn date-btn" aria-label="Insert today's date">Today</button>
+      <button id="date-picker-btn" class="icon-btn date-btn" aria-label="Pick a date to insert">Date…</button>
+      <button id="delete-btn" class="icon-btn danger" aria-label="Delete note">🗑</button>
+    </header>
+    <div id="date-picker-popover" class="date-popover" hidden>
+      <input id="date-picker-input" type="date" />
+    </div>
+    <main class="editor-main">
+      <input id="editor-title" class="editor-title" type="text" placeholder="Title" autocomplete="off" autocorrect="on" spellcheck="true" />
+      <textarea id="editor-body" class="editor-body" placeholder="Start typing…" autocomplete="off" autocorrect="on" spellcheck="true"></textarea>
+    </main>
+  </section>
+
+  <script src="js/storage.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
