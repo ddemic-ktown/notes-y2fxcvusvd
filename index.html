@@ -11,6 +11,16 @@
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
+  <!-- SIGN-IN VIEW -->
+  <section id="signin-view" class="screen">
+    <div class="signin-card">
+      <h1>Note Aggregator</h1>
+      <p>Sign in with Google to access your notes from any device.</p>
+      <button id="signin-btn" class="primary">Sign in with Google</button>
+      <p id="signin-error" class="signin-error" role="alert"></p>
+    </div>
+  </section>
+
   <!-- LIST VIEW -->
   <section id="list-view" class="screen active">
     <header class="app-header">
@@ -89,6 +99,12 @@
         </div>
         <ul id="keyword-list" class="keyword-list"></ul>
       </div>
+
+      <div class="setting-row setting-list-row">
+        <h3 class="setting-list-title">Account</h3>
+        <p id="account-email" class="muted" style="margin: 0 0 8px;"></p>
+        <button id="signout-btn" class="secondary">Sign out</button>
+      </div>
     </main>
   </section>
 
@@ -116,7 +132,6 @@
     </main>
   </section>
 
-  <script src="js/storage.js"></script>
-  <script src="js/app.js"></script>
+  <script type="module" src="js/app.js"></script>
 </body>
 </html>

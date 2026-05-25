@@ -27,6 +27,45 @@ body { min-height: 100vh; }
 .screen { display: none; min-height: 100vh; flex-direction: column; }
 .screen.active { display: flex; }
 
+/* Sign-in screen */
+#signin-view.active { display: flex; align-items: center; justify-content: center; padding: 20px; }
+.signin-card {
+  max-width: 360px;
+  width: 100%;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 28px 24px;
+  box-shadow: var(--shadow);
+  text-align: center;
+}
+.signin-card h1 { margin: 0 0 8px; font-size: 22px; }
+.signin-card p { color: var(--ink-soft); margin: 0 0 18px; }
+.signin-card button.primary {
+  background: var(--accent);
+  color: var(--accent-ink);
+  border: 0;
+  border-radius: var(--radius);
+  padding: 11px 16px;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  width: 100%;
+}
+.signin-error { color: var(--danger); font-size: 13px; margin-top: 12px !important; min-height: 1em; }
+
+#signout-btn.secondary {
+  background: var(--bg);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 8px 14px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+#signout-btn.secondary:hover { background: var(--surface); }
+
 /* Header */
 .app-header {
   background: var(--surface);
