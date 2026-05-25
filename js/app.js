@@ -41,6 +41,10 @@ const pinnedOrderListEl = document.getElementById('pinned-order-list');
 const keywordInput = document.getElementById('keyword-input');
 const keywordAddBtn = document.getElementById('keyword-add-btn');
 const keywordListEl = document.getElementById('keyword-list');
+const importCsvInput = document.getElementById('import-csv');
+const importCsvBtn = document.getElementById('import-csv-btn');
+const importHasHeader = document.getElementById('import-has-header');
+const importStatus = document.getElementById('import-status');
 const checkboxBtn = document.getElementById('checkbox-btn');
 const customerLinkBtn = document.getElementById('customer-link-btn');
 const dateTodayBtn = document.getElementById('date-today-btn');
@@ -718,6 +722,54 @@ keywordInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') {
     e.preventDefault();
     keywordAddBtn.click();
+  }
+});
+
+// CSV import
+function parseCsv(text) {
+  const rows = [];
+  let cur = [];
+  let field = '';
+  let inQuotes = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (inQuotes) {
+      if (ch === '"') {
+        if (text[i + 1] === '"') { field += '"'; i++; }
+        else { inQuotes = false; }
+      } else { field += ch; }
+    } else {
+      if (ch === '"') inQuotes = true;
+      else if (ch === ',') { cur.push(field); field = ''; }
+      else if (ch === '\n') { cur.push(field); rows.push(cur); cur = []; field = ''; }
+      else if (ch === '\r') { /* skip; \n handles row end */ }
+      else { field += ch; }
+    }
+  }
+  if (field !== '' || cur.length > 0) { cur.push(field); rows.push(cur); }
+  return rows.filter(r => r.some(c => c.trim() !== ''));
+}
+
+importCsvBtn.addEventListener('click', async () => {
+  const raw = importCsvInput.value.trim();
+  if (!raw) { importStatus.textContent = 'Paste some CSV first.'; return; }
+  const rows = parseCsv(raw);
+  const dataRows = importHasHeader.checked ? rows.slice(1) : rows;
+  if (dataRows.length === 0) { importStatus.textContent = 'Nothing to import.'; return; }
+  const customerRows = dataRows.map(cells => ({
+    body: cells.map(c => c.trim()).filter(c => c !== '').join('\n'),
+  })).filter(r => r.body);
+  if (customerRows.length === 0) { importStatus.textContent = 'Nothing to import.'; return; }
+  importStatus.textContent = `Importing ${customerRows.length}…`;
+  importCsvBtn.disabled = true;
+  try {
+    const n = await Storage.importCustomers(customerRows);
+    importStatus.textContent = `Imported ${n} customer${n === 1 ? '' : 's'}.`;
+    importCsvInput.value = '';
+  } catch (e) {
+    importStatus.textContent = 'Import failed: ' + (e && e.message ? e.message : 'unknown');
+  } finally {
+    importCsvBtn.disabled = false;
   }
 });
 

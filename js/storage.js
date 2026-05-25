@@ -231,6 +231,36 @@ export const Storage = {
     }
   },
 
+  // ---------- Bulk import ----------
+  // rows = array of { body: string } — each becomes a customer + default note
+  async importCustomers(rows) {
+    if (!Array.isArray(rows) || rows.length === 0) return 0;
+    const batch = writeBatch(db);
+    const now = nowIso();
+    let created = 0;
+    for (const row of rows) {
+      const body = (row && typeof row.body === "string") ? row.body : "";
+      if (!body.trim()) continue;
+      const cid = uid();
+      const nid = uid();
+      const customer = { created: now, updated: now };
+      const note = { body, customerId: cid, isDefault: true, created: now, updated: now };
+      batch.set(doc(customersCol(), cid), customer);
+      batch.set(doc(notesCol(), nid), note);
+      // Update cache so UI reflects immediately
+      _cache.customers.push({ id: cid, ...customer });
+      _cache.notes.push({ id: nid, ...note });
+      created++;
+    }
+    emit();
+    try {
+      await batch.commit();
+    } catch (e) {
+      console.warn("importCustomers batch", e);
+    }
+    return created;
+  },
+
   // ---------- Migration from localStorage (one-time) ----------
   async maybeMigrateFromLocalStorage() {
     if (_cache.notes.length > 0 || _cache.customers.length > 0) return false;

@@ -101,6 +101,22 @@
       </div>
 
       <div class="setting-row setting-list-row">
+        <h3 class="setting-list-title">Import customers from CSV</h3>
+        <p class="muted" style="margin:0 0 8px; font-size:13px;">
+          Paste rows from a spreadsheet. First row is treated as column headers (unchecked → first row is a customer). Each row becomes a customer; non-empty cells are joined as lines in their default note.
+        </p>
+        <label style="display:flex; align-items:center; gap:6px; font-size:13px; margin-bottom:8px; color:var(--ink-soft);">
+          <input id="import-has-header" type="checkbox" checked />
+          First row is header
+        </label>
+        <textarea id="import-csv" rows="6" placeholder="Name,Address,Phone&#10;John Smith,123 Maple St,(403) 555-1234&#10;Jane Doe,456 Oak Ave,(403) 555-5678" style="width:100%; padding:8px 10px; border:1px solid var(--line); border-radius:var(--radius); font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:13px; background:var(--bg); color:var(--ink); resize:vertical;"></textarea>
+        <div style="display:flex; gap:8px; margin-top:8px; align-items:center;">
+          <button id="import-csv-btn" class="primary" style="background:var(--accent); color:var(--accent-ink); border:0; border-radius:var(--radius); padding:8px 14px; font-weight:600; cursor:pointer;">Import</button>
+          <span id="import-status" class="muted" style="font-size:13px;"></span>
+        </div>
+      </div>
+
+      <div class="setting-row setting-list-row">
         <h3 class="setting-list-title">Account</h3>
         <p id="account-email" class="muted" style="margin: 0 0 8px;"></p>
         <button id="signout-btn" class="secondary">Sign out</button>
