@@ -2,7 +2,7 @@
 import { Storage } from "./storage.js";
 import { auth, googleProvider, signInWithPopup, signOut, onAuthStateChanged } from "./firebase-init.js";
 
-const APP_VERSION = 'v12';
+const APP_VERSION = 'v13';
 
 // ---------- DOM refs ----------
 const listView = document.getElementById('list-view');
@@ -1123,5 +1123,21 @@ const appVersionEl = document.getElementById('app-version');
 if (appVersionEl) appVersionEl.textContent = APP_VERSION;
 
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('sw.js').catch(() => {});
+  navigator.serviceWorker.register('sw.js').then((reg) => {
+    // Check for updates on every load
+    reg.update().catch(() => {});
+    // When a new SW is found, auto-reload once it's installed so the user
+    // gets the latest UI without manual cache clearing.
+    reg.addEventListener('updatefound', () => {
+      const installing = reg.installing;
+      if (!installing) return;
+      installing.addEventListener('statechange', () => {
+        if (installing.state === 'installed' && navigator.serviceWorker.controller) {
+          // Don't interrupt active edits
+          if (editorView.classList.contains('active')) return;
+          window.location.reload();
+        }
+      });
+    });
+  }).catch(() => {});
 }
