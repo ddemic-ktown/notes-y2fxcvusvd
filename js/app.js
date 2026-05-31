@@ -2,7 +2,7 @@
 import { Storage } from "./storage.js";
 import { auth, googleProvider, signInWithPopup, signOut, onAuthStateChanged } from "./firebase-init.js";
 
-const APP_VERSION = 'v14';
+const APP_VERSION = 'v44';
 
 // ---------- DOM refs ----------
 const listView = document.getElementById('list-view');
@@ -265,6 +265,7 @@ function showAggregator(keyword) {
   aggregatorTitle.textContent = keyword;
   renderAggregatorList(keyword);
   aggregatorView.classList.add('active');
+  history.pushState({ screen: 'aggregator', keyword }, '');
 }
 
 function renderAggregatorList(keyword) {
@@ -304,6 +305,9 @@ function showSettings() {
   renderKeywordList();
   if (accountEmailEl && auth.currentUser) accountEmailEl.textContent = auth.currentUser.email || '';
   settingsView.classList.add('active');
+  history.pushState({ screen: 'settings' }, '');
+  applyTheme(localStorage.getItem('na-theme') || 'dark');
+  renderMembersList();
 }
 
 function showNotes() {
@@ -312,6 +316,7 @@ function showNotes() {
   hideAllScreens();
   listView.classList.add('active');
   renderNotesList();
+  history.replaceState({ screen: 'home' }, '');
 }
 
 const isDesktop = window.matchMedia('(hover: hover) and (pointer: fine)').matches;
@@ -323,6 +328,7 @@ function showCustomers() {
   customersView.classList.add('active');
   renderCustomersList();
   if (isDesktop) setTimeout(() => customerSearchInput.focus(), 50);
+  history.pushState({ screen: 'customers' }, '');
 }
 
 function showCustomerNotes(customerId, returnTo) {
@@ -335,13 +341,14 @@ function showCustomerNotes(customerId, returnTo) {
   customerNotesReturnTo = returnTo || { screen: 'customers' };
   customerNotesTitle.textContent = title.trim() ? title.trim() : 'Unnamed customer';
   if (customerNotesReturnTo.screen === 'aggregator' && customerNotesReturnTo.keyword) {
-    customerNotesBackBtn.textContent = `← ${customerNotesReturnTo.keyword}`;
+    customerNotesBackBtn.textContent = `Back to ${customerNotesReturnTo.keyword}`;
   } else {
-    customerNotesBackBtn.textContent = '← Customers';
+    customerNotesBackBtn.textContent = 'Back to Customers';
   }
   hideAllScreens();
   customerNotesView.classList.add('active');
   renderCustomerNotesList(customerId);
+  history.pushState({ screen: 'customer-notes', customerId, returnTo: customerNotesReturnTo }, '');
 }
 
 function showEditor(record, type, cursorHint) {
@@ -374,7 +381,7 @@ function showEditor(record, type, cursorHint) {
     backLabel = activeKeyword;
   }
   if (backLabel) {
-    backBtn.textContent = `← ${backLabel}`;
+    backBtn.textContent = `Back to ${backLabel}`;
     backBtn.style.display = '';
   } else {
     backBtn.style.display = 'none';
@@ -395,7 +402,7 @@ function showEditor(record, type, cursorHint) {
   if (type === 'note' && record.customerId && !sameAsBack) {
     const def = Storage.getDefaultNoteForCustomer(record.customerId);
     const name = def ? splitTitleAndBody(def.body).title.trim() : '';
-    customerLinkBtn.textContent = name || 'Customer';
+    customerLinkBtn.textContent = 'Go to: ' + ((name && name.length > 0) ? name : 'Customer');
     customerLinkBtn.dataset.customerId = record.customerId;
     customerLinkBtn.hidden = false;
   } else {
@@ -404,12 +411,15 @@ function showEditor(record, type, cursorHint) {
   }
 
   deleteBtn.style.display = (type === 'note' && currentIsDefault) ? 'none' : '';
+  const assignBtnEl = document.getElementById('assign-btn');
+  if (assignBtnEl) assignBtnEl.hidden = (Storage.getRole() !== 'admin' || type !== 'note');
 
   hideAllScreens();
   editorView.classList.add('active');
   document.body.classList.add('editor-open');
   // Ensure page-level scroll is reset so the toolbar is at the top
   window.scrollTo(0, 0);
+  history.pushState({ screen: 'editor' }, '');
 
   setTimeout(() => {
     // If a cursor hint was passed (e.g. came from an aggregator match), jump
@@ -458,6 +468,10 @@ function returnFromEditor() {
 
 // ---------- list rendering ----------
 function renderNotesList() {
+  if (!Storage.isReady()) {
+    notesList.innerHTML = '<p class="empty-state" style="font-style:normal">Loading your data…</p>';
+    return;
+  }
   const notes = Storage.listNotes();
   const customersCount = Storage.listCustomers().length;
 
@@ -488,8 +502,11 @@ function renderNotesList() {
       const def = Storage.getDefaultNoteForCustomer(m.customerId);
       const customerName = def ? (splitTitleAndBody(def.body).title || '').trim() : '';
       const customer = customerName || 'Unnamed customer';
+      const note = Storage.getNote(m.noteId);
+      const noteTitle = note ? (splitTitleAndBody(note.body).title || '').trim() : '';
       const list = stripKeywordToList(m.paragraph, kw);
-      previewHtml = `<span class="match-customer">${escapeHtml(customer)}</span> - ${escapeHtml(list || '(empty)')}`;
+      const notePart = noteTitle ? ` - ${escapeHtml(noteTitle)}` : '';
+      previewHtml = `<span class="match-customer">${escapeHtml(customer)}</span>${notePart} - ${escapeHtml(list || '(empty)')}`;
     }
     return `
       <article class="note-card keyword-card" data-keyword="${escapeHtml(kw)}">
@@ -533,10 +550,11 @@ function renderNotesList() {
     notesHtml = notes.map(n => renderNoteCard(n)).join('');
   }
 
+  const sectionLabel = (text) => `<p class="section-label">${text}</p>`;
   const pinnedBlock = getPinnedOrder().map(key => {
-    if (key === 'aggregator') return keywordHtml;
-    if (key === 'recent') return recentHtml;
-    if (key === 'notes') return notesHtml;
+    if (key === 'aggregator') return sectionLabel('Aggregators:') + keywordHtml;
+    if (key === 'recent') return sectionLabel('Recent Notes:') + recentHtml;
+    if (key === 'notes') return sectionLabel('General Notes:') + notesHtml;
     return '';
   }).join('');
   notesList.innerHTML = customersCard + pinnedBlock;
@@ -733,6 +751,15 @@ recentCountInput.addEventListener('input', () => {
 });
 recentCountInput.addEventListener('blur', () => { recentCountInput.value = getRecentCount(); });
 
+document.getElementById('recent-count-down').addEventListener('click', () => {
+  const n = Math.max(0, getRecentCount() - 1);
+  setRecentCount(n); recentCountInput.value = n;
+});
+document.getElementById('recent-count-up').addEventListener('click', () => {
+  const n = Math.min(20, getRecentCount() + 1);
+  setRecentCount(n); recentCountInput.value = n;
+});
+
 aggregatorCountInput.addEventListener('input', () => {
   let n = parseInt(aggregatorCountInput.value, 10);
   if (Number.isNaN(n)) return;
@@ -741,6 +768,15 @@ aggregatorCountInput.addEventListener('input', () => {
   setAggregatorCount(n);
 });
 aggregatorCountInput.addEventListener('blur', () => { aggregatorCountInput.value = getAggregatorCount(); });
+
+document.getElementById('aggregator-count-down').addEventListener('click', () => {
+  const n = Math.max(0, getAggregatorCount() - 1);
+  setAggregatorCount(n); aggregatorCountInput.value = n;
+});
+document.getElementById('aggregator-count-up').addEventListener('click', () => {
+  const n = Math.min(50, getAggregatorCount() + 1);
+  setAggregatorCount(n); aggregatorCountInput.value = n;
+});
 
 keywordAddBtn.addEventListener('click', async () => {
   if (await addKeyword(keywordInput.value)) {
@@ -880,6 +916,29 @@ document.addEventListener('click', (e) => {
   closeDatePopover();
 });
 
+const highlightEl = document.getElementById('editor-body-highlight');
+
+function renderHighlights() {
+  if (!highlightEl) return;
+  const term = noteSearchInput.value;
+  const body = bodyInput.value;
+  if (!term || searchMatches.length === 0) {
+    highlightEl.innerHTML = '';
+    return;
+  }
+  let html = '';
+  let last = 0;
+  searchMatches.forEach((m, idx) => {
+    html += escapeHtml(body.substring(last, m.start));
+    const cls = idx === searchIndex ? 'current-match' : '';
+    html += `<mark class="${cls}">${escapeHtml(body.substring(m.start, m.end))}</mark>`;
+    last = m.end;
+  });
+  html += escapeHtml(body.substring(last));
+  highlightEl.innerHTML = html;
+  highlightEl.scrollTop = bodyInput.scrollTop;
+}
+
 function findMatches(term) {
   searchMatches = [];
   if (!term) return;
@@ -898,7 +957,7 @@ function updateSearchCount() {
   else noteSearchCount.textContent = `${searchIndex + 1}/${searchMatches.length}`;
 }
 function gotoMatch(index) {
-  if (searchMatches.length === 0) { updateSearchCount(); return; }
+  if (searchMatches.length === 0) { updateSearchCount(); renderHighlights(); return; }
   const n = searchMatches.length;
   searchIndex = ((index % n) + n) % n;
   const m = searchMatches[searchIndex];
@@ -909,17 +968,23 @@ function gotoMatch(index) {
   const target = lineCount * lineHeight - bodyInput.clientHeight / 2 + lineHeight;
   bodyInput.scrollTop = Math.max(0, target);
   updateSearchCount();
+  renderHighlights();
 }
 function resetNoteSearch() {
   noteSearchInput.value = '';
   searchMatches = [];
   searchIndex = 0;
   updateSearchCount();
+  renderHighlights();
 }
 noteSearchInput.addEventListener('input', () => {
   findMatches(noteSearchInput.value);
   if (searchMatches.length > 0) gotoMatch(0);
-  else updateSearchCount();
+  else { updateSearchCount(); renderHighlights(); }
+});
+
+bodyInput.addEventListener('scroll', () => {
+  if (highlightEl) highlightEl.scrollTop = bodyInput.scrollTop;
 });
 noteSearchInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') { e.preventDefault(); gotoMatch(searchIndex + (e.shiftKey ? -1 : 1)); }
@@ -1000,6 +1065,31 @@ titleInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') { e.preventDefault(); bodyInput.focus(); }
 });
 
+bodyInput.addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter') return;
+  const val = bodyInput.value;
+  const pos = bodyInput.selectionStart;
+  const lineStart = val.lastIndexOf('\n', pos - 1) + 1;
+  const currentLine = val.substring(lineStart, pos);
+  const prefixMatch = currentLine.match(/^([-–]\s|☐\s|☑\s)/);
+  if (!prefixMatch) return;
+  // If the line is only the prefix (empty item), remove it and stop
+  if (currentLine === prefixMatch[0]) {
+    e.preventDefault();
+    bodyInput.value = val.substring(0, lineStart) + val.substring(pos);
+    bodyInput.selectionStart = bodyInput.selectionEnd = lineStart;
+    scheduleSave();
+    return;
+  }
+  e.preventDefault();
+  // Always continue with ☐ (not ☑)
+  const prefix = prefixMatch[0].startsWith('☑') ? '☐ ' : prefixMatch[0];
+  const insert = '\n' + prefix;
+  bodyInput.value = val.substring(0, pos) + insert + val.substring(pos);
+  bodyInput.selectionStart = bodyInput.selectionEnd = pos + insert.length;
+  scheduleSave();
+});
+
 function commitAndCleanupEditor() {
   let cancelledCustomer = false;
   if (currentId) {
@@ -1040,6 +1130,34 @@ backBtn.addEventListener('click', () => {
   returnFromEditor();
 });
 
+// Android/browser back button support
+window.addEventListener('popstate', (e) => {
+  const screen = e.state && e.state.screen;
+  if (!screen || screen === 'home') {
+    // Already at home or no state — let browser handle it (exits app)
+    return;
+  }
+  if (editorView.classList.contains('active')) {
+    const cancelledCustomer = commitAndCleanupEditor();
+    if (cancelledCustomer) {
+      activeCustomerId = null;
+      showCustomers();
+    } else {
+      returnFromEditor();
+    }
+    return;
+  }
+  if (screen === 'editor') {
+    returnFromEditor();
+    return;
+  }
+  if (screen === 'settings' || screen === 'aggregator' || screen === 'customers' || screen === 'customer-notes') {
+    showNotes();
+    return;
+  }
+  showNotes();
+});
+
 deleteBtn.addEventListener('click', () => {
   if (!currentId) return;
   if (currentType === 'note' && currentIsDefault) return;
@@ -1059,6 +1177,50 @@ deleteBtn.addEventListener('click', () => {
     returnFromEditor();
   }
 });
+
+// ---------- assign users ----------
+const assignBtn = document.getElementById('assign-btn');
+const assignModal = document.getElementById('assign-modal');
+const assignModalClose = document.getElementById('assign-modal-close');
+const assignMembersList = document.getElementById('assign-members-list');
+const assignSaveBtn = document.getElementById('assign-save-btn');
+
+function openAssignModal() {
+  if (!currentId || !assignModal) return;
+  const note = Storage.getNote(currentId);
+  if (!note) return;
+  const assigned = note.assignedTo || [];
+  const members = Storage.listMembers().filter(m => m.role !== 'admin');
+
+  if (members.length === 0) {
+    assignMembersList.innerHTML = '<li style="font-size:14px;color:var(--ink-soft)">No non-admin members yet.</li>';
+  } else {
+    assignMembersList.innerHTML = members.map(m => `
+      <li class="assign-member-item">
+        <input type="checkbox" id="assign-${m.uid}" data-uid="${m.uid}" ${assigned.includes(m.uid) ? 'checked' : ''} />
+        <label for="assign-${m.uid}" style="flex:1;cursor:pointer">
+          ${escapeHtml(m.email || m.uid)}
+          <span style="font-size:12px;color:var(--ink-soft);margin-left:6px">${m.role}</span>
+        </label>
+      </li>
+    `).join('');
+  }
+  assignModal.hidden = false;
+}
+
+if (assignBtn) assignBtn.addEventListener('click', openAssignModal);
+if (assignModalClose) assignModalClose.addEventListener('click', () => { assignModal.hidden = true; });
+if (assignModal) assignModal.addEventListener('click', (e) => { if (e.target === assignModal) assignModal.hidden = true; });
+
+if (assignSaveBtn) {
+  assignSaveBtn.addEventListener('click', () => {
+    if (!currentId) return;
+    const checked = [...assignMembersList.querySelectorAll('input[type="checkbox"]:checked')];
+    const uids = checked.map(cb => cb.dataset.uid);
+    Storage.assignUsersToNote(currentId, uids);
+    assignModal.hidden = true;
+  });
+}
 
 // ---------- auth bootstrap ----------
 function showSignin() {
@@ -1081,6 +1243,125 @@ if (signoutBtn) {
   signoutBtn.addEventListener('click', async () => { await signOut(auth); });
 }
 
+// ---------- role-based UI ----------
+function applyRoleUI(role) {
+  const isCustomer = role === 'customer';
+  // Hide write controls for customers
+  const writeControls = [
+    document.getElementById('customers-fab'),
+    document.getElementById('customer-notes-fab'),
+    document.getElementById('delete-btn'),
+    document.getElementById('list-fab'),
+  ];
+  writeControls.forEach(el => { if (el) el.style.display = isCustomer ? 'none' : ''; });
+}
+
+// ---------- Users tab ----------
+function renderMembersList() {
+  const membersList = document.getElementById('members-list');
+  const invitesList = document.getElementById('invites-list');
+  const role = Storage.getRole();
+  if (!membersList || role !== 'admin') return;
+
+  const members = Storage.listMembers();
+  const currentUid = Storage.getUid();
+  membersList.innerHTML = members.map(m => `
+    <li class="member-item">
+      <span class="member-email">${escapeHtml(m.email || m.uid)}</span>
+      <select class="member-role-select" data-uid="${m.uid}" ${m.uid === currentUid ? 'disabled' : ''}>
+        <option value="admin" ${m.role === 'admin' ? 'selected' : ''}>Admin</option>
+        <option value="employee" ${m.role === 'employee' ? 'selected' : ''}>Employee</option>
+        <option value="customer" ${m.role === 'customer' ? 'selected' : ''}>Customer</option>
+      </select>
+      ${m.uid !== currentUid ? `<button class="member-remove-btn" data-uid="${m.uid}" title="Remove">✕</button>` : ''}
+    </li>
+  `).join('');
+
+  membersList.querySelectorAll('.member-role-select').forEach(sel => {
+    sel.addEventListener('change', async () => {
+      await Storage.updateMemberRole(sel.dataset.uid, sel.value);
+    });
+  });
+  membersList.querySelectorAll('.member-remove-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      if (confirm('Remove this user from the org?')) {
+        await Storage.removeMember(btn.dataset.uid);
+        renderMembersList();
+      }
+    });
+  });
+
+  if (invitesList) {
+    const invites = Storage.listInvites();
+    invitesList.innerHTML = invites.length === 0
+      ? '<li style="font-size:13px;color:var(--ink-soft)">No pending invites</li>'
+      : invites.map(inv => `
+        <li class="member-item">
+          <span class="member-email">${escapeHtml(inv.email)}</span>
+          <span style="font-size:12px;color:var(--ink-soft)">${inv.role}</span>
+          <button class="member-remove-btn" data-email="${escapeHtml(inv.email)}" title="Cancel">✕</button>
+        </li>
+      `).join('');
+    invitesList.querySelectorAll('.member-remove-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        await Storage.cancelInvite(btn.dataset.email);
+        renderMembersList();
+      });
+    });
+  }
+}
+
+const inviteBtn = document.getElementById('invite-btn');
+const inviteEmailInput = document.getElementById('invite-email');
+const inviteRoleSelect = document.getElementById('invite-role');
+const inviteStatus = document.getElementById('invite-status');
+
+if (inviteBtn) {
+  inviteBtn.addEventListener('click', async () => {
+    const email = inviteEmailInput ? inviteEmailInput.value.trim() : '';
+    const role = inviteRoleSelect ? inviteRoleSelect.value : 'employee';
+    if (!email) { if (inviteStatus) inviteStatus.textContent = 'Please enter an email.'; return; }
+    inviteBtn.disabled = true;
+    if (inviteStatus) inviteStatus.textContent = 'Sending…';
+    try {
+      await Storage.inviteUser(email, role);
+      if (inviteEmailInput) inviteEmailInput.value = '';
+      if (inviteStatus) inviteStatus.textContent = `Invited ${email}.`;
+      renderMembersList();
+    } catch (e) {
+      if (inviteStatus) inviteStatus.textContent = 'Failed: ' + (e.message || e);
+    }
+    inviteBtn.disabled = false;
+  });
+}
+
+// ---------- theme (light / dark) ----------
+function applyTheme(theme) {
+  document.body.classList.toggle('dark-mode', theme === 'dark');
+  const lightBtn = document.getElementById('theme-light-btn');
+  const darkBtn = document.getElementById('theme-dark-btn');
+  if (lightBtn) lightBtn.classList.toggle('active', theme !== 'dark');
+  if (darkBtn) darkBtn.classList.toggle('active', theme === 'dark');
+}
+
+const savedTheme = localStorage.getItem('na-theme') || 'dark';
+applyTheme(savedTheme);
+
+const themeLightBtn = document.getElementById('theme-light-btn');
+const themeDarkBtn = document.getElementById('theme-dark-btn');
+if (themeLightBtn) {
+  themeLightBtn.addEventListener('click', () => {
+    localStorage.setItem('na-theme', 'light');
+    applyTheme('light');
+  });
+}
+if (themeDarkBtn) {
+  themeDarkBtn.addEventListener('click', () => {
+    localStorage.setItem('na-theme', 'dark');
+    applyTheme('dark');
+  });
+}
+
 function rerenderCurrent() {
   if (signinView && signinView.classList.contains('active')) return;
   if (editorView.classList.contains('active')) return;
@@ -1095,6 +1376,7 @@ function rerenderCurrent() {
     aggregatorCountInput.value = getAggregatorCount();
     renderPinnedOrderList();
     renderKeywordList();
+    renderMembersList();
   }
 }
 
@@ -1106,16 +1388,19 @@ onAuthStateChanged(auth, async (user) => {
     showSignin();
     return;
   }
-  // Signed in
-  await Storage.init(user.uid);
-  // Wait for initial snapshots before migrating, so we know the Firestore is empty
+  // Signed in — resolve org (creates or joins), then migrate if needed
+  await Storage.init(user.uid, user.email);
+  // Wait for initial snapshots
   await new Promise((resolve) => {
     const un = Storage.onChange(() => {
       if (Storage.isReady()) { un(); resolve(); }
     });
   });
-  await Storage.maybeMigrateFromLocalStorage();
+  // Subscribe before migration so we catch the snapshot update
   unsubStorage = Storage.onChange(rerenderCurrent);
+  await Storage.maybeMigrateFromOldPath(user.uid);
+  // Hide write controls for customer role
+  applyRoleUI(Storage.getRole());
   showNotes();
 });
 

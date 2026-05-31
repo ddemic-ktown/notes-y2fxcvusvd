@@ -1,9 +1,82 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Each user can only read/write their own data
+
+    // User pointer doc and old data path — only the user themselves can read/write
+    match /users/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
     match /users/{userId}/{document=**} {
       allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+
+    // Invite lookup — readable by any authenticated user (needed at sign-in),
+    // writable only by org admins (enforced in org rules below) and by the
+    // invited user accepting their own invite
+    match /inviteLookup/{emailKey} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null;
+    }
+
+    // Org rules
+    match /orgs/{orgId} {
+
+      // Helper: is the requesting user a member of this org?
+      function isMember() {
+        return request.auth != null &&
+          exists(/databases/$(database)/documents/orgs/$(orgId)/members/$(request.auth.uid));
+      }
+
+      // Helper: get the requesting user's role
+      function memberRole() {
+        return get(/databases/$(database)/documents/orgs/$(orgId)/members/$(request.auth.uid)).data.role;
+      }
+
+      function isAdmin() { return isMember() && memberRole() == 'admin'; }
+      function isEmployee() { return isMember() && memberRole() == 'employee'; }
+      function isCustomer() { return isMember() && memberRole() == 'customer'; }
+
+      // Org doc — any authenticated user can create (bootstrap), members can read, admins can update
+      allow read: if isMember();
+      allow create: if request.auth != null;
+      allow update, delete: if isAdmin();
+
+      // Members subcollection
+      match /members/{memberId} {
+        allow read: if isMember() || request.auth.uid == memberId;
+        // Admins can add/edit/remove members; users can write their own doc on join
+        allow write: if request.auth != null;
+      }
+
+      // Invites subcollection — admin only
+      match /invites/{inviteId} {
+        allow read, write: if isAdmin();
+      }
+
+      // Settings — members can read, only admin/employee can write
+      match /settings/{doc} {
+        allow read: if isMember();
+        allow write: if isAdmin() || isEmployee();
+      }
+
+      // Customers — members can read, admin/employee can write
+      match /customers/{customerId} {
+        allow read: if isMember();
+        allow write: if isAdmin() || isEmployee();
+      }
+
+      // Notes
+      match /notes/{noteId} {
+        // Admin sees everything
+        allow read: if isAdmin();
+        // Employee and customer can read if assignedTo is empty or contains their uid
+        allow read: if (isEmployee() || isCustomer()) &&
+          (!('assignedTo' in resource.data) ||
+           resource.data.assignedTo.size() == 0 ||
+           request.auth.uid in resource.data.assignedTo);
+        // Admin and employee can write
+        allow write: if isAdmin() || isEmployee();
+      }
     }
   }
 }

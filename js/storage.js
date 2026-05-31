@@ -1,10 +1,9 @@
-// storage.js — Firestore-backed store with an in-memory cache that lets the
-// rest of the app keep its existing synchronous API. Real-time snapshot
-// listeners keep the cache fresh across tabs and devices.
+// storage.js — Firestore-backed store with in-memory cache.
+// Multi-user org structure: all data lives under orgs/{orgId}/
 import { db } from "./firebase-init.js";
 import {
   collection, doc, onSnapshot, setDoc, deleteDoc, getDocs,
-  serverTimestamp, writeBatch, getDoc,
+  writeBatch, getDoc, query, where,
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
 
 const DEFAULT_SETTINGS = {
@@ -15,9 +14,14 @@ const DEFAULT_SETTINGS = {
   customerSort: "alpha",
 };
 
-const _cache = { notes: [], customers: [], settings: { ...DEFAULT_SETTINGS } };
+const _cache = {
+  notes: [], customers: [], settings: { ...DEFAULT_SETTINGS },
+  members: [], invites: [],
+};
 const _listeners = new Set();
 let _uid = null;
+let _orgId = null;
+let _role = null; // 'admin' | 'employee' | 'customer'
 let _unsubs = [];
 let _ready = false;
 
@@ -27,14 +31,27 @@ function uid() {
 }
 function nowIso() { return new Date().toISOString(); }
 
-function notesCol() { return collection(db, `users/${_uid}/notes`); }
-function customersCol() { return collection(db, `users/${_uid}/customers`); }
-function settingsDoc() { return doc(db, `users/${_uid}/settings/preferences`); }
+// ---------- Firestore path helpers ----------
+function notesCol()     { return collection(db, `orgs/${_orgId}/notes`); }
+function customersCol() { return collection(db, `orgs/${_orgId}/customers`); }
+function settingsDoc()  { return doc(db, `orgs/${_orgId}/settings/preferences`); }
+function membersCol()   { return collection(db, `orgs/${_orgId}/members`); }
+function invitesCol()   { return collection(db, `orgs/${_orgId}/invites`); }
+function orgDoc()       { return doc(db, `orgs/${_orgId}`); }
 
+// ---------- listeners ----------
 function attachListeners() {
   detachListeners();
   _unsubs.push(onSnapshot(notesCol(), (snap) => {
-    _cache.notes = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    const all = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    // Non-admins only see notes with no assignedTo (shared with all) or their uid in assignedTo
+    if (_role === 'admin') {
+      _cache.notes = all;
+    } else {
+      _cache.notes = all.filter(n =>
+        !n.assignedTo || n.assignedTo.length === 0 || n.assignedTo.includes(_uid)
+      );
+    }
     _ready = true;
     emit();
   }));
@@ -43,11 +60,15 @@ function attachListeners() {
     emit();
   }));
   _unsubs.push(onSnapshot(settingsDoc(), (snap) => {
-    if (snap.exists()) {
-      _cache.settings = { ...DEFAULT_SETTINGS, ...snap.data() };
-    } else {
-      _cache.settings = { ...DEFAULT_SETTINGS };
-    }
+    _cache.settings = snap.exists() ? { ...DEFAULT_SETTINGS, ...snap.data() } : { ...DEFAULT_SETTINGS };
+    emit();
+  }));
+  _unsubs.push(onSnapshot(membersCol(), (snap) => {
+    _cache.members = snap.docs.map(d => ({ uid: d.id, ...d.data() }));
+    emit();
+  }));
+  _unsubs.push(onSnapshot(invitesCol(), (snap) => {
+    _cache.invites = snap.docs.map(d => ({ email: d.id, ...d.data() }));
     emit();
   }));
 }
@@ -57,26 +78,88 @@ function detachListeners() {
   _unsubs = [];
 }
 
+// ---------- org bootstrap ----------
+// Returns orgId. Creates org if none exists for this user, or joins via invite.
+async function resolveOrg(userId, userEmail) {
+  // 1. Check if user already has an org membership doc anywhere
+  //    We store a pointer in a top-level user doc: users/{uid}/orgId
+  const userDocRef = doc(db, `users/${userId}`);
+  const userSnap = await getDoc(userDocRef);
+  if (userSnap.exists() && userSnap.data().orgId) {
+    const existingOrgId = userSnap.data().orgId;
+    // Confirm membership still exists
+    const memberSnap = await getDoc(doc(db, `orgs/${existingOrgId}/members/${userId}`));
+    if (memberSnap.exists()) {
+      return { orgId: existingOrgId, role: memberSnap.data().role };
+    }
+  }
+
+  // 2. Check for a pending invite by email
+  if (userEmail) {
+    const emailKey = userEmail.toLowerCase().replace(/\./g, ',');
+    // Search all orgs for an invite — we store invite lookup at top level
+    const inviteLookupRef = doc(db, `inviteLookup/${emailKey}`);
+    const inviteLookup = await getDoc(inviteLookupRef);
+    if (inviteLookup.exists()) {
+      const { orgId, role } = inviteLookup.data();
+      // Accept invite: add member, write user pointer, delete invite lookup
+      const batch = writeBatch(db);
+      batch.set(doc(db, `orgs/${orgId}/members/${userId}`), {
+        role, email: userEmail, name: userEmail, joinedAt: nowIso(),
+      });
+      batch.set(userDocRef, { orgId });
+      batch.delete(doc(db, `orgs/${orgId}/invites/${emailKey}`));
+      batch.delete(inviteLookupRef);
+      await batch.commit();
+      return { orgId, role };
+    }
+  }
+
+  // 3. No org — create a new one, user becomes admin
+  const newOrgId = uid();
+  const batch = writeBatch(db);
+  batch.set(doc(db, `orgs/${newOrgId}`), { createdAt: nowIso(), createdBy: userId });
+  batch.set(doc(db, `orgs/${newOrgId}/members/${userId}`), {
+    role: 'admin', email: userEmail || '', name: userEmail || '', joinedAt: nowIso(),
+  });
+  batch.set(userDocRef, { orgId: newOrgId });
+  await batch.commit();
+  // Small delay to let Firestore propagate membership before attaching listeners
+  await new Promise(r => setTimeout(r, 1000));
+  return { orgId: newOrgId, role: 'admin' };
+}
+
 // ---------- public API ----------
 export const Storage = {
   onChange(cb) { _listeners.add(cb); return () => _listeners.delete(cb); },
   isReady() { return _ready; },
+  getRole() { return _role; },
+  getOrgId() { return _orgId; },
+  getUid() { return _uid; },
 
-  async init(userId) {
+  async init(userId, userEmail) {
     _uid = userId;
     _ready = false;
     _cache.notes = [];
     _cache.customers = [];
     _cache.settings = { ...DEFAULT_SETTINGS };
+    _cache.members = [];
+    _cache.invites = [];
+
+    const { orgId, role } = await resolveOrg(userId, userEmail);
+    _orgId = orgId;
+    _role = role;
+
     attachListeners();
   },
+
   signedOut() {
     detachListeners();
-    _uid = null;
+    _uid = null; _orgId = null; _role = null;
     _ready = false;
-    _cache.notes = [];
-    _cache.customers = [];
+    _cache.notes = []; _cache.customers = [];
     _cache.settings = { ...DEFAULT_SETTINGS };
+    _cache.members = []; _cache.invites = [];
     emit();
   },
 
@@ -109,6 +192,7 @@ export const Storage = {
       body: opts.body || "",
       customerId: opts.customerId || null,
       isDefault: !!opts.isDefault,
+      assignedTo: [],
       created: now,
       updated: now,
     };
@@ -158,12 +242,8 @@ export const Storage = {
     _cache.customers.push(customer);
     const defId = uid();
     const defaultNote = {
-      id: defId,
-      body: "",
-      customerId: cid,
-      isDefault: true,
-      created: now,
-      updated: now,
+      id: defId, body: "", customerId: cid, isDefault: true,
+      assignedTo: [], created: now, updated: now,
     };
     _cache.notes.push(defaultNote);
     emit();
@@ -200,26 +280,36 @@ export const Storage = {
     const results = [];
     for (const note of _cache.notes) {
       if (!note.customerId) continue;
-      const paragraphs = (note.body || "").split(/\n[ \t]*\n/);
-      for (const para of paragraphs) {
-        const trimmed = para.replace(/^\s+|\s+$/g, "");
-        if (!trimmed) continue;
-        const firstLine = trimmed.split("\n")[0];
-        const lower = firstLine.toLowerCase();
-        if (!lower.startsWith(kwLower)) continue;
-        const next = lower[kwLower.length];
-        if (next !== undefined && /[a-z0-9]/.test(next)) continue;
-        results.push({
-          noteId: note.id, customerId: note.customerId,
-          paragraph: trimmed, updated: note.updated,
-        });
+      const lines = (note.body || "").split("\n");
+      let i = 0;
+      while (i < lines.length) {
+        const line = lines[i];
+        const lineLower = line.trimStart().toLowerCase();
+        if (lineLower.startsWith(kwLower)) {
+          const next = lineLower[kwLower.length];
+          if (next === undefined || !/[a-z0-9]/.test(next)) {
+            let paraLines = [];
+            let j = i;
+            while (j < lines.length && lines[j].trim() !== "") {
+              paraLines.push(lines[j]);
+              j++;
+            }
+            results.push({
+              noteId: note.id, customerId: note.customerId,
+              paragraph: paraLines.join("\n"), updated: note.updated,
+            });
+            i = j;
+            continue;
+          }
+        }
+        i++;
       }
     }
     results.sort((a, b) => new Date(b.updated).getTime() - new Date(a.updated).getTime());
     return results;
   },
 
-  // ---------- Settings (single doc) ----------
+  // ---------- Settings ----------
   getSettings() { return { ...DEFAULT_SETTINGS, ..._cache.settings }; },
   async setSetting(key, value) {
     _cache.settings = { ...DEFAULT_SETTINGS, ..._cache.settings, [key]: value };
@@ -231,8 +321,56 @@ export const Storage = {
     }
   },
 
+  // ---------- Members ----------
+  listMembers() { return _cache.members.slice(); },
+
+  assignUsersToNote(noteId, uids) {
+    const i = _cache.notes.findIndex(n => n.id === noteId);
+    if (i === -1) return;
+    const next = { ..._cache.notes[i], assignedTo: uids };
+    _cache.notes[i] = next;
+    emit();
+    setDoc(doc(notesCol(), noteId), stripId(next)).catch(err => console.warn("assignUsersToNote", err));
+  },
+  getMember(uid) { return _cache.members.find(m => m.uid === uid) || null; },
+
+  async updateMemberRole(memberUid, role) {
+    const ref = doc(membersCol(), memberUid);
+    await setDoc(ref, { role }, { merge: true });
+  },
+
+  async removeMember(memberUid) {
+    await deleteDoc(doc(membersCol(), memberUid));
+    // Also clear their user pointer if it points to this org
+    const userSnap = await getDoc(doc(db, `users/${memberUid}`));
+    if (userSnap.exists() && userSnap.data().orgId === _orgId) {
+      await deleteDoc(doc(db, `users/${memberUid}`));
+    }
+  },
+
+  // ---------- Invites ----------
+  listInvites() { return _cache.invites.slice(); },
+
+  async inviteUser(email, role) {
+    if (!email || !role) return;
+    const emailKey = email.toLowerCase().replace(/\./g, ',');
+    const batch = writeBatch(db);
+    // Store in org's invites collection
+    batch.set(doc(invitesCol(), emailKey), { email, role, invitedAt: nowIso(), invitedBy: _uid });
+    // Store lookup so sign-in can find it
+    batch.set(doc(db, `inviteLookup/${emailKey}`), { orgId: _orgId, role, email });
+    await batch.commit();
+  },
+
+  async cancelInvite(email) {
+    const emailKey = email.toLowerCase().replace(/\./g, ',');
+    const batch = writeBatch(db);
+    batch.delete(doc(invitesCol(), emailKey));
+    batch.delete(doc(db, `inviteLookup/${emailKey}`));
+    await batch.commit();
+  },
+
   // ---------- Bulk import ----------
-  // rows = array of { body: string } — each becomes a customer + default note
   async importCustomers(rows) {
     if (!Array.isArray(rows) || rows.length === 0) return 0;
     const batch = writeBatch(db);
@@ -244,26 +382,53 @@ export const Storage = {
       const cid = uid();
       const nid = uid();
       const customer = { created: now, updated: now };
-      const note = { body, customerId: cid, isDefault: true, created: now, updated: now };
+      const note = { body, customerId: cid, isDefault: true, assignedTo: [], created: now, updated: now };
       batch.set(doc(customersCol(), cid), customer);
       batch.set(doc(notesCol(), nid), note);
-      // Update cache so UI reflects immediately
       _cache.customers.push({ id: cid, ...customer });
       _cache.notes.push({ id: nid, ...note });
       created++;
     }
     emit();
-    try {
-      await batch.commit();
-    } catch (e) {
-      console.warn("importCustomers batch", e);
-    }
+    try { await batch.commit(); } catch (e) { console.warn("importCustomers batch", e); }
     return created;
   },
 
-  // ---------- Migration from localStorage (one-time) ----------
-  async maybeMigrateFromLocalStorage() {
+  // ---------- Migration from old users/{uid}/ path ----------
+  async maybeMigrateFromOldPath(userId) {
+    // Only migrate if org has no notes/customers yet
     if (_cache.notes.length > 0 || _cache.customers.length > 0) return false;
+
+    const oldNotesSnap = await getDocs(collection(db, `users/${userId}/notes`));
+    const oldCustomersSnap = await getDocs(collection(db, `users/${userId}/customers`));
+    const oldSettingsSnap = await getDoc(doc(db, `users/${userId}/settings/preferences`));
+
+    if (oldNotesSnap.empty && oldCustomersSnap.empty) {
+      // Try localStorage migration as before
+      return this._maybeMigrateFromLocalStorage();
+    }
+
+    const batch = writeBatch(db);
+    for (const d of oldCustomersSnap.docs) {
+      batch.set(doc(customersCol(), d.id), d.data());
+    }
+    for (const d of oldNotesSnap.docs) {
+      const data = d.data();
+      batch.set(doc(notesCol(), d.id), { assignedTo: [], ...data });
+    }
+    if (oldSettingsSnap.exists()) {
+      batch.set(settingsDoc(), oldSettingsSnap.data());
+    }
+    try {
+      await batch.commit();
+      return true;
+    } catch (e) {
+      console.warn("migration from old path failed", e);
+      return false;
+    }
+  },
+
+  async _maybeMigrateFromLocalStorage() {
     const raw = localStorage.getItem("note-aggregator/v1");
     if (!raw) return false;
     let parsed;
@@ -271,21 +436,15 @@ export const Storage = {
     if (!parsed || (!Array.isArray(parsed.notes) && !Array.isArray(parsed.customers))) return false;
     const batch = writeBatch(db);
     for (const c of parsed.customers || []) {
-      batch.set(doc(customersCol(), c.id), {
-        created: c.created || nowIso(),
-        updated: c.updated || nowIso(),
-      });
+      batch.set(doc(customersCol(), c.id), { created: c.created || nowIso(), updated: c.updated || nowIso() });
     }
     for (const n of parsed.notes || []) {
       batch.set(doc(notesCol(), n.id), {
-        body: n.body || "",
-        customerId: n.customerId || null,
-        isDefault: !!n.isDefault,
-        created: n.created || nowIso(),
-        updated: n.updated || nowIso(),
+        body: n.body || "", customerId: n.customerId || null,
+        isDefault: !!n.isDefault, assignedTo: [],
+        created: n.created || nowIso(), updated: n.updated || nowIso(),
       });
     }
-    // Carry over old settings too
     const oldRecent = parseInt(localStorage.getItem("note-aggregator/recent-count"), 10);
     const oldAgg = parseInt(localStorage.getItem("note-aggregator/aggregator-count"), 10);
     const oldKwsRaw = localStorage.getItem("note-aggregator/keywords");
@@ -297,22 +456,20 @@ export const Storage = {
     if (oldKwsRaw) { try { newSettings.keywords = JSON.parse(oldKwsRaw); } catch {} }
     if (oldOrderRaw) {
       try {
-        const parsed = JSON.parse(oldOrderRaw);
-        if (Array.isArray(parsed)) newSettings.pinnedOrder = parsed;
+        const p = JSON.parse(oldOrderRaw);
+        if (Array.isArray(p)) newSettings.pinnedOrder = p;
       } catch {
         if (oldOrderRaw === "aggregator-first") newSettings.pinnedOrder = ["aggregator", "recent", "notes"];
-        if (oldOrderRaw === "recent-first") newSettings.pinnedOrder = ["recent", "aggregator", "notes"];
       }
     }
     if (oldSort === "alpha" || oldSort === "recent") newSettings.customerSort = oldSort;
     batch.set(settingsDoc(), newSettings);
     try {
       await batch.commit();
-      // Clear localStorage so we don't re-migrate
       localStorage.removeItem("note-aggregator/v1");
       return true;
     } catch (e) {
-      console.warn("migration failed", e);
+      console.warn("localStorage migration failed", e);
       return false;
     }
   },

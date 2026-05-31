@@ -24,7 +24,7 @@
   <!-- LIST VIEW -->
   <section id="list-view" class="screen active">
     <header class="app-header">
-      <h1>Notes</h1>
+      <h1>Company Organizer Ninja</h1>
       <span id="app-version" class="app-version" style="margin-left:auto"></span>
       <button id="settings-btn" class="icon-btn" aria-label="Settings">⚙</button>
     </header>
@@ -37,7 +37,7 @@
   <!-- CUSTOMERS LIST VIEW -->
   <section id="customers-view" class="screen">
     <header class="app-header">
-      <button class="icon-btn home-btn" aria-label="Home">⌂</button>
+      <button class="icon-btn date-btn home-btn" aria-label="Home">Home</button>
       <input id="customer-search" class="search-input" type="search" placeholder="Search customers" autocomplete="off" />
       <div class="sort-group" role="group" aria-label="Sort customers">
         <button id="sort-alpha" class="sort-btn" aria-pressed="true">A–Z</button>
@@ -53,8 +53,8 @@
   <!-- CUSTOMER NOTES VIEW -->
   <section id="customer-notes-view" class="screen">
     <header class="app-header">
-      <button id="customer-notes-back-btn" class="icon-btn back-btn" aria-label="Back to Customers">← Customers</button>
-      <button class="icon-btn home-btn" aria-label="Home">⌂</button>
+      <button class="icon-btn date-btn home-btn" aria-label="Home">Home</button>
+      <button id="customer-notes-back-btn" class="icon-btn date-btn back-btn" aria-label="Back to Customers">Back to Customers</button>
       <h1 id="customer-notes-title">Customer</h1>
     </header>
     <main id="customer-notes-list" class="notes-list"></main>
@@ -64,7 +64,7 @@
   <!-- AGGREGATOR VIEW (one per keyword) -->
   <section id="aggregator-view" class="screen">
     <header class="app-header">
-      <button class="icon-btn home-btn" aria-label="Home">⌂</button>
+      <button class="icon-btn date-btn home-btn" aria-label="Home">Home</button>
       <h1 id="aggregator-title">Keyword</h1>
     </header>
     <main id="aggregator-list" class="notes-list"></main>
@@ -73,18 +73,26 @@
   <!-- SETTINGS VIEW -->
   <section id="settings-view" class="screen">
     <header class="app-header">
-      <button class="icon-btn home-btn" aria-label="Home">⌂</button>
+      <button class="icon-btn date-btn home-btn" aria-label="Home">Home</button>
       <h1>Settings</h1>
     </header>
     <main class="settings-main">
       <div class="setting-row">
         <label for="setting-recent-count">Number of recent customer notes on home screen</label>
-        <input id="setting-recent-count" type="number" min="0" max="20" />
+        <div class="stepper">
+          <button class="stepper-btn" id="recent-count-down">−</button>
+          <input id="setting-recent-count" type="number" min="0" max="20" />
+          <button class="stepper-btn" id="recent-count-up">+</button>
+        </div>
       </div>
 
       <div class="setting-row">
         <label for="setting-aggregator-count">Number of aggregator notes on home screen</label>
-        <input id="setting-aggregator-count" type="number" min="0" max="50" />
+        <div class="stepper">
+          <button class="stepper-btn" id="aggregator-count-down">−</button>
+          <input id="setting-aggregator-count" type="number" min="0" max="50" />
+          <button class="stepper-btn" id="aggregator-count-up">+</button>
+        </div>
       </div>
 
       <div class="setting-row setting-list-row">
@@ -118,6 +126,32 @@
         </div>
       </div>
 
+      <div class="setting-row">
+        <label>Appearance</label>
+        <div style="display:flex; gap:8px; margin-top:6px;">
+          <button id="theme-light-btn" class="theme-btn secondary">Light</button>
+          <button id="theme-dark-btn" class="theme-btn secondary">Dark</button>
+        </div>
+      </div>
+
+      <div class="setting-row setting-list-row">
+        <h3 class="setting-list-title">Users</h3>
+        <ul id="members-list" class="members-list"></ul>
+        <h4 class="setting-sub-title">Pending Invites</h4>
+        <ul id="invites-list" class="members-list"></ul>
+        <h4 class="setting-sub-title">Invite a User</h4>
+        <div class="invite-form">
+          <input id="invite-email" type="email" placeholder="Email address" autocomplete="off" />
+          <select id="invite-role">
+            <option value="admin">Admin</option>
+            <option value="employee">Employee</option>
+            <option value="customer">Customer</option>
+          </select>
+          <button id="invite-btn" class="primary">Invite</button>
+        </div>
+        <p id="invite-status" class="muted" style="font-size:13px; margin-top:6px;"></p>
+      </div>
+
       <div class="setting-row setting-list-row">
         <h3 class="setting-list-title">Account</h3>
         <p id="account-email" class="muted" style="margin: 0 0 8px;"></p>
@@ -130,12 +164,13 @@
   <section id="editor-view" class="screen">
     <header class="app-header editor-header">
       <div class="editor-row editor-row-nav">
-        <button id="back-btn" class="icon-btn back-btn" aria-label="Back">←</button>
-        <button id="editor-home-btn" class="icon-btn home-btn" aria-label="Home">⌂</button>
+        <button id="editor-home-btn" class="icon-btn date-btn" aria-label="Home">Home</button>
+        <button id="back-btn" class="icon-btn date-btn back-btn" aria-label="Back">Back</button>
         <button id="customer-link-btn" class="customer-link-btn" aria-label="Go to customer notes" hidden></button>
         <button id="date-today-btn" class="icon-btn date-btn" aria-label="Insert today's date">Today</button>
         <button id="date-picker-btn" class="icon-btn date-btn" aria-label="Pick a date to insert">Date…</button>
         <button id="delete-btn" class="icon-btn danger" aria-label="Delete note">🗑</button>
+        <button id="assign-btn" class="icon-btn date-btn" aria-label="Assign users" hidden>Assign</button>
       </div>
       <div class="editor-row editor-row-tools">
         <input id="note-search-input" class="search-input note-search-input" type="search" placeholder="Find in note" autocomplete="off" />
@@ -150,9 +185,25 @@
     </div>
     <main class="editor-main">
       <input id="editor-title" class="editor-title" type="text" placeholder="Title" autocomplete="off" autocorrect="on" spellcheck="true" enterkeyhint="enter" />
-      <textarea id="editor-body" class="editor-body" placeholder="Start typing…" autocomplete="off" autocorrect="on" spellcheck="true"></textarea>
+      <div class="editor-body-wrap">
+        <div id="editor-body-highlight" class="editor-body editor-body-highlight" aria-hidden="true"></div>
+        <textarea id="editor-body" class="editor-body editor-body-input" placeholder="Start typing…" autocomplete="off" autocorrect="on" spellcheck="true"></textarea>
+      </div>
     </main>
   </section>
+
+  <!-- Assign Users Modal -->
+  <div id="assign-modal" class="modal-overlay" hidden>
+    <div class="modal-panel">
+      <div class="modal-header">
+        <h2 class="modal-title">Assign Users</h2>
+        <button id="assign-modal-close" class="icon-btn" aria-label="Close">✕</button>
+      </div>
+      <p class="muted" style="font-size:13px; margin:0 0 12px;">Select who can see this note. Admins always have access.</p>
+      <ul id="assign-members-list" class="members-list"></ul>
+      <button id="assign-save-btn" class="primary" style="margin-top:14px; width:100%; padding:10px; border:none; border-radius:var(--radius); font-weight:600; font-size:15px; cursor:pointer; background:var(--accent); color:var(--accent-ink);">Save</button>
+    </div>
+  </div>
 
   <script type="module" src="js/app.js"></script>
 </body>
