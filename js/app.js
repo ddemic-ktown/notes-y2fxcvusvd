@@ -2,7 +2,7 @@
 import { Storage } from "./storage.js";
 import { auth, googleProvider, signInWithPopup, signOut, onAuthStateChanged } from "./firebase-init.js";
 
-const APP_VERSION = 'v48';
+const APP_VERSION = 'v49';
 
 // ---------- DOM refs ----------
 const listView = document.getElementById('list-view');
@@ -741,12 +741,10 @@ function goHome() {
   showNotes();
 }
 document.querySelectorAll('.home-btn').forEach(btn => {
-  if (btn.id === 'editor-home-btn') {
-    btn.addEventListener('click', () => { commitAndCleanupEditor(); goHome(); });
-  } else {
-    btn.addEventListener('click', goHome);
-  }
+  btn.addEventListener('click', goHome);
 });
+const editorHomeBtnEl = document.getElementById('editor-home-btn');
+if (editorHomeBtnEl) editorHomeBtnEl.addEventListener('click', () => { commitAndCleanupEditor(); goHome(); });
 
 recentCountInput.addEventListener('input', () => {
   let n = parseInt(recentCountInput.value, 10);
