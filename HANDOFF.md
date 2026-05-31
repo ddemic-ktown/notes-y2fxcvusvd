@@ -1,6 +1,6 @@
 # Company Organizer Ninja — Handoff Document
 
-**Status as of:** May 2026, version v47  
+**Status as of:** May 2026, version v48  
 **Live URL:** https://ddemic-ktown.github.io/notes-y2fxcvusvd/  
 **GitHub repo:** https://github.com/ddemic-ktown/notes-y2fxcvusvd  
 **Firebase project:** note-aggregator  
@@ -137,7 +137,7 @@ Each note has `assignedTo: [uid, ...]`. Empty array = admin-only (not visible to
 - Update the "Status as of" line at the top of this file to reflect the new version
 - In the chat response, explicitly state the new version number (e.g. "Updated to v47")
 
-Current version: **v47**
+Current version: **v48**
 
 ---
 

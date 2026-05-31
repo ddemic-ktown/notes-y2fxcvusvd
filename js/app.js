@@ -2,7 +2,7 @@
 import { Storage } from "./storage.js";
 import { auth, googleProvider, signInWithPopup, signOut, onAuthStateChanged } from "./firebase-init.js";
 
-const APP_VERSION = 'v47';
+const APP_VERSION = 'v48';
 
 // ---------- DOM refs ----------
 const listView = document.getElementById('list-view');
@@ -563,7 +563,11 @@ function renderNotesList() {
 
   notesList.querySelectorAll('.note-card').forEach(card => {
     card.addEventListener('click', () => {
-      if (card.dataset.nav === 'customers') showCustomers();
+      if (card.dataset.nav === 'customers') {
+        const chevron = card.querySelector('.note-chevron');
+        if (chevron) chevron.innerHTML = '<span class="nav-spinner"></span>';
+        setTimeout(showCustomers, 0);
+      }
       else if (card.dataset.keyword) showAggregator(card.dataset.keyword);
       else {
         const note = Storage.getNote(card.dataset.id);
