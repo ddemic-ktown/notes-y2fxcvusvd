@@ -49,7 +49,7 @@ function attachListeners() {
       _cache.notes = all;
     } else {
       _cache.notes = all.filter(n =>
-        !n.assignedTo || n.assignedTo.length === 0 || n.assignedTo.includes(_uid)
+        Array.isArray(n.assignedTo) && n.assignedTo.includes(_uid)
       );
     }
     _ready = true;

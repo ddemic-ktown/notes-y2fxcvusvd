@@ -69,11 +69,10 @@ service cloud.firestore {
       match /notes/{noteId} {
         // Admin sees everything
         allow read: if isAdmin();
-        // Employee and customer can read if assignedTo is empty or contains their uid
+        // Employee and customer can only read if explicitly assigned
         allow read: if (isEmployee() || isCustomer()) &&
-          (!('assignedTo' in resource.data) ||
-           resource.data.assignedTo.size() == 0 ||
-           request.auth.uid in resource.data.assignedTo);
+          ('assignedTo' in resource.data) &&
+          request.auth.uid in resource.data.assignedTo;
         // Admin and employee can write
         allow write: if isAdmin() || isEmployee();
       }

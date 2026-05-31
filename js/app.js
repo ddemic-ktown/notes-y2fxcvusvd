@@ -2,7 +2,7 @@
 import { Storage } from "./storage.js";
 import { auth, googleProvider, signInWithPopup, signOut, onAuthStateChanged } from "./firebase-init.js";
 
-const APP_VERSION = 'v44';
+const APP_VERSION = 'v45';
 
 // ---------- DOM refs ----------
 const listView = document.getElementById('list-view');
