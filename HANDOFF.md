@@ -1,6 +1,6 @@
 # Company Organizer Ninja — Handoff Document
 
-**Status as of:** May 2026, version v44  
+**Status as of:** May 2026, version v46  
 **Live URL:** https://ddemic-ktown.github.io/notes-y2fxcvusvd/  
 **GitHub repo:** https://github.com/ddemic-ktown/notes-y2fxcvusvd  
 **Firebase project:** note-aggregator  
@@ -131,7 +131,12 @@ Each note has `assignedTo: [uid, ...]`. Empty array = admin-only (not visible to
 1. `APP_VERSION` in `js/app.js` (e.g. `'v44'` → `'v45'`)
 2. `VERSION` in `sw.js` (e.g. `'na-v44'` → `'na-v45'`)
 
-Current version: **v44**
+**For AI assistants:** on every code change, without being asked:
+- Bump both version numbers (`APP_VERSION` in `app.js` and `VERSION` in `sw.js`)
+- Update the "Current version" line below to match
+- Update the "Status as of" line at the top of this file to reflect the new version
+
+Current version: **v46**
 
 ---
 

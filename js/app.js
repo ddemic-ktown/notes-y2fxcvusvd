@@ -2,7 +2,7 @@
 import { Storage } from "./storage.js";
 import { auth, googleProvider, signInWithPopup, signOut, onAuthStateChanged } from "./firebase-init.js";
 
-const APP_VERSION = 'v45';
+const APP_VERSION = 'v46';
 
 // ---------- DOM refs ----------
 const listView = document.getElementById('list-view');
@@ -1133,8 +1133,12 @@ backBtn.addEventListener('click', () => {
 // Android/browser back button support
 window.addEventListener('popstate', (e) => {
   const screen = e.state && e.state.screen;
-  if (!screen || screen === 'home') {
-    // Already at home or no state — let browser handle it (exits app)
+  if (!screen) {
+    // No state — let browser handle it (exits app)
+    return;
+  }
+  if (screen === 'home') {
+    showNotes();
     return;
   }
   if (editorView.classList.contains('active')) {
