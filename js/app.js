@@ -2,7 +2,7 @@
 import { Storage } from "./storage.js";
 import { auth, googleProvider, signInWithPopup, signOut, onAuthStateChanged } from "./firebase-init.js";
 
-const APP_VERSION = 'v46';
+const APP_VERSION = 'v47';
 
 // ---------- DOM refs ----------
 const listView = document.getElementById('list-view');
@@ -185,6 +185,7 @@ let activeCustomerId = null;
 let activeKeyword = null;
 let customerNotesReturnTo = { screen: 'customers' };
 let saveTimer = null;
+let swReg = null;
 let searchMatches = [];
 let searchIndex = 0;
 
@@ -317,6 +318,7 @@ function showNotes() {
   listView.classList.add('active');
   renderNotesList();
   history.replaceState({ screen: 'home' }, '');
+  if (swReg) swReg.update().catch(() => {});
 }
 
 const isDesktop = window.matchMedia('(hover: hover) and (pointer: fine)').matches;
@@ -1418,13 +1420,13 @@ if (appVersionEl) appVersionEl.textContent = APP_VERSION;
 
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('sw.js').then((reg) => {
-    // Check for updates on every load
+    swReg = reg;
     reg.update().catch(() => {});
-    // When a new SW is found, auto-reload once it's installed so the user
-    // gets the latest UI without manual cache clearing.
     reg.addEventListener('updatefound', () => {
       const installing = reg.installing;
       if (!installing) return;
+      // Show "newer version detected" immediately while the new SW installs
+      if (appVersionEl) appVersionEl.textContent = APP_VERSION + ' — newer version detected';
       installing.addEventListener('statechange', () => {
         if (installing.state === 'installed' && navigator.serviceWorker.controller) {
           // Don't interrupt active edits
