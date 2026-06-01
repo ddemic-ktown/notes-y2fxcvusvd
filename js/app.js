@@ -2,7 +2,7 @@
 import { Storage } from "./storage.js";
 import { auth, googleProvider, signInWithPopup, signOut, onAuthStateChanged } from "./firebase-init.js";
 
-const APP_VERSION = 'v54';
+const APP_VERSION = 'v55';
 
 // ---------- DOM refs ----------
 const listView = document.getElementById('list-view');
@@ -1557,20 +1557,17 @@ function tutorialSteps() {
       screen: 'home',
       target: () => document.querySelector('#notes-list .note-card[data-nav="customers"]'),
       text: 'Click here to view and add customers.',
-      arrow: 'up',
     },
     {
       screen: 'home',
       target: () => document.getElementById('settings-btn'),
       text: 'You can change settings, import contacts, and do other cool things here.',
-      arrow: 'up',
     },
     {
       screen: 'customers',
       setup: () => showCustomers(),
       target: () => document.querySelector('#customers-list .note-card'),
       text: 'You can search or scroll to select a customer.',
-      arrow: 'up',
     },
     {
       screen: 'customer-notes',
@@ -1583,45 +1580,67 @@ function tutorialSteps() {
       },
       target: () => document.querySelector('#customer-notes-list .note-card'),
       text: 'Each customer has a default note. The title should be the customer\'s name.',
-      arrow: 'up',
     },
     {
       screen: 'customer-notes',
       target: () => document.getElementById('customer-notes-fab'),
       text: 'You can add new notes by tapping the + right here.',
-      arrow: 'down',
     },
   ];
 }
 
-function positionBubble(targetEl, arrow) {
+function positionBubble(targetEl) {
   if (!targetEl || !tutorialBubble) return;
   const r = targetEl.getBoundingClientRect();
-  const bw = 276; // max-width + padding
-  tutorialBubble.className = 'tutorial-bubble';
+  const bw = tutorialBubble.offsetWidth || 260;
+  const bh = tutorialBubble.offsetHeight || 120;
+  const margin = 12;
+  const arrowSize = 18;
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+
+  const spaceBelow = vh - r.bottom - margin;
+  const spaceAbove = r.top - margin;
+  const spaceRight = vw - r.right - margin;
+
+  let placement;
+  if (spaceBelow >= bh + arrowSize) placement = 'below';
+  else if (spaceAbove >= bh + arrowSize) placement = 'above';
+  else if (spaceRight >= bw + arrowSize) placement = 'right';
+  else placement = 'left';
 
   let top, left;
-  if (arrow === 'down') {
-    // bubble above target, arrow points down
-    tutorialBubble.classList.add('arrow-down');
-    top = r.top - tutorialBubble.offsetHeight - 20;
-    left = Math.min(r.left, window.innerWidth - bw - 8);
-  } else if (arrow === 'right') {
-    tutorialBubble.classList.add('arrow-right');
-    top = r.top;
-    left = r.left - bw - 20;
+  const targetCX = r.left + r.width / 2;
+  const targetCY = r.top + r.height / 2;
+
+  if (placement === 'below') {
+    top = r.bottom + arrowSize;
+    left = Math.max(8, Math.min(targetCX - bw / 2, vw - bw - 8));
+    const arrowH = Math.max(8, Math.min(targetCX - left - 8, bw - 24));
+    tutorialBubble.className = 'tutorial-bubble arrow-up';
+    tutorialBubble.style.setProperty('--arrow-h', arrowH + 'px');
+  } else if (placement === 'above') {
+    top = r.top - bh - arrowSize;
+    left = Math.max(8, Math.min(targetCX - bw / 2, vw - bw - 8));
+    const arrowH = Math.max(8, Math.min(targetCX - left - 8, bw - 24));
+    tutorialBubble.className = 'tutorial-bubble arrow-down';
+    tutorialBubble.style.setProperty('--arrow-h', arrowH + 'px');
+  } else if (placement === 'right') {
+    left = r.right + arrowSize;
+    top = Math.max(8, Math.min(targetCY - bh / 2, vh - bh - 8));
+    const arrowV = Math.max(8, Math.min(targetCY - top - 8, bh - 24));
+    tutorialBubble.className = 'tutorial-bubble arrow-left';
+    tutorialBubble.style.setProperty('--arrow-v', arrowV + 'px');
   } else {
-    // default: bubble below target, arrow points up
-    top = r.bottom + 12;
-    left = Math.min(Math.max(r.left, 8), window.innerWidth - bw - 8);
-    // position arrow over target center
-    const arrowLeft = r.left + r.width / 2 - left - 8;
-    tutorialBubble.style.setProperty('--arrow-left', Math.max(8, arrowLeft) + 'px');
+    left = r.left - bw - arrowSize;
+    top = Math.max(8, Math.min(targetCY - bh / 2, vh - bh - 8));
+    const arrowV = Math.max(8, Math.min(targetCY - top - 8, bh - 24));
+    tutorialBubble.className = 'tutorial-bubble arrow-right';
+    tutorialBubble.style.setProperty('--arrow-v', arrowV + 'px');
   }
 
-  top = Math.max(8, Math.min(top, window.innerHeight - 160));
-  tutorialBubble.style.top = top + 'px';
-  tutorialBubble.style.left = left + 'px';
+  tutorialBubble.style.top = Math.max(8, top) + 'px';
+  tutorialBubble.style.left = Math.max(8, left) + 'px';
 }
 
 async function runTutorialStep(index) {
@@ -1637,11 +1656,18 @@ async function runTutorialStep(index) {
     goHome();
   }
 
+  // Scroll to top so targets are visible
+  window.scrollTo(0, 0);
+
   // Wait for render
   await new Promise(r => setTimeout(r, 120));
 
   const target = step.target();
   if (!target) { endTutorial(); return; }
+
+  // Scroll target into view if needed
+  target.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  await new Promise(r => setTimeout(r, 80));
 
   tutorialText.textContent = step.text;
   tutorialOverlay.hidden = false;
@@ -1649,7 +1675,7 @@ async function runTutorialStep(index) {
   tutorialBubble.style.top = '-9999px';
   tutorialBubble.style.left = '-9999px';
   await new Promise(r => setTimeout(r, 30));
-  positionBubble(target, step.arrow || 'up');
+  positionBubble(target);
 
   // Highlight target
   target.style.outline = '3px solid var(--accent, #2563eb)';
