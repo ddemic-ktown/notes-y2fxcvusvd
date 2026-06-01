@@ -160,6 +160,11 @@
         <p id="account-email" class="muted" style="margin: 0 0 8px;"></p>
         <button id="signout-btn" class="secondary">Sign out</button>
       </div>
+
+      <div class="setting-row">
+        <label>Help</label>
+        <button id="tutorial-btn" class="secondary" style="margin-top:6px;">Tutorial</button>
+      </div>
     </main>
   </section>
 
@@ -175,7 +180,7 @@
           <button id="editor-more-btn" class="icon-btn date-btn editor-more-btn" aria-label="More options">⋯</button>
           <div id="editor-more-dropdown" class="editor-more-dropdown" hidden>
             <button id="date-today-btn" class="editor-more-item" aria-label="Insert today's date">Today's date</button>
-            <button id="date-picker-btn" class="editor-more-item" aria-label="Pick a date to insert">Pick a date…</button>
+            <label id="date-picker-btn" class="editor-more-item" aria-label="Pick a date to insert" style="cursor:pointer;">Pick a date…<input id="date-picker-input" type="date" style="position:absolute;opacity:0;pointer-events:none;width:1px;height:1px;" /></label>
             <button id="assign-btn" class="editor-more-item" aria-label="Assign users" hidden>Assign users</button>
             <button id="assign-customer-btn" class="editor-more-item" aria-label="Assign to customer" hidden>Assign to customer</button>
           </div>
@@ -189,9 +194,6 @@
         <button id="checkbox-btn" class="icon-btn" aria-label="Toggle checkbox on line(s)">☐</button>
       </div>
     </header>
-    <div id="date-picker-popover" class="date-popover" hidden>
-      <input id="date-picker-input" type="date" />
-    </div>
     <main class="editor-main">
       <input id="editor-title" class="editor-title" type="text" placeholder="Title" autocomplete="off" autocorrect="on" spellcheck="true" enterkeyhint="enter" />
       <div class="editor-body-wrap">
@@ -211,6 +213,15 @@
       <p class="muted" style="font-size:13px; margin:0 0 12px;">Select who can see this note. Admins always have access.</p>
       <ul id="assign-members-list" class="members-list"></ul>
       <button id="assign-save-btn" class="primary" style="margin-top:14px; width:100%; padding:10px; border:none; border-radius:var(--radius); font-weight:600; font-size:15px; cursor:pointer; background:var(--accent); color:var(--accent-ink);">Save</button>
+    </div>
+  </div>
+
+  <!-- Tutorial Overlay -->
+  <div id="tutorial-overlay" class="tutorial-overlay" hidden>
+    <div id="tutorial-bubble" class="tutorial-bubble">
+      <button id="tutorial-close" class="tutorial-close" aria-label="Close tutorial">✕</button>
+      <p id="tutorial-text" class="tutorial-text"></p>
+      <button id="tutorial-next" class="tutorial-next">Got it →</button>
     </div>
   </div>
 

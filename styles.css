@@ -282,6 +282,72 @@ body.dark-mode .customer-link-btn { background: #2d2a1e; border-color: #78600a; 
 
 .icon-btn.home-btn:not(.date-btn) { font-size: 24px; line-height: 1; padding: 2px 8px; }
 
+/* Tutorial overlay */
+.tutorial-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  pointer-events: none;
+}
+.tutorial-overlay[hidden] { display: none; }
+.tutorial-bubble {
+  position: fixed;
+  background: var(--accent, #2563eb);
+  color: #fff;
+  border-radius: 14px;
+  padding: 14px 16px 12px;
+  max-width: 260px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.25);
+  pointer-events: all;
+  z-index: 1001;
+}
+.tutorial-bubble::after {
+  content: '';
+  position: absolute;
+  border: 8px solid transparent;
+  border-bottom-color: var(--accent, #2563eb);
+  top: -16px;
+  left: 24px;
+}
+.tutorial-bubble.arrow-down::after {
+  border-bottom-color: transparent;
+  border-top-color: var(--accent, #2563eb);
+  top: auto;
+  bottom: -16px;
+}
+.tutorial-bubble.arrow-right::after {
+  border-bottom-color: transparent;
+  border-left-color: var(--accent, #2563eb);
+  top: 12px;
+  left: auto;
+  right: -16px;
+}
+.tutorial-text { margin: 0 0 10px; font-size: 14px; line-height: 1.5; }
+.tutorial-next {
+  background: rgba(255,255,255,0.2);
+  border: 1px solid rgba(255,255,255,0.4);
+  color: #fff;
+  border-radius: 8px;
+  padding: 6px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  width: 100%;
+}
+.tutorial-next:active { background: rgba(255,255,255,0.35); }
+.tutorial-close {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  background: none;
+  border: none;
+  color: rgba(255,255,255,0.7);
+  font-size: 16px;
+  cursor: pointer;
+  padding: 2px 4px;
+  line-height: 1;
+}
+
 /* Assign users modal */
 .modal-overlay {
   position: fixed;

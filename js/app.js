@@ -2,7 +2,7 @@
 import { Storage } from "./storage.js";
 import { auth, googleProvider, signInWithPopup, signOut, onAuthStateChanged } from "./firebase-init.js";
 
-const APP_VERSION = 'v51';
+const APP_VERSION = 'v54';
 
 // ---------- DOM refs ----------
 const listView = document.getElementById('list-view');
@@ -54,7 +54,6 @@ const dateTodayBtn = document.getElementById('date-today-btn');
 const datePickerBtn = document.getElementById('date-picker-btn');
 const editorMoreBtn = document.getElementById('editor-more-btn');
 const editorMoreDropdown = document.getElementById('editor-more-dropdown');
-const datePopover = document.getElementById('date-picker-popover');
 const datePickerInput = document.getElementById('date-picker-input');
 const noteSearchInput = document.getElementById('note-search-input');
 const noteSearchCount = document.getElementById('note-search-count');
@@ -401,7 +400,6 @@ function showEditor(record, type, cursorHint) {
   searchNextBtn.style.display = showNoteOnly ? '' : 'none';
   if (editorMoreBtn) editorMoreBtn.closest('.editor-more-wrap').style.display = showNoteOnly ? '' : 'none';
   closeMoreDropdown();
-  closeDatePopover();
 
   const sameAsBack = returnScreen === 'customer-notes'
     && record.customerId && record.customerId === activeCustomerId;
@@ -430,19 +428,16 @@ function showEditor(record, type, cursorHint) {
   history.pushState({ screen: 'editor' }, '');
 
   setTimeout(() => {
-    // If a cursor hint was passed (e.g. came from an aggregator match), jump
-    // to the matching paragraph inside the body textarea.
+    // If a cursor hint was passed (e.g. came from an aggregator match), scroll
+    // to the matching paragraph but do NOT focus (avoids triggering keyboard).
     if (cursorHint && cursorHint.paragraph && type === 'note') {
       const bodyVal = bodyInput.value;
       const lines = cursorHint.paragraph.split('\n');
-      // Try progressively shorter suffixes — if the paragraph straddles the
-      // title (line 1) and body, dropping leading lines lets us find the body part.
       for (let start = 0; start < lines.length; start++) {
         const candidate = lines.slice(start).join('\n');
         if (!candidate) continue;
         const idx = bodyVal.indexOf(candidate);
         if (idx !== -1) {
-          bodyInput.focus();
           bodyInput.setSelectionRange(idx, idx);
           const before = bodyVal.substring(0, idx);
           const lineHeight = parseFloat(getComputedStyle(bodyInput).lineHeight) || 22;
@@ -452,18 +447,8 @@ function showEditor(record, type, cursorHint) {
           return;
         }
       }
-      // Fallback: paragraph was entirely on the title line — focus that.
-      titleInput.focus();
-      return;
     }
-    const titleEmpty = !titleInput.value;
-    const bodyEmpty = !bodyInput.value;
-    if (titleEmpty && bodyEmpty) titleInput.focus();
-    else {
-      bodyInput.focus();
-      const end = bodyInput.value.length;
-      bodyInput.setSelectionRange(end, end);
-    }
+    // Do not auto-focus — keyboard should only appear when user taps the text
   }, 50);
 }
 
@@ -958,20 +943,6 @@ function insertDateAtCursor(dateStr) {
   bodyInput.focus();
   scheduleSave();
 }
-function openDatePopover() {
-  // Position relative to the always-visible ⋯ button (datePickerBtn is inside the dropdown and may be hidden)
-  const anchor = editorMoreBtn || datePickerBtn;
-  const rect = anchor.getBoundingClientRect();
-  datePopover.style.top = `${rect.bottom + 4}px`;
-  datePopover.style.right = `${window.innerWidth - rect.right}px`;
-  datePopover.style.left = 'auto';
-  datePickerInput.value = '';
-  datePopover.hidden = false;
-  // Just focus the input — user taps it to open the native date picker on iOS/Android
-  setTimeout(() => datePickerInput.focus(), 30);
-}
-function closeDatePopover() { datePopover.hidden = true; }
-
 function closeMoreDropdown() { if (editorMoreDropdown) editorMoreDropdown.hidden = true; }
 function toggleMoreDropdown() {
   if (!editorMoreDropdown) return;
@@ -989,21 +960,13 @@ if (editorMoreDropdown) editorMoreDropdown.addEventListener('click', () => {
 dateTodayBtn.addEventListener('click', () => {
   insertDateAtCursor(formatDateForInsert(new Date()));
 });
-datePickerBtn.addEventListener('click', (e) => {
-  e.stopPropagation();
-  if (datePopover.hidden) openDatePopover();
-  else closeDatePopover();
-});
 datePickerInput.addEventListener('change', () => {
   if (!datePickerInput.value) return;
   const [y, m, d] = datePickerInput.value.split('-').map(Number);
   insertDateAtCursor(formatDateForInsert(new Date(y, m - 1, d)));
-  closeDatePopover();
+  datePickerInput.value = '';
 });
 document.addEventListener('click', (e) => {
-  if (!datePopover.hidden) {
-    if (!datePopover.contains(e.target) && e.target !== datePickerBtn) closeDatePopover();
-  }
   if (editorMoreDropdown && !editorMoreDropdown.hidden) {
     if (!editorMoreDropdown.contains(e.target) && e.target !== editorMoreBtn) closeMoreDropdown();
   }
@@ -1577,6 +1540,149 @@ window.addEventListener('beforeunload', () => {
 // Display app version in the home toolbar
 const appVersionEl = document.getElementById('app-version');
 if (appVersionEl) appVersionEl.textContent = APP_VERSION;
+
+// ---------- tutorial ----------
+const tutorialOverlay = document.getElementById('tutorial-overlay');
+const tutorialBubble = document.getElementById('tutorial-bubble');
+const tutorialText = document.getElementById('tutorial-text');
+const tutorialNext = document.getElementById('tutorial-next');
+const tutorialClose = document.getElementById('tutorial-close');
+const tutorialBtn = document.getElementById('tutorial-btn');
+
+let tutorialStepIndex = 0;
+
+function tutorialSteps() {
+  return [
+    {
+      screen: 'home',
+      target: () => document.querySelector('#notes-list .note-card[data-nav="customers"]'),
+      text: 'Click here to view and add customers.',
+      arrow: 'up',
+    },
+    {
+      screen: 'home',
+      target: () => document.getElementById('settings-btn'),
+      text: 'You can change settings, import contacts, and do other cool things here.',
+      arrow: 'up',
+    },
+    {
+      screen: 'customers',
+      setup: () => showCustomers(),
+      target: () => document.querySelector('#customers-list .note-card'),
+      text: 'You can search or scroll to select a customer.',
+      arrow: 'up',
+    },
+    {
+      screen: 'customer-notes',
+      setup: () => {
+        const customers = Storage.listCustomers();
+        if (!customers.length) return false;
+        const c = customers[0];
+        showCustomerNotes(c.id);
+        return true;
+      },
+      target: () => document.querySelector('#customer-notes-list .note-card'),
+      text: 'Each customer has a default note. The title should be the customer\'s name.',
+      arrow: 'up',
+    },
+    {
+      screen: 'customer-notes',
+      target: () => document.getElementById('customer-notes-fab'),
+      text: 'You can add new notes by tapping the + right here.',
+      arrow: 'down',
+    },
+  ];
+}
+
+function positionBubble(targetEl, arrow) {
+  if (!targetEl || !tutorialBubble) return;
+  const r = targetEl.getBoundingClientRect();
+  const bw = 276; // max-width + padding
+  tutorialBubble.className = 'tutorial-bubble';
+
+  let top, left;
+  if (arrow === 'down') {
+    // bubble above target, arrow points down
+    tutorialBubble.classList.add('arrow-down');
+    top = r.top - tutorialBubble.offsetHeight - 20;
+    left = Math.min(r.left, window.innerWidth - bw - 8);
+  } else if (arrow === 'right') {
+    tutorialBubble.classList.add('arrow-right');
+    top = r.top;
+    left = r.left - bw - 20;
+  } else {
+    // default: bubble below target, arrow points up
+    top = r.bottom + 12;
+    left = Math.min(Math.max(r.left, 8), window.innerWidth - bw - 8);
+    // position arrow over target center
+    const arrowLeft = r.left + r.width / 2 - left - 8;
+    tutorialBubble.style.setProperty('--arrow-left', Math.max(8, arrowLeft) + 'px');
+  }
+
+  top = Math.max(8, Math.min(top, window.innerHeight - 160));
+  tutorialBubble.style.top = top + 'px';
+  tutorialBubble.style.left = left + 'px';
+}
+
+async function runTutorialStep(index) {
+  const steps = tutorialSteps();
+  if (index >= steps.length) { endTutorial(); return; }
+  const step = steps[index];
+
+  // Navigate if needed
+  if (step.setup) {
+    const ok = step.setup();
+    if (ok === false) { endTutorial(); return; }
+  } else if (step.screen === 'home') {
+    goHome();
+  }
+
+  // Wait for render
+  await new Promise(r => setTimeout(r, 120));
+
+  const target = step.target();
+  if (!target) { endTutorial(); return; }
+
+  tutorialText.textContent = step.text;
+  tutorialOverlay.hidden = false;
+  // Render bubble off-screen first to measure height
+  tutorialBubble.style.top = '-9999px';
+  tutorialBubble.style.left = '-9999px';
+  await new Promise(r => setTimeout(r, 30));
+  positionBubble(target, step.arrow || 'up');
+
+  // Highlight target
+  target.style.outline = '3px solid var(--accent, #2563eb)';
+  target.style.outlineOffset = '3px';
+  target.dataset.tutorialHighlight = '1';
+}
+
+function clearHighlights() {
+  document.querySelectorAll('[data-tutorial-highlight]').forEach(el => {
+    el.style.outline = '';
+    el.style.outlineOffset = '';
+    delete el.dataset.tutorialHighlight;
+  });
+}
+
+function endTutorial() {
+  clearHighlights();
+  if (tutorialOverlay) tutorialOverlay.hidden = true;
+  tutorialStepIndex = 0;
+}
+
+if (tutorialNext) tutorialNext.addEventListener('click', () => {
+  clearHighlights();
+  tutorialStepIndex++;
+  runTutorialStep(tutorialStepIndex);
+});
+
+if (tutorialClose) tutorialClose.addEventListener('click', endTutorial);
+
+if (tutorialBtn) tutorialBtn.addEventListener('click', () => {
+  tutorialStepIndex = 0;
+  runTutorialStep(0);
+});
 
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('sw.js').then((reg) => {
