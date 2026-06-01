@@ -2,7 +2,7 @@
 import { Storage } from "./storage.js";
 import { auth, googleProvider, signInWithPopup, signOut, onAuthStateChanged } from "./firebase-init.js";
 
-const APP_VERSION = 'v55';
+const APP_VERSION = 'v56';
 
 // ---------- DOM refs ----------
 const listView = document.getElementById('list-view');
@@ -1568,6 +1568,11 @@ function tutorialSteps() {
       setup: () => showCustomers(),
       target: () => document.querySelector('#customers-list .note-card'),
       text: 'You can search or scroll to select a customer.',
+    },
+    {
+      screen: 'customers',
+      target: () => document.getElementById('customers-fab'),
+      text: 'You can add new customers by clicking here.',
     },
     {
       screen: 'customer-notes',
