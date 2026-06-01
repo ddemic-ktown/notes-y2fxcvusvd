@@ -110,7 +110,11 @@ body.editor-open {
   padding-top: max(14px, env(safe-area-inset-top));
 }
 .app-header h1 { margin: 0; font-size: 18px; font-weight: 600; }
-.app-version { font-size: 12px; color: var(--ink-soft); margin-right: 8px; }
+.app-version { font-size: 12px; color: var(--ink-soft); }
+.home-header { flex-direction: column; align-items: stretch; gap: 8px; }
+.home-header-top { display: flex; align-items: center; gap: 8px; }
+.home-header-top h1 { flex: 1; }
+.home-search-input { width: 100%; box-sizing: border-box; }
 /* Editor header — stacked into two rows: nav row + tools row */
 .editor-header {
   flex-direction: column;
@@ -121,7 +125,7 @@ body.editor-open {
 }
 .editor-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .editor-row-tools { width: 100%; }
-.editor-header .note-search-input { font-size: 13px; padding: 7px 12px; flex: 1; min-width: 0; }
+.editor-header .note-search-input { font-size: 16px; padding: 7px 12px; flex: 1; min-width: 0; }
 .editor-header .search-count { font-size: 12px; color: var(--ink-soft); min-width: 30px; text-align: center; flex-shrink: 0; }
 .editor-header .icon-btn:not(.date-btn) { padding: 4px 6px; font-size: 18px; }
 .editor-header .date-btn {
@@ -135,6 +139,36 @@ body.editor-open {
   white-space: nowrap;
 }
 .editor-header .date-btn:hover { background: var(--surface); border-color: var(--accent); color: var(--accent); }
+
+.editor-more-wrap { position: relative; margin-left: auto; }
+.editor-more-btn { font-size: 18px; letter-spacing: 1px; padding: 4px 10px; }
+.editor-more-dropdown {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.15);
+  min-width: 160px;
+  z-index: 200;
+  overflow: hidden;
+}
+.editor-more-item {
+  display: block;
+  width: 100%;
+  padding: 12px 16px;
+  text-align: left;
+  background: none;
+  border: none;
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.editor-more-item:not(:last-child) { border-bottom: 1px solid var(--line); }
+.editor-more-item:active { background: var(--surface); }
+
 .customer-link-btn {
   background: #fffbeb;
   color: var(--ink);
@@ -157,13 +191,13 @@ body.dark-mode .customer-link-btn { background: #2d2a1e; border-color: #78600a; 
 
 /* Date-insert popover */
 .date-popover {
-  position: absolute;
+  position: fixed;
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--radius);
   padding: 10px;
   box-shadow: 0 6px 18px rgba(0,0,0,0.12);
-  z-index: 50;
+  z-index: 300;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -304,12 +338,16 @@ body.dark-mode .customer-link-btn { background: #2d2a1e; border-color: #78600a; 
   border: 1px solid var(--line);
   border-radius: 999px;
   background: var(--bg);
-  font-size: 14px;
+  font-size: 16px; /* 16px minimum prevents iOS Safari auto-zoom on focus */
   color: var(--ink);
   outline: none;
   -webkit-appearance: none;
 }
 .search-input:focus { border-color: var(--accent); background: var(--surface); }
+input[type="search"]::-webkit-search-cancel-button {
+  -webkit-appearance: searchfield-cancel-button;
+  cursor: pointer;
+}
 
 /* Segmented sort buttons */
 .sort-group {

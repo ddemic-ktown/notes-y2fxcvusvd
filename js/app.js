@@ -2,7 +2,7 @@
 import { Storage } from "./storage.js";
 import { auth, googleProvider, signInWithPopup, signOut, onAuthStateChanged } from "./firebase-init.js";
 
-const APP_VERSION = 'v49';
+const APP_VERSION = 'v51';
 
 // ---------- DOM refs ----------
 const listView = document.getElementById('list-view');
@@ -36,6 +36,7 @@ const customerNotesBackBtn = document.getElementById('customer-notes-back-btn');
 const sortAlphaBtn = document.getElementById('sort-alpha');
 const sortRecentBtn = document.getElementById('sort-recent');
 const customerSearchInput = document.getElementById('customer-search');
+const homeSearchInput = document.getElementById('home-search-input');
 const settingsBtn = document.getElementById('settings-btn');
 const recentCountInput = document.getElementById('setting-recent-count');
 const aggregatorCountInput = document.getElementById('setting-aggregator-count');
@@ -51,6 +52,8 @@ const checkboxBtn = document.getElementById('checkbox-btn');
 const customerLinkBtn = document.getElementById('customer-link-btn');
 const dateTodayBtn = document.getElementById('date-today-btn');
 const datePickerBtn = document.getElementById('date-picker-btn');
+const editorMoreBtn = document.getElementById('editor-more-btn');
+const editorMoreDropdown = document.getElementById('editor-more-dropdown');
 const datePopover = document.getElementById('date-picker-popover');
 const datePickerInput = document.getElementById('date-picker-input');
 const noteSearchInput = document.getElementById('note-search-input');
@@ -175,6 +178,7 @@ async function setCustomerSort(v) {
 }
 
 let customerSearchTerm = '';
+let homeSearchTerm = '';
 
 // ---------- editor state ----------
 let currentId = null;
@@ -395,8 +399,8 @@ function showEditor(record, type, cursorHint) {
   noteSearchCount.style.display = showNoteOnly ? '' : 'none';
   searchPrevBtn.style.display = showNoteOnly ? '' : 'none';
   searchNextBtn.style.display = showNoteOnly ? '' : 'none';
-  dateTodayBtn.style.display = showNoteOnly ? '' : 'none';
-  datePickerBtn.style.display = showNoteOnly ? '' : 'none';
+  if (editorMoreBtn) editorMoreBtn.closest('.editor-more-wrap').style.display = showNoteOnly ? '' : 'none';
+  closeMoreDropdown();
   closeDatePopover();
 
   const sameAsBack = returnScreen === 'customer-notes'
@@ -415,6 +419,8 @@ function showEditor(record, type, cursorHint) {
   deleteBtn.style.display = (type === 'note' && currentIsDefault) ? 'none' : '';
   const assignBtnEl = document.getElementById('assign-btn');
   if (assignBtnEl) assignBtnEl.hidden = (Storage.getRole() !== 'admin' || type !== 'note');
+  const assignCustomerBtnEl = document.getElementById('assign-customer-btn');
+  if (assignCustomerBtnEl) assignCustomerBtnEl.hidden = !(type === 'note' && !record.customerId);
 
   hideAllScreens();
   editorView.classList.add('active');
@@ -468,8 +474,69 @@ function returnFromEditor() {
   else showNotes();
 }
 
+// ---------- home search ----------
+function noteMatchesSearch(note, words) {
+  const haystack = (note.body || '').toLowerCase();
+  return words.every(w => haystack.includes(w));
+}
+
+function renderHomeSearchResults(term) {
+  const words = term.trim().toLowerCase().split(/\s+/).filter(w => w.length > 0);
+  if (words.length === 0) { renderNotesList(); return; }
+
+  // Collect all notes (general + customer)
+  const allNotes = Storage.listAllNotes ? Storage.listAllNotes() : [
+    ...Storage.listNotes(),
+    ...Storage.listCustomers().flatMap(c => Storage.listNotesByCustomer(c.id)),
+  ];
+
+  const results = allNotes.filter(n => noteMatchesSearch(n, words));
+
+  if (results.length === 0) {
+    notesList.innerHTML = `<p class="empty-state">No notes match "${escapeHtml(term)}".</p>`;
+    return;
+  }
+
+  notesList.innerHTML = results.map(n => {
+    const { title, body } = splitTitleAndBody(n.body);
+    const safeTitle = title.trim()
+      ? escapeHtml(title)
+      : '<span style="color:var(--ink-soft);font-style:italic">Untitled</span>';
+    const firstBodyLine = (body.split('\n').find(l => l.trim() !== '') || '').trim();
+    const safePreview = firstBodyLine ? escapeHtml(firstBodyLine) : '';
+    let customerTag = '';
+    if (n.customerId) {
+      const def = Storage.getDefaultNoteForCustomer(n.customerId);
+      const name = def ? (splitTitleAndBody(def.body).title || '').trim() : '';
+      customerTag = `<span class="customer-tag">${escapeHtml(name || 'Unnamed customer')}</span>`;
+    }
+    return `
+      <article class="note-card" data-id="${n.id}" data-kind="note">
+        ${customerTag}
+        <div class="note-head">
+          <p class="note-title">${safeTitle}</p>
+          <span class="note-date">${formatDateTime(n.updated)}</span>
+        </div>
+        ${safePreview ? `<p class="note-preview">${safePreview}</p>` : ''}
+      </article>
+    `;
+  }).join('');
+
+  notesList.querySelectorAll('.note-card').forEach(card => {
+    card.addEventListener('click', () => {
+      const note = Storage.getNote(card.dataset.id);
+      if (note) {
+        returnScreen = note.customerId ? 'customer-notes' : 'notes';
+        if (note.customerId) activeCustomerId = note.customerId;
+        showEditor(note, 'note');
+      }
+    });
+  });
+}
+
 // ---------- list rendering ----------
 function renderNotesList() {
+  if (homeSearchTerm.trim()) { renderHomeSearchResults(homeSearchTerm); return; }
   if (!Storage.isReady()) {
     notesList.innerHTML = '<p class="empty-state" style="font-style:normal">Loading your data…</p>';
     return;
@@ -640,7 +707,8 @@ function customerMatchesSearch(c, term) {
   if (!term) return true;
   const def = Storage.getDefaultNoteForCustomer(c.id);
   const haystack = (def ? def.body : '').toLowerCase();
-  return haystack.includes(term);
+  const words = term.split(/\s+/).filter(w => w.length > 0);
+  return words.every(w => haystack.includes(w));
 }
 
 function renderCustomersList() {
@@ -738,6 +806,8 @@ settingsBtn.addEventListener('click', showSettings);
 function goHome() {
   activeCustomerId = null;
   activeKeyword = null;
+  homeSearchTerm = '';
+  if (homeSearchInput) homeSearchInput.value = '';
   showNotes();
 }
 document.querySelectorAll('.home-btn').forEach(btn => {
@@ -851,6 +921,11 @@ customerSearchInput.addEventListener('input', () => {
   renderCustomersList();
 });
 
+homeSearchInput.addEventListener('input', () => {
+  homeSearchTerm = homeSearchInput.value;
+  renderNotesList();
+});
+
 sortAlphaBtn.addEventListener('click', async () => {
   if (getCustomerSort() === 'alpha') return;
   await setCustomerSort('alpha');
@@ -884,20 +959,32 @@ function insertDateAtCursor(dateStr) {
   scheduleSave();
 }
 function openDatePopover() {
-  const rect = datePickerBtn.getBoundingClientRect();
+  // Position relative to the always-visible ⋯ button (datePickerBtn is inside the dropdown and may be hidden)
+  const anchor = editorMoreBtn || datePickerBtn;
+  const rect = anchor.getBoundingClientRect();
   datePopover.style.top = `${rect.bottom + 4}px`;
   datePopover.style.right = `${window.innerWidth - rect.right}px`;
   datePopover.style.left = 'auto';
   datePickerInput.value = '';
   datePopover.hidden = false;
-  setTimeout(() => {
-    datePickerInput.focus();
-    if (typeof datePickerInput.showPicker === 'function') {
-      try { datePickerInput.showPicker(); } catch (e) {}
-    }
-  }, 30);
+  // Just focus the input — user taps it to open the native date picker on iOS/Android
+  setTimeout(() => datePickerInput.focus(), 30);
 }
 function closeDatePopover() { datePopover.hidden = true; }
+
+function closeMoreDropdown() { if (editorMoreDropdown) editorMoreDropdown.hidden = true; }
+function toggleMoreDropdown() {
+  if (!editorMoreDropdown) return;
+  editorMoreDropdown.hidden = !editorMoreDropdown.hidden;
+}
+if (editorMoreBtn) editorMoreBtn.addEventListener('click', (e) => {
+  e.stopPropagation();
+  toggleMoreDropdown();
+});
+// Close dropdown when any item inside it is clicked
+if (editorMoreDropdown) editorMoreDropdown.addEventListener('click', () => {
+  closeMoreDropdown();
+});
 
 dateTodayBtn.addEventListener('click', () => {
   insertDateAtCursor(formatDateForInsert(new Date()));
@@ -914,10 +1001,12 @@ datePickerInput.addEventListener('change', () => {
   closeDatePopover();
 });
 document.addEventListener('click', (e) => {
-  if (datePopover.hidden) return;
-  if (datePopover.contains(e.target)) return;
-  if (e.target === datePickerBtn) return;
-  closeDatePopover();
+  if (!datePopover.hidden) {
+    if (!datePopover.contains(e.target) && e.target !== datePickerBtn) closeDatePopover();
+  }
+  if (editorMoreDropdown && !editorMoreDropdown.hidden) {
+    if (!editorMoreDropdown.contains(e.target) && e.target !== editorMoreBtn) closeMoreDropdown();
+  }
 });
 
 const highlightEl = document.getElementById('editor-body-highlight');
@@ -926,15 +1015,19 @@ function renderHighlights() {
   if (!highlightEl) return;
   const term = noteSearchInput.value;
   const body = bodyInput.value;
-  if (!term || searchMatches.length === 0) {
+  // Only highlight body matches (title matches are shown via selection on the title input)
+  const bodyMatches = searchMatches.filter(m => !m.inTitle);
+  if (!term || bodyMatches.length === 0) {
     highlightEl.innerHTML = '';
     return;
   }
   let html = '';
   let last = 0;
-  searchMatches.forEach((m, idx) => {
+  bodyMatches.forEach((m, idx) => {
+    // searchIndex may point to a title match — find the current body match index
+    const globalIdx = searchMatches.indexOf(m);
     html += escapeHtml(body.substring(last, m.start));
-    const cls = idx === searchIndex ? 'current-match' : '';
+    const cls = globalIdx === searchIndex ? 'current-match' : '';
     html += `<mark class="${cls}">${escapeHtml(body.substring(m.start, m.end))}</mark>`;
     last = m.end;
   });
@@ -946,12 +1039,21 @@ function renderHighlights() {
 function findMatches(term) {
   searchMatches = [];
   if (!term) return;
-  const body = bodyInput.value;
   const termLower = term.toLowerCase();
-  const bodyLower = body.toLowerCase();
+  // Search title
+  const title = titleInput.value;
+  const titleLower = title.toLowerCase();
   let i = 0;
+  while ((i = titleLower.indexOf(termLower, i)) !== -1) {
+    searchMatches.push({ start: i, end: i + term.length, inTitle: true });
+    i += Math.max(term.length, 1);
+  }
+  // Search body
+  const body = bodyInput.value;
+  const bodyLower = body.toLowerCase();
+  i = 0;
   while ((i = bodyLower.indexOf(termLower, i)) !== -1) {
-    searchMatches.push({ start: i, end: i + term.length });
+    searchMatches.push({ start: i, end: i + term.length, inTitle: false });
     i += Math.max(term.length, 1);
   }
 }
@@ -965,12 +1067,17 @@ function gotoMatch(index) {
   const n = searchMatches.length;
   searchIndex = ((index % n) + n) % n;
   const m = searchMatches[searchIndex];
-  bodyInput.setSelectionRange(m.start, m.end);
-  const before = bodyInput.value.substring(0, m.start);
-  const lineHeight = parseFloat(getComputedStyle(bodyInput).lineHeight) || 22;
-  const lineCount = (before.match(/\n/g) || []).length;
-  const target = lineCount * lineHeight - bodyInput.clientHeight / 2 + lineHeight;
-  bodyInput.scrollTop = Math.max(0, target);
+  if (m.inTitle) {
+    titleInput.focus();
+    titleInput.setSelectionRange(m.start, m.end);
+  } else {
+    bodyInput.setSelectionRange(m.start, m.end);
+    const before = bodyInput.value.substring(0, m.start);
+    const lineHeight = parseFloat(getComputedStyle(bodyInput).lineHeight) || 22;
+    const lineCount = (before.match(/\n/g) || []).length;
+    const target = lineCount * lineHeight - bodyInput.clientHeight / 2 + lineHeight;
+    bodyInput.scrollTop = Math.max(0, target);
+  }
   updateSearchCount();
   renderHighlights();
 }
@@ -1219,6 +1326,57 @@ function openAssignModal() {
 if (assignBtn) assignBtn.addEventListener('click', openAssignModal);
 if (assignModalClose) assignModalClose.addEventListener('click', () => { assignModal.hidden = true; });
 if (assignModal) assignModal.addEventListener('click', (e) => { if (e.target === assignModal) assignModal.hidden = true; });
+
+// ---------- assign to customer ----------
+const assignCustomerModal = document.getElementById('assign-customer-modal');
+const assignCustomerModalClose = document.getElementById('assign-customer-modal-close');
+const assignCustomerSearch = document.getElementById('assign-customer-search');
+const assignCustomerList = document.getElementById('assign-customer-list');
+const assignCustomerBtn = document.getElementById('assign-customer-btn');
+
+function renderAssignCustomerList(filter) {
+  const words = (filter || '').trim().toLowerCase().split(/\s+/).filter(w => w.length > 0);
+  const customers = Storage.listCustomers().filter(c => {
+    if (!words.length) return true;
+    const def = Storage.getDefaultNoteForCustomer(c.id);
+    const haystack = (def ? def.body : '').toLowerCase();
+    return words.every(w => haystack.includes(w));
+  });
+  if (!assignCustomerList) return;
+  if (customers.length === 0) {
+    assignCustomerList.innerHTML = '<li style="padding:10px;font-size:14px;color:var(--ink-soft)">No customers found.</li>';
+    return;
+  }
+  assignCustomerList.innerHTML = customers.map(c => {
+    const def = Storage.getDefaultNoteForCustomer(c.id);
+    const name = def ? (splitTitleAndBody(def.body).title || '').trim() : '';
+    const display = name || 'Unnamed customer';
+    return `<li class="assign-customer-item" data-id="${c.id}" style="padding:12px 16px;cursor:pointer;font-size:15px;border-bottom:1px solid var(--line);">${escapeHtml(display)}</li>`;
+  }).join('');
+  assignCustomerList.querySelectorAll('.assign-customer-item').forEach(item => {
+    item.addEventListener('click', () => {
+      if (!currentId) return;
+      commitSave();
+      Storage.assignNoteToCustomer(currentId, item.dataset.id);
+      assignCustomerModal.hidden = true;
+      currentId = null; currentType = null; currentIsDefault = false;
+      activeCustomerId = item.dataset.id;
+      returnScreen = 'customer-notes';
+      showCustomerNotes(item.dataset.id);
+    });
+  });
+}
+
+if (assignCustomerBtn) assignCustomerBtn.addEventListener('click', () => {
+  if (!assignCustomerModal) return;
+  if (assignCustomerSearch) assignCustomerSearch.value = '';
+  renderAssignCustomerList('');
+  assignCustomerModal.hidden = false;
+  setTimeout(() => { if (assignCustomerSearch) assignCustomerSearch.focus(); }, 50);
+});
+if (assignCustomerModalClose) assignCustomerModalClose.addEventListener('click', () => { assignCustomerModal.hidden = true; });
+if (assignCustomerModal) assignCustomerModal.addEventListener('click', (e) => { if (e.target === assignCustomerModal) assignCustomerModal.hidden = true; });
+if (assignCustomerSearch) assignCustomerSearch.addEventListener('input', () => renderAssignCustomerList(assignCustomerSearch.value));
 
 if (assignSaveBtn) {
   assignSaveBtn.addEventListener('click', () => {

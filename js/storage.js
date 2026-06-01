@@ -169,6 +169,11 @@ export const Storage = {
       .filter(n => !n.customerId)
       .sort((a, b) => new Date(b.updated).getTime() - new Date(a.updated).getTime());
   },
+  listAllNotes() {
+    return _cache.notes
+      .slice()
+      .sort((a, b) => new Date(b.updated).getTime() - new Date(a.updated).getTime());
+  },
   listNotesByCustomer(customerId) {
     const all = _cache.notes.filter(n => n.customerId === customerId);
     const defaults = all.filter(n => n.isDefault);
@@ -216,6 +221,16 @@ export const Storage = {
     _cache.notes = _cache.notes.filter(n => n.id !== id);
     emit();
     deleteDoc(doc(notesCol(), id)).catch(err => console.warn("deleteNote", err));
+  },
+
+  assignNoteToCustomer(noteId, customerId) {
+    const i = _cache.notes.findIndex(n => n.id === noteId);
+    if (i === -1) return null;
+    const next = { ..._cache.notes[i], customerId, updated: nowIso() };
+    _cache.notes[i] = next;
+    emit();
+    setDoc(doc(notesCol(), noteId), stripId(next)).catch(err => console.warn("assignNoteToCustomer", err));
+    return next;
   },
 
   ensureDefaultNoteForCustomer(customerId) {

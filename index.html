@@ -23,10 +23,13 @@
 
   <!-- LIST VIEW -->
   <section id="list-view" class="screen active">
-    <header class="app-header">
-      <h1>Company Organizer Ninja</h1>
-      <span id="app-version" class="app-version" style="margin-left:auto"></span>
-      <button id="settings-btn" class="icon-btn" aria-label="Settings">⚙</button>
+    <header class="app-header home-header">
+      <div class="home-header-top">
+        <h1>Company Organizer Ninja</h1>
+        <span id="app-version" class="app-version"></span>
+        <button id="settings-btn" class="icon-btn" aria-label="Settings">⚙</button>
+      </div>
+      <input id="home-search-input" class="search-input home-search-input" type="search" placeholder="Search all notes…" autocomplete="off" />
     </header>
     <main id="notes-list" class="notes-list">
       <p class="empty-state">No notes yet. Tap <strong>+</strong> to add one.</p>
@@ -167,10 +170,16 @@
         <button id="editor-home-btn" class="icon-btn date-btn" aria-label="Home">Home</button>
         <button id="back-btn" class="icon-btn date-btn back-btn" aria-label="Back">Back</button>
         <button id="customer-link-btn" class="customer-link-btn" aria-label="Go to customer notes" hidden></button>
-        <button id="date-today-btn" class="icon-btn date-btn" aria-label="Insert today's date">Today</button>
-        <button id="date-picker-btn" class="icon-btn date-btn" aria-label="Pick a date to insert">Date…</button>
         <button id="delete-btn" class="icon-btn danger" aria-label="Delete note">🗑</button>
-        <button id="assign-btn" class="icon-btn date-btn" aria-label="Assign users" hidden>Assign</button>
+        <div class="editor-more-wrap">
+          <button id="editor-more-btn" class="icon-btn date-btn editor-more-btn" aria-label="More options">⋯</button>
+          <div id="editor-more-dropdown" class="editor-more-dropdown" hidden>
+            <button id="date-today-btn" class="editor-more-item" aria-label="Insert today's date">Today's date</button>
+            <button id="date-picker-btn" class="editor-more-item" aria-label="Pick a date to insert">Pick a date…</button>
+            <button id="assign-btn" class="editor-more-item" aria-label="Assign users" hidden>Assign users</button>
+            <button id="assign-customer-btn" class="editor-more-item" aria-label="Assign to customer" hidden>Assign to customer</button>
+          </div>
+        </div>
       </div>
       <div class="editor-row editor-row-tools">
         <input id="note-search-input" class="search-input note-search-input" type="search" placeholder="Find in note" autocomplete="off" />
@@ -202,6 +211,18 @@
       <p class="muted" style="font-size:13px; margin:0 0 12px;">Select who can see this note. Admins always have access.</p>
       <ul id="assign-members-list" class="members-list"></ul>
       <button id="assign-save-btn" class="primary" style="margin-top:14px; width:100%; padding:10px; border:none; border-radius:var(--radius); font-weight:600; font-size:15px; cursor:pointer; background:var(--accent); color:var(--accent-ink);">Save</button>
+    </div>
+  </div>
+
+  <!-- Assign to Customer Modal -->
+  <div id="assign-customer-modal" class="modal-overlay" hidden>
+    <div class="modal-panel">
+      <div class="modal-header">
+        <h2 class="modal-title">Assign to customer</h2>
+        <button id="assign-customer-modal-close" class="icon-btn" aria-label="Close">✕</button>
+      </div>
+      <input id="assign-customer-search" class="search-input" type="search" placeholder="Search customers…" autocomplete="off" style="margin-bottom:10px;" />
+      <ul id="assign-customer-list" class="members-list"></ul>
     </div>
   </div>
 
