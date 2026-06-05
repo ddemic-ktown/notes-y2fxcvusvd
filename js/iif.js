@@ -181,16 +181,29 @@ export function parseHoursNote(text, customers, employees) {
     }
     cleaned = cleaned.replace(/\band\b/gi, '').trim();
 
-    // Extract time range
+    // Extract all time ranges (e.g. "9.15-3.05, 3.05-4.40") and sum them
     let hours = null;
     let hoursConfidence = 1.0;
-    const trMatch = cleaned.match(/([\d.:]+(?:am|pm)?)\s*[-–]\s*([\d.:]+(?:am|pm)?)/i);
-    if (trMatch) {
-      hours = parseTimeRange(trMatch[0]);
-      cleaned = cleaned.replace(trMatch[0], '').trim();
+    const timeRangeRe = /([\d.:]+(?:am|pm)?)\s*[-–]\s*([\d.:]+(?:am|pm)?)/gi;
+    let trMatch;
+    let totalHours = 0;
+    let foundRanges = false;
+    const usedRanges = [];
+    while ((trMatch = timeRangeRe.exec(cleaned)) !== null) {
+      const rangeHours = parseTimeRange(trMatch[0]);
+      if (rangeHours !== null && rangeHours > 0) {
+        totalHours += rangeHours;
+        usedRanges.push(trMatch[0]);
+        foundRanges = true;
+      }
+    }
+    if (foundRanges) {
+      hours = Math.round(totalHours * 100) / 100;
+      for (const r of usedRanges) cleaned = cleaned.replace(r, '');
+      cleaned = cleaned.trim();
     }
 
-    // Extract duration
+    // Extract duration (e.g. "3.5hrs")
     if (hours === null) {
       const durMatch = cleaned.match(/([\d.]+\s*hrs?)/i);
       if (durMatch) {

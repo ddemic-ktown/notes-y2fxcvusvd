@@ -3,7 +3,7 @@ import { Storage } from "./storage.js";
 import { auth, googleProvider, signInWithPopup, signOut, onAuthStateChanged } from "./firebase-init.js";
 import { parseHoursNote, generateIIF, fuzzyMatchCustomer } from "./iif.js";
 
-const APP_VERSION = 'v61';
+const APP_VERSION = 'v62';
 
 // ---------- DOM refs ----------
 const listView = document.getElementById('list-view');
@@ -374,6 +374,7 @@ function showNotes() {
   listView.classList.add('active');
   renderNotesList();
   history.replaceState({ screen: 'home' }, '');
+  window.scrollTo(0, 0);
   if (swReg) swReg.update().catch(() => {});
 }
 
