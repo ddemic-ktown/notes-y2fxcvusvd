@@ -93,8 +93,18 @@
         <label for="setting-aggregator-count">Number of aggregator notes on home screen</label>
         <div class="stepper">
           <button class="stepper-btn" id="aggregator-count-down">−</button>
-          <input id="setting-aggregator-count" type="number" min="0" max="50" />
+          <input id="setting-aggregator-count" type="number" min="0" />
           <button class="stepper-btn" id="aggregator-count-up">+</button>
+        </div>
+      </div>
+
+      <div class="setting-row">
+        <label for="setting-general-notes-count">Number of recent general notes on home screen</label>
+        <p class="muted" style="font-size:13px;margin:2px 0 6px;">Extra notes appear at the bottom of the home screen.</p>
+        <div class="stepper">
+          <button class="stepper-btn" id="general-notes-count-down">−</button>
+          <input id="setting-general-notes-count" type="number" min="0" />
+          <button class="stepper-btn" id="general-notes-count-up">+</button>
         </div>
       </div>
 
@@ -189,6 +199,7 @@
             <label id="date-picker-btn" class="editor-more-item" aria-label="Pick a date to insert" style="cursor:pointer;">Pick a date…<input id="date-picker-input" type="date" style="position:absolute;opacity:0;pointer-events:none;width:1px;height:1px;" /></label>
             <button id="assign-btn" class="editor-more-item" aria-label="Assign users" hidden>Assign users</button>
             <button id="assign-customer-btn" class="editor-more-item" aria-label="Assign to customer" hidden>Assign to customer</button>
+            <button id="editor-iif-btn" class="editor-more-item" aria-label="Generate IIF file" hidden>Generate IIF file</button>
           </div>
         </div>
       </div>
@@ -224,15 +235,29 @@
 
   <!-- IIF Generator Modal -->
   <div id="iif-modal" class="modal-overlay" hidden>
-    <div class="modal-panel" style="max-width:520px;width:95vw;max-height:85vh;display:flex;flex-direction:column;">
+    <div class="modal-panel iif-modal-panel">
       <div class="modal-header">
         <h2 class="modal-title">Generate IIF File</h2>
         <button id="iif-modal-close" class="icon-btn" aria-label="Close">✕</button>
       </div>
-      <div id="iif-status" style="font-size:13px;color:var(--ink-soft);margin-bottom:10px;"></div>
-      <div id="iif-entries" style="flex:1;overflow-y:auto;margin-bottom:12px;"></div>
-      <div style="display:flex;gap:8px;flex-shrink:0;">
-        <button id="iif-download-btn" class="primary" style="flex:1;padding:10px;border:none;border-radius:var(--radius);font-weight:600;font-size:15px;cursor:pointer;background:var(--accent);color:var(--accent-ink);" hidden>Download .iif</button>
+      <div id="iif-status" class="iif-status"></div>
+      <div id="iif-entries" class="iif-table-wrap">
+        <table class="iif-table">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Employees</th>
+              <th>Customer</th>
+              <th>Hours</th>
+              <th>Score</th>
+            </tr>
+          </thead>
+          <tbody id="iif-table-body"></tbody>
+        </table>
+      </div>
+      <div class="iif-footer">
+        <span id="iif-review-note" class="iif-review-note"></span>
+        <button id="iif-download-btn" class="primary iif-download-btn" hidden>Download .iif</button>
       </div>
     </div>
   </div>

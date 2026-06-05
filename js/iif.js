@@ -122,7 +122,9 @@ export function parseHoursNote(text, customerNames) {
   let activeEmployees = [];
 
   for (const rawLine of lines) {
-    const line = rawLine.trim();
+    // Strip inline comments (// and everything after)
+    const uncommented = rawLine.replace(/\/\/.*$/, '');
+    const line = uncommented.trim();
     if (!line) continue;
 
     const stripped = line.replace(/^[-•*]\s*/, '').trim();
@@ -216,7 +218,7 @@ export function parseHoursNote(text, customerNames) {
       hours: hours || 0,
       hoursFormatted: hours ? formatDuration(hours) : '',
       confidence,
-      raw: rawLine,
+      raw: rawLine.trim(),
       needsReview,
       issue,
     });

@@ -3,7 +3,7 @@ import { Storage } from "./storage.js";
 import { auth, googleProvider, signInWithPopup, signOut, onAuthStateChanged } from "./firebase-init.js";
 import { parseHoursNote, generateIIF, fuzzyMatchCustomer } from "./iif.js";
 
-const APP_VERSION = 'v57';
+const APP_VERSION = 'v59';
 
 // ---------- DOM refs ----------
 const listView = document.getElementById('list-view');
@@ -41,6 +41,7 @@ const homeSearchInput = document.getElementById('home-search-input');
 const settingsBtn = document.getElementById('settings-btn');
 const recentCountInput = document.getElementById('setting-recent-count');
 const aggregatorCountInput = document.getElementById('setting-aggregator-count');
+const generalNotesCountInput = document.getElementById('setting-general-notes-count');
 const pinnedOrderListEl = document.getElementById('pinned-order-list');
 const keywordInput = document.getElementById('keyword-input');
 const keywordAddBtn = document.getElementById('keyword-add-btn');
@@ -116,8 +117,15 @@ async function setRecentCount(n) { await Storage.setSetting('recentCount', n); }
 function getAggregatorCount() {
   const n = parseInt(Storage.getSettings().aggregatorCount, 10);
   if (Number.isNaN(n) || n < 0) return 4;
-  return Math.min(n, 50);
+  return n;
 }
+
+function getGeneralNotesCount() {
+  const n = parseInt(Storage.getSettings().generalNotesCount, 10);
+  if (Number.isNaN(n) || n < 0) return 5;
+  return n;
+}
+async function setGeneralNotesCount(n) { await Storage.setSetting('generalNotesCount', n); }
 async function setAggregatorCount(n) { await Storage.setSetting('aggregatorCount', n); }
 
 function getPinnedOrder() {
@@ -306,6 +314,7 @@ function showSettings() {
   hideAllScreens();
   recentCountInput.value = getRecentCount();
   aggregatorCountInput.value = getAggregatorCount();
+  if (generalNotesCountInput) generalNotesCountInput.value = getGeneralNotesCount();
   renderPinnedOrderList();
   renderKeywordList();
   if (accountEmailEl && auth.currentUser) accountEmailEl.textContent = auth.currentUser.email || '';
@@ -420,6 +429,11 @@ function showEditor(record, type, cursorHint) {
   if (assignBtnEl) assignBtnEl.hidden = (Storage.getRole() !== 'admin' || type !== 'note');
   const assignCustomerBtnEl = document.getElementById('assign-customer-btn');
   if (assignCustomerBtnEl) assignCustomerBtnEl.hidden = !(type === 'note' && !record.customerId);
+  const editorIifBtnEl = document.getElementById('editor-iif-btn');
+  if (editorIifBtnEl) {
+    const isHoursNote = type === 'note' && (splitTitleAndBody(record.body).title || '').trim().toLowerCase() === 'hours';
+    editorIifBtnEl.hidden = !isHoursNote;
+  }
 
   hideAllScreens();
   editorView.classList.add('active');
@@ -598,12 +612,20 @@ function renderNotesList() {
     `;
   }).join('');
 
+  const generalLimit = getGeneralNotesCount();
+  const recentNotes = notes.slice(0, generalLimit);
+  const olderNotes = notes.slice(generalLimit);
+
   let notesHtml = '';
   if (notes.length === 0) {
     notesHtml = '<p class="empty-state">No notes yet. Tap <strong>+</strong> to add one.</p>';
   } else {
-    notesHtml = notes.map(n => renderNoteCard(n)).join('');
+    notesHtml = recentNotes.map(n => renderNoteCard(n)).join('');
   }
+
+  const olderHtml = olderNotes.length > 0
+    ? `<p class="section-label">Older general notes:</p>` + olderNotes.map(n => renderNoteCard(n)).join('')
+    : '';
 
   const sectionLabel = (text) => `<p class="section-label">${text}</p>`;
   const pinnedBlock = getPinnedOrder().map(key => {
@@ -612,7 +634,7 @@ function renderNotesList() {
     if (key === 'notes') return sectionLabel('General Notes:') + notesHtml;
     return '';
   }).join('');
-  notesList.innerHTML = customersCard + pinnedBlock;
+  notesList.innerHTML = customersCard + pinnedBlock + olderHtml;
 
   notesList.querySelectorAll('.note-card').forEach(card => {
     card.addEventListener('click', () => {
@@ -824,7 +846,6 @@ aggregatorCountInput.addEventListener('input', () => {
   let n = parseInt(aggregatorCountInput.value, 10);
   if (Number.isNaN(n)) return;
   if (n < 0) n = 0;
-  if (n > 50) n = 50;
   setAggregatorCount(n);
 });
 aggregatorCountInput.addEventListener('blur', () => { aggregatorCountInput.value = getAggregatorCount(); });
@@ -834,8 +855,26 @@ document.getElementById('aggregator-count-down').addEventListener('click', () =>
   setAggregatorCount(n); aggregatorCountInput.value = n;
 });
 document.getElementById('aggregator-count-up').addEventListener('click', () => {
-  const n = Math.min(50, getAggregatorCount() + 1);
+  const n = getAggregatorCount() + 1;
   setAggregatorCount(n); aggregatorCountInput.value = n;
+});
+
+if (generalNotesCountInput) {
+  generalNotesCountInput.addEventListener('input', () => {
+    let n = parseInt(generalNotesCountInput.value, 10);
+    if (Number.isNaN(n)) return;
+    if (n < 0) n = 0;
+    setGeneralNotesCount(n);
+  });
+  generalNotesCountInput.addEventListener('blur', () => { generalNotesCountInput.value = getGeneralNotesCount(); });
+}
+document.getElementById('general-notes-count-down').addEventListener('click', () => {
+  const n = Math.max(0, getGeneralNotesCount() - 1);
+  setGeneralNotesCount(n); if (generalNotesCountInput) generalNotesCountInput.value = n;
+});
+document.getElementById('general-notes-count-up').addEventListener('click', () => {
+  const n = getGeneralNotesCount() + 1;
+  setGeneralNotesCount(n); if (generalNotesCountInput) generalNotesCountInput.value = n;
 });
 
 keywordAddBtn.addEventListener('click', async () => {
@@ -1504,6 +1543,7 @@ function rerenderCurrent() {
   } else if (settingsView.classList.contains('active')) {
     recentCountInput.value = getRecentCount();
     aggregatorCountInput.value = getAggregatorCount();
+    if (generalNotesCountInput) generalNotesCountInput.value = getGeneralNotesCount();
     renderPinnedOrderList();
     renderKeywordList();
     renderMembersList();
@@ -1547,8 +1587,10 @@ const iifBtn = document.getElementById('iif-btn');
 const iifModal = document.getElementById('iif-modal');
 const iifModalClose = document.getElementById('iif-modal-close');
 const iifStatus = document.getElementById('iif-status');
-const iifEntries = document.getElementById('iif-entries');
+const iifTableBody = document.getElementById('iif-table-body');
 const iifDownloadBtn = document.getElementById('iif-download-btn');
+const iifReviewNote = document.getElementById('iif-review-note');
+const editorIifBtn = document.getElementById('editor-iif-btn');
 
 let iifParsedEntries = [];
 
@@ -1573,40 +1615,34 @@ function confidenceColor(score) {
 }
 
 function renderIIFEntries(entries) {
+  if (!iifTableBody) return;
   if (!entries.length) {
-    iifEntries.innerHTML = '<p style="color:var(--ink-soft);font-size:14px;">No entries found.</p>';
+    iifTableBody.innerHTML = '<tr><td colspan="5" style="padding:16px;color:var(--ink-soft);text-align:center;">No entries found.</td></tr>';
     return;
   }
 
-  iifEntries.innerHTML = entries.map((e, idx) => {
-    const bg = e.needsReview ? 'background:#fff7ed;border-color:#fed7aa;' : '';
-    const empLabel = e.employees.join(' + ') || '?';
+  iifTableBody.innerHTML = entries.map((e, idx) => {
+    const empLabel = e.employees.join(' + ') || '<span style="color:#dc2626">?</span>';
+    const scoreColor = confidenceColor(e.confidence);
+    const rowClass = e.needsReview ? 'iif-needs-review' : '';
+    const issueIcon = e.issue ? `<br><span style="font-size:10px;color:#d97706;">⚠ ${escapeHtml(e.issue)}</span>` : '';
     return `
-      <div class="iif-entry ${e.needsReview ? 'iif-needs-review' : ''}" data-idx="${idx}" style="border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin-bottom:8px;${bg}">
-        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:6px;">
-          <span style="font-size:12px;color:var(--ink-soft);">${e.dateFormatted || '?'} · ${empLabel}</span>
-          <span style="font-size:11px;font-weight:600;color:${confidenceColor(e.confidence)};flex-shrink:0;">${e.confidence}%</span>
-        </div>
-        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-          <input class="iif-customer-input" data-idx="${idx}" value="${escapeHtml(e.customerMatched)}" placeholder="Customer name"
-            style="flex:1;min-width:120px;padding:5px 8px;border:1px solid var(--line);border-radius:6px;font-size:13px;background:var(--bg);color:var(--ink);" />
-          <input class="iif-hours-input" data-idx="${idx}" value="${e.hoursFormatted || ''}" placeholder="H:MM"
-            style="width:60px;padding:5px 8px;border:1px solid var(--line);border-radius:6px;font-size:13px;background:var(--bg);color:var(--ink);text-align:center;" />
-        </div>
-        ${e.issue ? `<p style="font-size:11px;color:#d97706;margin:4px 0 0;">⚠ ${escapeHtml(e.issue)}</p>` : ''}
-        <p style="font-size:11px;color:var(--ink-soft);margin:4px 0 0;font-style:italic;">${escapeHtml(e.raw.trim())}</p>
-      </div>
+      <tr class="${rowClass}" title="${escapeHtml(e.raw)}">
+        <td style="white-space:nowrap;">${e.dateFormatted || '?'}</td>
+        <td style="white-space:nowrap;">${empLabel}${issueIcon}</td>
+        <td><input class="iif-cell-input iif-customer-input" data-idx="${idx}" value="${escapeHtml(e.customerMatched)}" placeholder="Customer" /></td>
+        <td><input class="iif-cell-input iif-hours-input" data-idx="${idx}" value="${e.hoursFormatted || ''}" placeholder="H:MM" /></td>
+        <td><span class="iif-score" style="color:${scoreColor};">${e.confidence}%</span></td>
+      </tr>
     `;
   }).join('');
 
-  // Wire up editable fields
-  iifEntries.querySelectorAll('.iif-customer-input').forEach(input => {
+  iifTableBody.querySelectorAll('.iif-customer-input').forEach(input => {
     input.addEventListener('input', () => {
-      const idx = parseInt(input.dataset.idx, 10);
-      iifParsedEntries[idx].customerMatched = input.value;
+      iifParsedEntries[parseInt(input.dataset.idx, 10)].customerMatched = input.value;
     });
   });
-  iifEntries.querySelectorAll('.iif-hours-input').forEach(input => {
+  iifTableBody.querySelectorAll('.iif-hours-input').forEach(input => {
     input.addEventListener('input', () => {
       const idx = parseInt(input.dataset.idx, 10);
       const val = input.value.trim();
@@ -1619,12 +1655,13 @@ function renderIIFEntries(entries) {
   });
 }
 
-if (iifBtn) iifBtn.addEventListener('click', () => {
+function openIIFModal() {
   const note = findHoursNote();
   if (!note) {
     iifStatus.textContent = 'No note titled "hours" found. Create a general note with the title "hours" and add your work notes there.';
-    iifDownloadBtn.hidden = true;
-    iifEntries.innerHTML = '';
+    if (iifTableBody) iifTableBody.innerHTML = '';
+    if (iifDownloadBtn) iifDownloadBtn.hidden = true;
+    if (iifReviewNote) iifReviewNote.textContent = '';
     iifModal.hidden = false;
     return;
   }
@@ -1635,15 +1672,19 @@ if (iifBtn) iifBtn.addEventListener('click', () => {
 
   const reviewCount = iifParsedEntries.filter(e => e.needsReview).length;
   const total = iifParsedEntries.length;
-  iifStatus.textContent = `Found ${total} entr${total === 1 ? 'y' : 'ies'}${reviewCount ? ` · ${reviewCount} need${reviewCount === 1 ? 's' : ''} review (highlighted in orange)` : ' · all good'}.`;
+  iifStatus.textContent = `${total} entr${total === 1 ? 'y' : 'ies'} parsed from your hours note.`;
+  if (iifReviewNote) iifReviewNote.textContent = reviewCount ? `⚠ ${reviewCount} entr${reviewCount === 1 ? 'y needs' : 'ies need'} review (orange rows)` : '';
 
   renderIIFEntries(iifParsedEntries);
-  iifDownloadBtn.hidden = total === 0;
+  if (iifDownloadBtn) iifDownloadBtn.hidden = total === 0;
   iifModal.hidden = false;
-});
+}
+
+if (iifBtn) iifBtn.addEventListener('click', openIIFModal);
 
 if (iifModalClose) iifModalClose.addEventListener('click', () => { iifModal.hidden = true; });
 if (iifModal) iifModal.addEventListener('click', e => { if (e.target === iifModal) iifModal.hidden = true; });
+if (editorIifBtn) editorIifBtn.addEventListener('click', openIIFModal);
 
 if (iifDownloadBtn) iifDownloadBtn.addEventListener('click', () => {
   const iif = generateIIF(iifParsedEntries);
