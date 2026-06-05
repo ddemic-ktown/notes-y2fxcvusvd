@@ -26,30 +26,42 @@ function normalize(s) {
   return s.toLowerCase().replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
-function wordOverlapScore(a, b) {
-  const wa = normalize(a).split(' ').filter(w => w.length > 1);
-  const wb = normalize(b).split(' ').filter(w => w.length > 1);
-  if (!wa.length || !wb.length) return 0;
-  const setB = new Set(wb);
-  let overlap = 0;
-  for (const w of wa) {
-    if (setB.has(w)) { overlap++; continue; }
-    for (const w2 of wb) {
-      const dist = levenshtein(w, w2);
-      if (dist <= Math.max(1, Math.floor(Math.max(w.length, w2.length) * 0.3))) {
-        overlap += 0.7; break;
+const NOISE_WORDS = new Set(['and', 'the', 'at', 'in', 'of', 'a', 'an', 'for', 'on', 'to', 'by', 'or']);
+
+function queryWords(s) {
+  return normalize(s).split(' ').filter(w => w.length > 1 && !NOISE_WORDS.has(w));
+}
+
+// Recall-oriented: fraction of query words found in haystack
+function recallScore(qWords, haystackText) {
+  if (!qWords.length) return 0;
+  const hWords = new Set(normalize(haystackText).split(' ').filter(w => w.length > 1));
+  let matched = 0;
+  for (const w of qWords) {
+    if (hWords.has(w)) { matched++; continue; }
+    for (const hw of hWords) {
+      const dist = levenshtein(w, hw);
+      if (dist <= Math.max(1, Math.floor(Math.max(w.length, hw.length) * 0.3))) {
+        matched += 0.7; break;
       }
     }
   }
-  return overlap / Math.max(wa.length, wb.length);
+  return matched / qWords.length;
 }
 
-export function fuzzyMatchCustomer(query, customerNames) {
-  if (!customerNames.length) return { name: query, score: 0 };
-  let best = { name: customerNames[0], score: 0 };
-  for (const name of customerNames) {
-    const score = wordOverlapScore(query, name);
-    if (score > best.score) best = { name, score };
+// customers = [{ name, searchText }] where searchText includes full note body
+export function fuzzyMatchCustomer(query, customers) {
+  if (!customers.length) return { name: query, score: 0 };
+  const qw = queryWords(query);
+  if (!qw.length) return { name: customers[0].name || query, score: 0 };
+
+  let best = { name: customers[0].name || query, score: 0 };
+  for (const c of customers) {
+    const nameScore = recallScore(qw, c.name || '');
+    const fullScore = recallScore(qw, c.searchText || c.name || '');
+    // Use full-text score but give a small bonus when name alone is a strong match
+    const score = Math.max(nameScore, nameScore * 0.4 + fullScore * 0.6);
+    if (score > best.score) best = { name: c.name, score };
   }
   return best;
 }

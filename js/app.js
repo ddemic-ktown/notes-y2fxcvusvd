@@ -3,7 +3,7 @@ import { Storage } from "./storage.js";
 import { auth, googleProvider, signInWithPopup, signOut, onAuthStateChanged } from "./firebase-init.js";
 import { parseHoursNote, generateIIF, fuzzyMatchCustomer } from "./iif.js";
 
-const APP_VERSION = 'v59';
+const APP_VERSION = 'v60';
 
 // ---------- DOM refs ----------
 const listView = document.getElementById('list-view');
@@ -1597,8 +1597,10 @@ let iifParsedEntries = [];
 function getCustomerNamesList() {
   return Storage.listCustomers().map(c => {
     const def = Storage.getDefaultNoteForCustomer(c.id);
-    return def ? (splitTitleAndBody(def.body).title || '').trim() : '';
-  }).filter(n => n.length > 0);
+    const body = def ? def.body : '';
+    const name = (splitTitleAndBody(body).title || '').trim();
+    return { name, searchText: body };
+  }).filter(c => c.name.length > 0);
 }
 
 function findHoursNote() {
