@@ -162,6 +162,12 @@
       </div>
 
       <div class="setting-row">
+        <label>QuickBooks</label>
+        <p class="muted" style="font-size:13px;margin:4px 0 8px;">Parses your "hours" note and generates a .iif file for QuickBooks Desktop.</p>
+        <button id="iif-btn" class="secondary" style="margin-top:6px;">Generate IIF file</button>
+      </div>
+
+      <div class="setting-row">
         <label>Help</label>
         <button id="tutorial-btn" class="secondary" style="margin-top:6px;">Tutorial</button>
       </div>
@@ -213,6 +219,21 @@
       <p class="muted" style="font-size:13px; margin:0 0 12px;">Select who can see this note. Admins always have access.</p>
       <ul id="assign-members-list" class="members-list"></ul>
       <button id="assign-save-btn" class="primary" style="margin-top:14px; width:100%; padding:10px; border:none; border-radius:var(--radius); font-weight:600; font-size:15px; cursor:pointer; background:var(--accent); color:var(--accent-ink);">Save</button>
+    </div>
+  </div>
+
+  <!-- IIF Generator Modal -->
+  <div id="iif-modal" class="modal-overlay" hidden>
+    <div class="modal-panel" style="max-width:520px;width:95vw;max-height:85vh;display:flex;flex-direction:column;">
+      <div class="modal-header">
+        <h2 class="modal-title">Generate IIF File</h2>
+        <button id="iif-modal-close" class="icon-btn" aria-label="Close">✕</button>
+      </div>
+      <div id="iif-status" style="font-size:13px;color:var(--ink-soft);margin-bottom:10px;"></div>
+      <div id="iif-entries" style="flex:1;overflow-y:auto;margin-bottom:12px;"></div>
+      <div style="display:flex;gap:8px;flex-shrink:0;">
+        <button id="iif-download-btn" class="primary" style="flex:1;padding:10px;border:none;border-radius:var(--radius);font-weight:600;font-size:15px;cursor:pointer;background:var(--accent);color:var(--accent-ink);" hidden>Download .iif</button>
+      </div>
     </div>
   </div>
 

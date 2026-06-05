@@ -1,8 +1,9 @@
 // app.js — bootstraps auth, wires UI, and re-renders on Firestore cache updates.
 import { Storage } from "./storage.js";
 import { auth, googleProvider, signInWithPopup, signOut, onAuthStateChanged } from "./firebase-init.js";
+import { parseHoursNote, generateIIF, fuzzyMatchCustomer } from "./iif.js";
 
-const APP_VERSION = 'v56';
+const APP_VERSION = 'v57';
 
 // ---------- DOM refs ----------
 const listView = document.getElementById('list-view');
@@ -1540,6 +1541,120 @@ window.addEventListener('beforeunload', () => {
 // Display app version in the home toolbar
 const appVersionEl = document.getElementById('app-version');
 if (appVersionEl) appVersionEl.textContent = APP_VERSION;
+
+// ---------- IIF generator ----------
+const iifBtn = document.getElementById('iif-btn');
+const iifModal = document.getElementById('iif-modal');
+const iifModalClose = document.getElementById('iif-modal-close');
+const iifStatus = document.getElementById('iif-status');
+const iifEntries = document.getElementById('iif-entries');
+const iifDownloadBtn = document.getElementById('iif-download-btn');
+
+let iifParsedEntries = [];
+
+function getCustomerNamesList() {
+  return Storage.listCustomers().map(c => {
+    const def = Storage.getDefaultNoteForCustomer(c.id);
+    return def ? (splitTitleAndBody(def.body).title || '').trim() : '';
+  }).filter(n => n.length > 0);
+}
+
+function findHoursNote() {
+  return Storage.listAllNotes().find(n => {
+    const { title } = splitTitleAndBody(n.body);
+    return title.trim().toLowerCase() === 'hours';
+  });
+}
+
+function confidenceColor(score) {
+  if (score >= 80) return 'var(--color-success, #16a34a)';
+  if (score >= 50) return '#d97706';
+  return '#dc2626';
+}
+
+function renderIIFEntries(entries) {
+  if (!entries.length) {
+    iifEntries.innerHTML = '<p style="color:var(--ink-soft);font-size:14px;">No entries found.</p>';
+    return;
+  }
+
+  iifEntries.innerHTML = entries.map((e, idx) => {
+    const bg = e.needsReview ? 'background:#fff7ed;border-color:#fed7aa;' : '';
+    const empLabel = e.employees.join(' + ') || '?';
+    return `
+      <div class="iif-entry ${e.needsReview ? 'iif-needs-review' : ''}" data-idx="${idx}" style="border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin-bottom:8px;${bg}">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:6px;">
+          <span style="font-size:12px;color:var(--ink-soft);">${e.dateFormatted || '?'} · ${empLabel}</span>
+          <span style="font-size:11px;font-weight:600;color:${confidenceColor(e.confidence)};flex-shrink:0;">${e.confidence}%</span>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+          <input class="iif-customer-input" data-idx="${idx}" value="${escapeHtml(e.customerMatched)}" placeholder="Customer name"
+            style="flex:1;min-width:120px;padding:5px 8px;border:1px solid var(--line);border-radius:6px;font-size:13px;background:var(--bg);color:var(--ink);" />
+          <input class="iif-hours-input" data-idx="${idx}" value="${e.hoursFormatted || ''}" placeholder="H:MM"
+            style="width:60px;padding:5px 8px;border:1px solid var(--line);border-radius:6px;font-size:13px;background:var(--bg);color:var(--ink);text-align:center;" />
+        </div>
+        ${e.issue ? `<p style="font-size:11px;color:#d97706;margin:4px 0 0;">⚠ ${escapeHtml(e.issue)}</p>` : ''}
+        <p style="font-size:11px;color:var(--ink-soft);margin:4px 0 0;font-style:italic;">${escapeHtml(e.raw.trim())}</p>
+      </div>
+    `;
+  }).join('');
+
+  // Wire up editable fields
+  iifEntries.querySelectorAll('.iif-customer-input').forEach(input => {
+    input.addEventListener('input', () => {
+      const idx = parseInt(input.dataset.idx, 10);
+      iifParsedEntries[idx].customerMatched = input.value;
+    });
+  });
+  iifEntries.querySelectorAll('.iif-hours-input').forEach(input => {
+    input.addEventListener('input', () => {
+      const idx = parseInt(input.dataset.idx, 10);
+      const val = input.value.trim();
+      const m = val.match(/^(\d+):(\d{2})$/);
+      if (m) {
+        iifParsedEntries[idx].hours = parseInt(m[1]) + parseInt(m[2]) / 60;
+        iifParsedEntries[idx].hoursFormatted = val;
+      }
+    });
+  });
+}
+
+if (iifBtn) iifBtn.addEventListener('click', () => {
+  const note = findHoursNote();
+  if (!note) {
+    iifStatus.textContent = 'No note titled "hours" found. Create a general note with the title "hours" and add your work notes there.';
+    iifDownloadBtn.hidden = true;
+    iifEntries.innerHTML = '';
+    iifModal.hidden = false;
+    return;
+  }
+
+  const { body } = splitTitleAndBody(note.body);
+  const customerNames = getCustomerNamesList();
+  iifParsedEntries = parseHoursNote(body, customerNames);
+
+  const reviewCount = iifParsedEntries.filter(e => e.needsReview).length;
+  const total = iifParsedEntries.length;
+  iifStatus.textContent = `Found ${total} entr${total === 1 ? 'y' : 'ies'}${reviewCount ? ` · ${reviewCount} need${reviewCount === 1 ? 's' : ''} review (highlighted in orange)` : ' · all good'}.`;
+
+  renderIIFEntries(iifParsedEntries);
+  iifDownloadBtn.hidden = total === 0;
+  iifModal.hidden = false;
+});
+
+if (iifModalClose) iifModalClose.addEventListener('click', () => { iifModal.hidden = true; });
+if (iifModal) iifModal.addEventListener('click', e => { if (e.target === iifModal) iifModal.hidden = true; });
+
+if (iifDownloadBtn) iifDownloadBtn.addEventListener('click', () => {
+  const iif = generateIIF(iifParsedEntries);
+  const blob = new Blob([iif], { type: 'text/plain' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `hours-${new Date().toISOString().slice(0,10)}.iif`;
+  a.click();
+  URL.revokeObjectURL(url);
+});
 
 // ---------- tutorial ----------
 const tutorialOverlay = document.getElementById('tutorial-overlay');
