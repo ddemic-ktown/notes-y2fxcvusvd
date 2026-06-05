@@ -3,7 +3,7 @@ import { Storage } from "./storage.js";
 import { auth, googleProvider, signInWithPopup, signOut, onAuthStateChanged } from "./firebase-init.js";
 import { parseHoursNote, generateIIF, fuzzyMatchCustomer } from "./iif.js";
 
-const APP_VERSION = 'v60';
+const APP_VERSION = 'v61';
 
 // ---------- DOM refs ----------
 const listView = document.getElementById('list-view');
@@ -46,6 +46,9 @@ const pinnedOrderListEl = document.getElementById('pinned-order-list');
 const keywordInput = document.getElementById('keyword-input');
 const keywordAddBtn = document.getElementById('keyword-add-btn');
 const keywordListEl = document.getElementById('keyword-list');
+const employeeInput = document.getElementById('employee-input');
+const employeeAddBtn = document.getElementById('employee-add-btn');
+const employeeListEl = document.getElementById('employee-list');
 const importCsvInput = document.getElementById('import-csv');
 const importCsvBtn = document.getElementById('import-csv-btn');
 const importHasHeader = document.getElementById('import-has-header');
@@ -76,6 +79,45 @@ function getKeywords() {
   return Array.isArray(arr) ? arr : [];
 }
 async function setKeywords(list) { await Storage.setSetting('keywords', list); }
+
+// ---------- employees (Time Logger) ----------
+function getEmployees() {
+  const arr = Storage.getSettings().employees;
+  return Array.isArray(arr) && arr.length ? arr : ['Davor', 'Janet'];
+}
+async function setEmployees(list) { await Storage.setSetting('employees', list); }
+async function addEmployee(name) {
+  const n = (name || '').trim();
+  if (!n) return false;
+  const list = getEmployees();
+  if (list.some(e => e.toLowerCase() === n.toLowerCase())) return false;
+  const capitalized = n.charAt(0).toUpperCase() + n.slice(1).toLowerCase();
+  await setEmployees([...list, capitalized]);
+  return true;
+}
+async function removeEmployee(name) {
+  await setEmployees(getEmployees().filter(e => e !== name));
+}
+function renderEmployeeList() {
+  const list = getEmployees();
+  if (!employeeListEl) return;
+  if (list.length === 0) {
+    employeeListEl.innerHTML = '<li class="keyword-empty">No employees yet.</li>';
+    return;
+  }
+  employeeListEl.innerHTML = list.map(e => `
+    <li class="keyword-pill">
+      <span>${escapeHtml(e)}</span>
+      <button data-emp="${escapeHtml(e)}" aria-label="Remove ${escapeHtml(e)}">×</button>
+    </li>
+  `).join('');
+  employeeListEl.querySelectorAll('button[data-emp]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      await removeEmployee(btn.dataset.emp);
+      renderEmployeeList();
+    });
+  });
+}
 async function addKeyword(word) {
   const w = (word || '').trim();
   if (!w) return false;
@@ -317,6 +359,7 @@ function showSettings() {
   if (generalNotesCountInput) generalNotesCountInput.value = getGeneralNotesCount();
   renderPinnedOrderList();
   renderKeywordList();
+  renderEmployeeList();
   if (accountEmailEl && auth.currentUser) accountEmailEl.textContent = auth.currentUser.email || '';
   settingsView.classList.add('active');
   history.pushState({ screen: 'settings' }, '');
@@ -891,6 +934,19 @@ keywordInput.addEventListener('keydown', (e) => {
     e.preventDefault();
     keywordAddBtn.click();
   }
+});
+
+if (employeeAddBtn) employeeAddBtn.addEventListener('click', async () => {
+  if (await addEmployee(employeeInput.value)) {
+    employeeInput.value = '';
+    renderEmployeeList();
+  } else {
+    employeeInput.value = '';
+  }
+  if (employeeInput) employeeInput.focus();
+});
+if (employeeInput) employeeInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') { e.preventDefault(); employeeAddBtn.click(); }
 });
 
 // CSV import
@@ -1546,6 +1602,7 @@ function rerenderCurrent() {
     if (generalNotesCountInput) generalNotesCountInput.value = getGeneralNotesCount();
     renderPinnedOrderList();
     renderKeywordList();
+    renderEmployeeList();
     renderMembersList();
   }
 }
@@ -1623,18 +1680,27 @@ function renderIIFEntries(entries) {
     return;
   }
 
-  iifTableBody.innerHTML = entries.map((e, idx) => {
-    const empLabel = e.employees.join(' + ') || '<span style="color:#dc2626">?</span>';
+  // Expand multi-employee entries into one row each
+  const rows = [];
+  entries.forEach((e, idx) => {
+    const emps = e.employees.length ? e.employees : ['?'];
+    emps.forEach((emp, empIdx) => {
+      rows.push({ e, idx, emp, first: empIdx === 0 });
+    });
+  });
+
+  iifTableBody.innerHTML = rows.map(({ e, idx, emp, first }) => {
     const scoreColor = confidenceColor(e.confidence);
     const rowClass = e.needsReview ? 'iif-needs-review' : '';
-    const issueIcon = e.issue ? `<br><span style="font-size:10px;color:#d97706;">⚠ ${escapeHtml(e.issue)}</span>` : '';
+    const issueIcon = (first && e.issue) ? `<br><span style="font-size:10px;color:#d97706;">⚠ ${escapeHtml(e.issue)}</span>` : '';
+    const empColor = emp === '?' ? 'color:#dc2626' : '';
     return `
       <tr class="${rowClass}" title="${escapeHtml(e.raw)}">
-        <td style="white-space:nowrap;">${e.dateFormatted || '?'}</td>
-        <td style="white-space:nowrap;">${empLabel}${issueIcon}</td>
+        <td style="white-space:nowrap;">${first ? (e.dateFormatted || '?') : ''}</td>
+        <td style="white-space:nowrap;${empColor}">${escapeHtml(emp)}${issueIcon}</td>
         <td><input class="iif-cell-input iif-customer-input" data-idx="${idx}" value="${escapeHtml(e.customerMatched)}" placeholder="Customer" /></td>
         <td><input class="iif-cell-input iif-hours-input" data-idx="${idx}" value="${e.hoursFormatted || ''}" placeholder="H:MM" /></td>
-        <td><span class="iif-score" style="color:${scoreColor};">${e.confidence}%</span></td>
+        <td>${first ? `<span class="iif-score" style="color:${scoreColor};">${e.confidence}%</span>` : ''}</td>
       </tr>
     `;
   }).join('');
@@ -1670,7 +1736,7 @@ function openIIFModal() {
 
   const { body } = splitTitleAndBody(note.body);
   const customerNames = getCustomerNamesList();
-  iifParsedEntries = parseHoursNote(body, customerNames);
+  iifParsedEntries = parseHoursNote(body, customerNames, getEmployees());
 
   const reviewCount = iifParsedEntries.filter(e => e.needsReview).length;
   const total = iifParsedEntries.length;

@@ -127,7 +127,13 @@ export function formatDuration(hours) {
 }
 
 // ---------- Main parser ----------
-export function parseHoursNote(text, customerNames) {
+// employees = [{ name: 'Davor' }, ...] — passed in from app settings
+export function parseHoursNote(text, customers, employees) {
+  // Normalise employee list — use passed-in list or fall back to defaults
+  const empList = (employees && employees.length)
+    ? employees.map(e => (typeof e === 'string' ? e : e.name).trim())
+    : ['Davor', 'Janet'];
+
   const lines = text.split('\n');
   const entries = [];
   let currentDate = null;
@@ -151,33 +157,29 @@ export function parseHoursNote(text, customerNames) {
     }
     if (!currentDate) continue;
 
-    // Detect employees
+    // Detect employees from the configured list
     let working = stripped;
-    const hasDavor = /\bdavor\b/i.test(working);
-    const hasJanet = /\bjanet\b/i.test(working);
+    const foundEmps = empList.filter(emp =>
+      new RegExp(`\\b${emp.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(working)
+    );
+
     let employeesFound = [];
     let employeeConfidence = 1.0;
 
-    if (hasDavor && hasJanet) {
-      employeesFound = ['Davor', 'Janet'];
-      activeEmployees = ['Davor', 'Janet'];
-    } else if (hasDavor) {
-      employeesFound = ['Davor'];
-      activeEmployees = ['Davor'];
-    } else if (hasJanet) {
-      employeesFound = ['Janet'];
-      activeEmployees = ['Janet'];
+    if (foundEmps.length > 0) {
+      employeesFound = foundEmps.map(e => e.charAt(0).toUpperCase() + e.slice(1).toLowerCase());
+      activeEmployees = employeesFound.slice();
     } else {
       employeesFound = activeEmployees.slice();
       employeeConfidence = activeEmployees.length > 0 ? 0.85 : 0;
     }
 
-    // Remove employee names
-    let cleaned = working
-      .replace(/\bdavor\b/gi, '')
-      .replace(/\bjanet\b/gi, '')
-      .replace(/\band\b/gi, '')
-      .trim();
+    // Remove employee names and "and" between them
+    let cleaned = working;
+    for (const emp of empList) {
+      cleaned = cleaned.replace(new RegExp(`\\b${emp.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'gi'), '');
+    }
+    cleaned = cleaned.replace(/\band\b/gi, '').trim();
 
     // Extract time range
     let hours = null;
@@ -207,7 +209,7 @@ export function parseHoursNote(text, customerNames) {
       .trim();
 
     // Fuzzy match
-    const match = customerText ? fuzzyMatchCustomer(customerText, customerNames) : { name: '', score: 0 };
+    const match = customerText ? fuzzyMatchCustomer(customerText, customers) : { name: '', score: 0 };
 
     const confidence = Math.round(
       (employeeConfidence * 0.3 + (match.score || 0) * 0.5 + hoursConfidence * 0.2) * 100

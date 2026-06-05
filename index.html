@@ -124,6 +124,16 @@
       </div>
 
       <div class="setting-row setting-list-row">
+        <h3 class="setting-list-title">Time Logger — Employees</h3>
+        <p class="muted" style="margin:0 0 8px; font-size:13px;">Names the Time Logger recognises as employees when parsing your hours note.</p>
+        <div class="keyword-add">
+          <input id="employee-input" type="text" placeholder="Add an employee" autocomplete="off" />
+          <button id="employee-add-btn">Add</button>
+        </div>
+        <ul id="employee-list" class="keyword-list"></ul>
+      </div>
+
+      <div class="setting-row setting-list-row">
         <h3 class="setting-list-title">Import customers from CSV</h3>
         <p class="muted" style="margin:0 0 8px; font-size:13px;">
           Paste rows from a spreadsheet. First row is treated as column headers (unchecked → first row is a customer). Each row becomes a customer; non-empty cells are joined as lines in their default note.
