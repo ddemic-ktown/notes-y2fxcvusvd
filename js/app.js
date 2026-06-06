@@ -3,7 +3,7 @@ import { Storage } from "./storage.js";
 import { auth, googleProvider, signInWithPopup, signOut, onAuthStateChanged } from "./firebase-init.js";
 import { parseHoursNote, generateIIF, fuzzyMatchCustomer } from "./iif.js";
 
-const APP_VERSION = 'v62';
+const APP_VERSION = 'v64';
 
 // ---------- DOM refs ----------
 const listView = document.getElementById('list-view');
@@ -399,10 +399,12 @@ function showCustomerNotes(customerId, returnTo) {
   returnScreen = 'customer-notes';
   customerNotesReturnTo = returnTo || { screen: 'customers' };
   customerNotesTitle.textContent = title.trim() ? title.trim() : 'Unnamed customer';
-  if (customerNotesReturnTo.screen === 'aggregator' && customerNotesReturnTo.keyword) {
-    customerNotesBackBtn.textContent = `Back to ${customerNotesReturnTo.keyword}`;
-  } else {
-    customerNotesBackBtn.textContent = 'Back to Customers';
+  if (customerNotesBackBtn) {
+    if (customerNotesReturnTo.screen === 'aggregator' && customerNotesReturnTo.keyword) {
+      customerNotesBackBtn.textContent = `Back to ${customerNotesReturnTo.keyword}`;
+    } else {
+      customerNotesBackBtn.textContent = 'Back to Customers';
+    }
   }
   hideAllScreens();
   customerNotesView.classList.add('active');
@@ -439,11 +441,13 @@ function showEditor(record, type, cursorHint) {
   } else if (returnScreen === 'aggregator' && activeKeyword) {
     backLabel = activeKeyword;
   }
-  if (backLabel) {
-    backBtn.textContent = `Back to ${backLabel}`;
-    backBtn.style.display = '';
-  } else {
-    backBtn.style.display = 'none';
+  if (backBtn) {
+    if (backLabel) {
+      backBtn.textContent = `Back to ${backLabel}`;
+      backBtn.style.display = '';
+    } else {
+      backBtn.style.display = 'none';
+    }
   }
 
   resetNoteSearch();
@@ -848,7 +852,7 @@ customerNotesFab.addEventListener('click', () => {
   showEditor(note, 'note');
 });
 
-customerNotesBackBtn.addEventListener('click', () => {
+if (customerNotesBackBtn) customerNotesBackBtn.addEventListener('click', () => {
   const ret = customerNotesReturnTo;
   if (ret && ret.screen === 'aggregator' && ret.keyword) showAggregator(ret.keyword);
   else showCustomers();
@@ -1291,7 +1295,7 @@ function commitAndCleanupEditor() {
   return cancelledCustomer;
 }
 
-backBtn.addEventListener('click', () => {
+if (backBtn) backBtn.addEventListener('click', () => {
   const cancelledCustomer = commitAndCleanupEditor();
   if (cancelledCustomer) {
     activeCustomerId = null;
@@ -1326,10 +1330,14 @@ window.addEventListener('popstate', (e) => {
     returnFromEditor();
     return;
   }
-  if (screen === 'settings' || screen === 'aggregator' || screen === 'customers' || screen === 'customer-notes') {
-    showNotes();
+  if (screen === 'customers') { showCustomers(); return; }
+  if (screen === 'customer-notes') {
+    if (e.state.customerId) showCustomerNotes(e.state.customerId, e.state.returnTo);
+    else showCustomers();
     return;
   }
+  if (screen === 'aggregator') { showAggregator(e.state.keyword); return; }
+  if (screen === 'settings') { showSettings(); return; }
   showNotes();
 });
 

@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <meta name="theme-color" content="#1f2937" />
-  <title>Note Aggregator</title>
+  <title>JobPilot</title>
   <link rel="manifest" href="manifest.json" />
   <link rel="icon" type="image/png" href="icons/favicon.png" />
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
@@ -25,7 +25,7 @@
   <section id="list-view" class="screen active">
     <header class="app-header home-header">
       <div class="home-header-top">
-        <h1>Company Organizer Ninja</h1>
+        <h1>JobPilot</h1>
         <span id="app-version" class="app-version"></span>
         <button id="settings-btn" class="icon-btn" aria-label="Settings">⚙</button>
       </div>
@@ -41,6 +41,7 @@
   <section id="customers-view" class="screen">
     <header class="app-header">
       <button class="icon-btn date-btn home-btn" aria-label="Home">Home</button>
+      <h1 style="font-size:17px;margin:0;">List of Customers</h1>
       <input id="customer-search" class="search-input" type="search" placeholder="Search customers" autocomplete="off" />
       <div class="sort-group" role="group" aria-label="Sort customers">
         <button id="sort-alpha" class="sort-btn" aria-pressed="true">A–Z</button>
@@ -57,7 +58,6 @@
   <section id="customer-notes-view" class="screen">
     <header class="app-header">
       <button class="icon-btn date-btn home-btn" aria-label="Home">Home</button>
-      <button id="customer-notes-back-btn" class="icon-btn date-btn back-btn" aria-label="Back to Customers">Back to Customers</button>
       <h1 id="customer-notes-title">Customer</h1>
     </header>
     <main id="customer-notes-list" class="notes-list"></main>
@@ -199,7 +199,6 @@
     <header class="app-header editor-header">
       <div class="editor-row editor-row-nav">
         <button id="editor-home-btn" class="icon-btn date-btn" aria-label="Home">Home</button>
-        <button id="back-btn" class="icon-btn date-btn back-btn" aria-label="Back">Back</button>
         <button id="customer-link-btn" class="customer-link-btn" aria-label="Go to customer notes" hidden></button>
         <button id="delete-btn" class="icon-btn danger" aria-label="Delete note">🗑</button>
         <div class="editor-more-wrap">
