@@ -3,7 +3,7 @@ import { Storage } from "./storage.js";
 import { auth, googleProvider, signInWithPopup, signOut, onAuthStateChanged } from "./firebase-init.js";
 import { parseHoursNote, generateIIF, fuzzyMatchCustomer } from "./iif.js";
 
-const APP_VERSION = 'v69';
+const APP_VERSION = 'v70';
 
 // ---------- DOM refs ----------
 const listView = document.getElementById('list-view');
@@ -243,6 +243,7 @@ let customerNotesReturnTo = { screen: 'customers' };
 let saveTimer = null;
 let swReg = null;
 let handlingPopstate = false;
+let currentPopstateTarget = null;
 let searchMatches = [];
 let searchIndex = 0;
 
@@ -521,10 +522,27 @@ function showEditor(record, type, cursorHint) {
 }
 
 function returnFromEditor() {
-  if (returnScreen === 'aggregator' && activeKeyword) showAggregator(activeKeyword);
-  else if (returnScreen === 'customer-notes' && activeCustomerId) showCustomerNotes(activeCustomerId);
-  else if (returnScreen === 'customers') showCustomers();
-  else showNotes();
+  if (returnScreen === 'aggregator' && activeKeyword) {
+    showAggregator(activeKeyword);
+    // Rebuild history if we didn't pop to the aggregator entry
+    if (handlingPopstate && currentPopstateTarget !== 'aggregator') {
+      history.pushState({ screen: 'aggregator', keyword: activeKeyword }, '');
+    }
+  } else if (returnScreen === 'customer-notes' && activeCustomerId) {
+    showCustomerNotes(activeCustomerId);
+    // Rebuild history if we didn't pop to the customer-notes entry
+    if (handlingPopstate && currentPopstateTarget !== 'customer-notes') {
+      history.pushState({ screen: 'customers' }, '');
+      history.pushState({ screen: 'customer-notes', customerId: activeCustomerId, returnTo: customerNotesReturnTo }, '');
+    }
+  } else if (returnScreen === 'customers') {
+    showCustomers();
+    if (handlingPopstate && currentPopstateTarget !== 'customers') {
+      history.pushState({ screen: 'customers' }, '');
+    }
+  } else {
+    showNotes();
+  }
 }
 
 // ---------- home search ----------
@@ -1333,14 +1351,14 @@ if (backBtn) backBtn.addEventListener('click', () => {
 window.addEventListener('popstate', (e) => {
   handlingPopstate = true;
   const screen = e.state && e.state.screen;
+  currentPopstateTarget = screen;
+
   if (!screen) {
     handlingPopstate = false;
     return;
   }
-  if (screen === 'home') {
-    showNotes();
-    handlingPopstate = false; return;
-  }
+
+  // Editor check MUST come before screen === 'home' so cleanup always runs
   if (editorView.classList.contains('active')) {
     const cancelledCustomer = commitAndCleanupEditor();
     if (cancelledCustomer) {
@@ -1351,10 +1369,21 @@ window.addEventListener('popstate', (e) => {
     }
     handlingPopstate = false; return;
   }
-  if (screen === 'editor') {
-    returnFromEditor();
+
+  if (screen === 'home') {
+    showNotes();
     handlingPopstate = false; return;
   }
+
+  // Screen-based: if customer-notes is showing, always go to customers
+  if (customerNotesView.classList.contains('active')) {
+    const ret = customerNotesReturnTo;
+    if (ret && ret.screen === 'aggregator' && ret.keyword) showAggregator(ret.keyword);
+    else showCustomers();
+    handlingPopstate = false; return;
+  }
+
+  if (screen === 'editor') { returnFromEditor(); handlingPopstate = false; return; }
   if (screen === 'customers') { showCustomers(); handlingPopstate = false; return; }
   if (screen === 'customer-notes') {
     if (e.state.customerId) showCustomerNotes(e.state.customerId, e.state.returnTo);
