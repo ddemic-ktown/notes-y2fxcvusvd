@@ -210,6 +210,7 @@ export const Storage = {
   updateNote(id, body) {
     const i = _cache.notes.findIndex(n => n.id === id);
     if (i === -1) return null;
+    if (_cache.notes[i].body === body) return _cache.notes[i]; // no change — don't update timestamp
     const next = { ..._cache.notes[i], body, updated: nowIso() };
     _cache.notes[i] = next;
     emit();
