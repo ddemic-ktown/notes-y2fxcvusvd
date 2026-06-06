@@ -3,7 +3,7 @@ import { Storage } from "./storage.js";
 import { auth, googleProvider, signInWithPopup, signOut, onAuthStateChanged } from "./firebase-init.js";
 import { parseHoursNote, generateIIF, fuzzyMatchCustomer } from "./iif.js";
 
-const APP_VERSION = 'v67';
+const APP_VERSION = 'v68';
 
 // ---------- DOM refs ----------
 const listView = document.getElementById('list-view');
@@ -1974,20 +1974,44 @@ if (tutorialBtn) tutorialBtn.addEventListener('click', () => {
   runTutorialStep(0);
 });
 
+const updateBtn = document.getElementById('update-btn');
+
+function showUpdateAvailable() {
+  if (appVersionEl) appVersionEl.textContent = APP_VERSION + ' — newer version detected';
+  if (updateBtn) updateBtn.hidden = false;
+}
+
+function triggerUpdate() {
+  if (swReg && swReg.waiting) {
+    swReg.waiting.postMessage('SKIP_WAITING');
+  } else {
+    window.location.reload();
+  }
+}
+
+if (updateBtn) updateBtn.addEventListener('click', triggerUpdate);
+
 if ('serviceWorker' in navigator) {
+  // Reload as soon as the new SW takes control
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    window.location.reload();
+  });
+
   navigator.serviceWorker.register('sw.js').then((reg) => {
     swReg = reg;
+
+    // A SW is already waiting from a previous update check — show button immediately
+    if (reg.waiting) showUpdateAvailable();
+
     reg.update().catch(() => {});
+
     reg.addEventListener('updatefound', () => {
       const installing = reg.installing;
       if (!installing) return;
-      // Show "newer version detected" immediately while the new SW installs
-      if (appVersionEl) appVersionEl.textContent = APP_VERSION + ' — newer version detected';
+      showUpdateAvailable();
       installing.addEventListener('statechange', () => {
         if (installing.state === 'installed' && navigator.serviceWorker.controller) {
-          // Don't interrupt active edits
-          if (editorView.classList.contains('active')) return;
-          window.location.reload();
+          showUpdateAvailable();
         }
       });
     });

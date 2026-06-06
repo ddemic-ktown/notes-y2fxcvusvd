@@ -27,6 +27,7 @@
       <div class="home-header-top">
         <h1>JobPilot</h1>
         <span id="app-version" class="app-version"></span>
+        <button id="update-btn" class="update-btn" hidden>Update</button>
         <button id="settings-btn" class="icon-btn" aria-label="Settings">⚙</button>
       </div>
       <input id="home-search-input" class="search-input home-search-input" type="search" placeholder="Search all notes…" autocomplete="off" />
@@ -43,13 +44,13 @@
       <div class="customers-header-top">
         <button class="icon-btn date-btn home-btn" aria-label="Home">Home</button>
         <h1 style="font-size:17px;margin:0;flex:1;">List of Customers</h1>
-      </div>
-      <div class="customers-header-bottom">
-        <input id="customer-search" class="search-input" type="search" placeholder="Search customers" autocomplete="off" style="flex:1;" />
         <div class="sort-group" role="group" aria-label="Sort customers">
           <button id="sort-alpha" class="sort-btn" aria-pressed="true">A–Z</button>
           <button id="sort-recent" class="sort-btn" aria-pressed="false">Recent</button>
         </div>
+      </div>
+      <div class="customers-header-bottom">
+        <input id="customer-search" class="search-input" type="search" placeholder="Search customers" autocomplete="off" style="flex:1;" />
       </div>
     </header>
     <main id="customers-list" class="notes-list">
