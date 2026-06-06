@@ -39,13 +39,17 @@
 
   <!-- CUSTOMERS LIST VIEW -->
   <section id="customers-view" class="screen">
-    <header class="app-header">
-      <button class="icon-btn date-btn home-btn" aria-label="Home">Home</button>
-      <h1 style="font-size:17px;margin:0;">List of Customers</h1>
-      <input id="customer-search" class="search-input" type="search" placeholder="Search customers" autocomplete="off" />
-      <div class="sort-group" role="group" aria-label="Sort customers">
-        <button id="sort-alpha" class="sort-btn" aria-pressed="true">A–Z</button>
-        <button id="sort-recent" class="sort-btn" aria-pressed="false">Recent</button>
+    <header class="app-header customers-header">
+      <div class="customers-header-top">
+        <button class="icon-btn date-btn home-btn" aria-label="Home">Home</button>
+        <h1 style="font-size:17px;margin:0;flex:1;">List of Customers</h1>
+      </div>
+      <div class="customers-header-bottom">
+        <input id="customer-search" class="search-input" type="search" placeholder="Search customers" autocomplete="off" style="flex:1;" />
+        <div class="sort-group" role="group" aria-label="Sort customers">
+          <button id="sort-alpha" class="sort-btn" aria-pressed="true">A–Z</button>
+          <button id="sort-recent" class="sort-btn" aria-pressed="false">Recent</button>
+        </div>
       </div>
     </header>
     <main id="customers-list" class="notes-list">
@@ -56,9 +60,14 @@
 
   <!-- CUSTOMER NOTES VIEW -->
   <section id="customer-notes-view" class="screen">
-    <header class="app-header">
-      <button class="icon-btn date-btn home-btn" aria-label="Home">Home</button>
-      <h1 id="customer-notes-title">Customer</h1>
+    <header class="app-header customers-header">
+      <div class="customers-header-top">
+        <button class="icon-btn date-btn home-btn" aria-label="Home">Home</button>
+        <h1 id="customer-notes-title" style="font-size:17px;margin:0;flex:1;">Customer</h1>
+      </div>
+      <div class="customers-header-bottom">
+        <input id="customer-notes-search" class="search-input" type="search" placeholder="Search notes…" autocomplete="off" style="flex:1;" />
+      </div>
     </header>
     <main id="customer-notes-list" class="notes-list"></main>
     <button id="customer-notes-fab" class="fab" aria-label="New note for this customer">+</button>

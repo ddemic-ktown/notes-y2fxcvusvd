@@ -3,7 +3,7 @@ import { Storage } from "./storage.js";
 import { auth, googleProvider, signInWithPopup, signOut, onAuthStateChanged } from "./firebase-init.js";
 import { parseHoursNote, generateIIF, fuzzyMatchCustomer } from "./iif.js";
 
-const APP_VERSION = 'v64';
+const APP_VERSION = 'v67';
 
 // ---------- DOM refs ----------
 const listView = document.getElementById('list-view');
@@ -37,6 +37,7 @@ const customerNotesBackBtn = document.getElementById('customer-notes-back-btn');
 const sortAlphaBtn = document.getElementById('sort-alpha');
 const sortRecentBtn = document.getElementById('sort-recent');
 const customerSearchInput = document.getElementById('customer-search');
+const customerNotesSearchInput = document.getElementById('customer-notes-search');
 const homeSearchInput = document.getElementById('home-search-input');
 const settingsBtn = document.getElementById('settings-btn');
 const recentCountInput = document.getElementById('setting-recent-count');
@@ -228,6 +229,7 @@ async function setCustomerSort(v) {
 }
 
 let customerSearchTerm = '';
+let customerNotesSearchTerm = '';
 let homeSearchTerm = '';
 
 // ---------- editor state ----------
@@ -240,6 +242,7 @@ let activeKeyword = null;
 let customerNotesReturnTo = { screen: 'customers' };
 let saveTimer = null;
 let swReg = null;
+let handlingPopstate = false;
 let searchMatches = [];
 let searchIndex = 0;
 
@@ -320,7 +323,7 @@ function showAggregator(keyword) {
   aggregatorTitle.textContent = keyword;
   renderAggregatorList(keyword);
   aggregatorView.classList.add('active');
-  history.pushState({ screen: 'aggregator', keyword }, '');
+  if (!handlingPopstate) history.pushState({ screen: 'aggregator', keyword }, '');
 }
 
 function renderAggregatorList(keyword) {
@@ -362,7 +365,7 @@ function showSettings() {
   renderEmployeeList();
   if (accountEmailEl && auth.currentUser) accountEmailEl.textContent = auth.currentUser.email || '';
   settingsView.classList.add('active');
-  history.pushState({ screen: 'settings' }, '');
+  if (!handlingPopstate) history.pushState({ screen: 'settings' }, '');
   applyTheme(localStorage.getItem('na-theme') || 'dark');
   renderMembersList();
 }
@@ -387,10 +390,12 @@ function showCustomers() {
   customersView.classList.add('active');
   renderCustomersList();
   if (isDesktop) setTimeout(() => customerSearchInput.focus(), 50);
-  history.pushState({ screen: 'customers' }, '');
+  if (!handlingPopstate) history.pushState({ screen: 'customers' }, '');
 }
 
 function showCustomerNotes(customerId, returnTo) {
+  customerNotesSearchTerm = '';
+  if (customerNotesSearchInput) customerNotesSearchInput.value = '';
   const customer = Storage.getCustomer(customerId);
   if (!customer) { showCustomers(); return; }
   const def = Storage.ensureDefaultNoteForCustomer(customerId);
@@ -409,7 +414,7 @@ function showCustomerNotes(customerId, returnTo) {
   hideAllScreens();
   customerNotesView.classList.add('active');
   renderCustomerNotesList(customerId);
-  history.pushState({ screen: 'customer-notes', customerId, returnTo: customerNotesReturnTo }, '');
+  if (!handlingPopstate) history.pushState({ screen: 'customer-notes', customerId, returnTo: customerNotesReturnTo }, '');
 }
 
 function showEditor(record, type, cursorHint) {
@@ -488,7 +493,7 @@ function showEditor(record, type, cursorHint) {
   document.body.classList.add('editor-open');
   // Ensure page-level scroll is reset so the toolbar is at the top
   window.scrollTo(0, 0);
-  history.pushState({ screen: 'editor' }, '');
+  if (!handlingPopstate) history.pushState({ screen: 'editor' }, '');
 
   setTimeout(() => {
     // If a cursor hint was passed (e.g. came from an aggregator match), scroll
@@ -807,7 +812,16 @@ function renderCustomersList() {
 }
 
 function renderCustomerNotesList(customerId) {
-  const notes = Storage.listNotesByCustomer(customerId);
+  const all = Storage.listNotesByCustomer(customerId);
+  const term = customerNotesSearchTerm.trim().toLowerCase();
+  const words = term ? term.split(/\s+/).filter(w => w.length > 0) : [];
+  const notes = words.length
+    ? all.filter(n => words.every(w => (n.body || '').toLowerCase().includes(w)))
+    : all;
+  if (notes.length === 0 && words.length) {
+    customerNotesList.innerHTML = `<p class="empty-state">No notes match "${escapeHtml(customerNotesSearchTerm)}".</p>`;
+    return;
+  }
   customerNotesList.innerHTML = notes.map(renderNoteCard).join('');
   customerNotesList.querySelectorAll('.note-card').forEach(card => {
     card.addEventListener('click', () => {
@@ -1012,6 +1026,13 @@ homeSearchInput.addEventListener('input', () => {
   renderNotesList();
 });
 
+if (customerNotesSearchInput) {
+  customerNotesSearchInput.addEventListener('input', () => {
+    customerNotesSearchTerm = customerNotesSearchInput.value;
+    if (activeCustomerId) renderCustomerNotesList(activeCustomerId);
+  });
+}
+
 sortAlphaBtn.addEventListener('click', async () => {
   if (getCustomerSort() === 'alpha') return;
   await setCustomerSort('alpha');
@@ -1054,7 +1075,9 @@ if (editorMoreBtn) editorMoreBtn.addEventListener('click', (e) => {
   toggleMoreDropdown();
 });
 // Close dropdown when any item inside it is clicked
-if (editorMoreDropdown) editorMoreDropdown.addEventListener('click', () => {
+// Exception: date-picker-btn is a label that opens the native picker — let iOS handle it first
+if (editorMoreDropdown) editorMoreDropdown.addEventListener('click', (e) => {
+  if (e.target.closest('#date-picker-btn')) return;
   closeMoreDropdown();
 });
 
@@ -1066,6 +1089,7 @@ datePickerInput.addEventListener('change', () => {
   const [y, m, d] = datePickerInput.value.split('-').map(Number);
   insertDateAtCursor(formatDateForInsert(new Date(y, m - 1, d)));
   datePickerInput.value = '';
+  closeMoreDropdown();
 });
 document.addEventListener('click', (e) => {
   if (editorMoreDropdown && !editorMoreDropdown.hidden) {
@@ -1307,14 +1331,15 @@ if (backBtn) backBtn.addEventListener('click', () => {
 
 // Android/browser back button support
 window.addEventListener('popstate', (e) => {
+  handlingPopstate = true;
   const screen = e.state && e.state.screen;
   if (!screen) {
-    // No state — let browser handle it (exits app)
+    handlingPopstate = false;
     return;
   }
   if (screen === 'home') {
     showNotes();
-    return;
+    handlingPopstate = false; return;
   }
   if (editorView.classList.contains('active')) {
     const cancelledCustomer = commitAndCleanupEditor();
@@ -1324,21 +1349,22 @@ window.addEventListener('popstate', (e) => {
     } else {
       returnFromEditor();
     }
-    return;
+    handlingPopstate = false; return;
   }
   if (screen === 'editor') {
     returnFromEditor();
-    return;
+    handlingPopstate = false; return;
   }
-  if (screen === 'customers') { showCustomers(); return; }
+  if (screen === 'customers') { showCustomers(); handlingPopstate = false; return; }
   if (screen === 'customer-notes') {
     if (e.state.customerId) showCustomerNotes(e.state.customerId, e.state.returnTo);
     else showCustomers();
-    return;
+    handlingPopstate = false; return;
   }
-  if (screen === 'aggregator') { showAggregator(e.state.keyword); return; }
-  if (screen === 'settings') { showSettings(); return; }
+  if (screen === 'aggregator') { showAggregator(e.state.keyword); handlingPopstate = false; return; }
+  if (screen === 'settings') { showSettings(); handlingPopstate = false; return; }
   showNotes();
+  handlingPopstate = false;
 });
 
 deleteBtn.addEventListener('click', () => {
