@@ -3,7 +3,7 @@ import { Storage } from "./storage.js";
 import { auth, googleProvider, signInWithPopup, signOut, onAuthStateChanged } from "./firebase-init.js";
 import { parseHoursNote, generateIIF, fuzzyMatchCustomer } from "./iif.js";
 
-const APP_VERSION = 'v70';
+const APP_VERSION = 'v71';
 
 // ---------- DOM refs ----------
 const listView = document.getElementById('list-view');
@@ -2026,13 +2026,18 @@ if ('serviceWorker' in navigator) {
     window.location.reload();
   });
 
-  navigator.serviceWorker.register('sw.js').then((reg) => {
+  navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then((reg) => {
     swReg = reg;
 
     // A SW is already waiting from a previous update check — show button immediately
     if (reg.waiting) showUpdateAvailable();
 
     reg.update().catch(() => {});
+
+    // Also check for updates when app is foregrounded (common on mobile)
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') reg.update().catch(() => {});
+    });
 
     reg.addEventListener('updatefound', () => {
       const installing = reg.installing;
