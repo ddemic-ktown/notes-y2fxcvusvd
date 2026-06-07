@@ -3,7 +3,7 @@ import { Storage } from "./storage.js";
 import { auth, googleProvider, signInWithPopup, signOut, onAuthStateChanged } from "./firebase-init.js";
 import { parseHoursNote, generateIIF, fuzzyMatchCustomer } from "./iif.js";
 
-const APP_VERSION = 'v2026.06.07-123251';
+const APP_VERSION = 'v2026.06.07-124229';
 
 // ---------- DOM refs ----------
 const listView = document.getElementById('list-view');
@@ -2064,6 +2064,11 @@ function tutorialSteps() {
             target: () => document.querySelector('[data-section="recent"]'),
             text: 'And finally, the home screen shows the customer notes that have been edited last.',
           },
+          {
+            screen: 'home',
+            target: () => document.querySelector('#notes-list .home-pinned'),
+            text: 'Clicking on a note brings up the note to view and edit.',
+          },
         ],
       };
       const ordered = getPinnedOrder().flatMap(key => sectionSteps[key] || []);
@@ -2071,6 +2076,17 @@ function tutorialSteps() {
       if (ordered.length) ordered[0] = { ...ordered[0], setup: () => goHome() };
       return ordered;
     })(),
+    {
+      screen: 'editor',
+      setup: () => {
+        const recent = Storage.listRecentCustomerNotes(1);
+        if (!recent.length) return false;
+        showEditor(recent[0], 'note');
+        return true;
+      },
+      target: () => document.getElementById('customer-link-btn'),
+      text: 'You can see which customer this note is assigned to at the top.',
+    },
   ];
 }
 
