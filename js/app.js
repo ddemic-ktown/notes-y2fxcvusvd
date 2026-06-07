@@ -3,7 +3,7 @@ import { Storage } from "./storage.js";
 import { auth, googleProvider, signInWithPopup, signOut, onAuthStateChanged } from "./firebase-init.js";
 import { parseHoursNote, generateIIF, fuzzyMatchCustomer } from "./iif.js";
 
-const APP_VERSION = 'v74';
+const APP_VERSION = 'v75';
 
 // ---------- DOM refs ----------
 const listView = document.getElementById('list-view');
@@ -2003,6 +2003,11 @@ function tutorialSteps() {
     },
     {
       screen: 'home',
+      target: () => document.getElementById('fab'),
+      text: 'Tapping the blue + on the home screen will add a new general note.',
+    },
+    {
+      screen: 'home',
       target: () => document.querySelector('[data-section="recent"]'),
       text: 'And finally, the home screen shows the customer notes that have been edited last.',
     },
@@ -2086,7 +2091,7 @@ async function runTutorialStep(index) {
   if (!target) { endTutorial(); return; }
 
   // Scroll target into view if needed
-  target.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  target.scrollIntoView({ block: 'center', behavior: 'smooth' });
   await new Promise(r => setTimeout(r, 80));
 
   tutorialText.textContent = step.text;
