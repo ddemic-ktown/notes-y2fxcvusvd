@@ -49,6 +49,30 @@ function recallScore(qWords, haystackText) {
   return matched / qWords.length;
 }
 
+// Reverse-direction match: scans a chunk of free-form text (e.g. one line of
+// a work note) for mentions of a *known* customer — checking both their name
+// and any other recorded info (address, notes, etc. from their default note).
+// This lets the parser pick out the right customer even when the line also
+// contains unrelated narrative, instead of requiring that text be commented out.
+// customers = [{ name, searchText }] where searchText includes full note body
+// (title + everything else, e.g. address)
+export function matchCustomerToText(text, customers) {
+  if (!customers.length) return { name: '', score: 0 };
+  let best = { name: '', score: 0 };
+  for (const c of customers) {
+    const nameWords = queryWords(c.name || '');
+    if (!nameWords.length) continue;
+    const infoWords = queryWords(c.searchText || c.name || '');
+    const nameScore = recallScore(nameWords, text);
+    const infoScore = recallScore(infoWords, text);
+    // The name is the primary signal; recorded info (which includes the
+    // address) helps confirm the match or break ties between similar names.
+    const score = Math.max(nameScore, nameScore * 0.6 + infoScore * 0.4);
+    if (score > best.score) best = { name: c.name, score };
+  }
+  return best;
+}
+
 // customers = [{ name, searchText }] where searchText includes full note body
 export function fuzzyMatchCustomer(query, customers) {
   if (!customers.length) return { name: query, score: 0 };
@@ -214,15 +238,22 @@ export function parseHoursNote(text, customers, employees) {
 
     if (!hours || hours <= 0) hoursConfidence = 0;
 
-    // Clean up customer text
-    const customerText = cleaned
-      .replace(/^[-–,.\s]+/, '')
-      .replace(/[-–,.\s]+$/, '')
-      .replace(/\s+/g, ' ')
-      .trim();
+    // First, look for a *known* customer mentioned anywhere in the remaining
+    // text (by name and/or address/notes on file). This lets the parser
+    // ignore surrounding narrative ("fixed the faucet, very happy, etc.")
+    // without needing it commented out.
+    const known = cleaned ? matchCustomerToText(cleaned, customers) : { name: '', score: 0 };
 
-    // Fuzzy match
-    const match = customerText ? fuzzyMatchCustomer(customerText, customers) : { name: '', score: 0 };
+    let customerText, match;
+    if (known.score >= 0.5) {
+      customerText = known.name;
+      match = known;
+    } else {
+      // No confident match to a known customer — use an obvious placeholder
+      // so the entry stands out in review and is easy to fill in by hand.
+      customerText = 'Bilbo Baggins';
+      match = { name: customerText, score: 0 };
+    }
 
     const confidence = Math.round(
       (employeeConfidence * 0.3 + (match.score || 0) * 0.5 + hoursConfidence * 0.2) * 100
