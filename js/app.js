@@ -3,7 +3,7 @@ import { Storage } from "./storage.js";
 import { auth, googleProvider, signInWithPopup, signOut, onAuthStateChanged } from "./firebase-init.js";
 import { parseHoursNote, generateIIF, fuzzyMatchCustomer } from "./iif.js";
 
-const APP_VERSION = 'v2026.06.07-121801';
+const APP_VERSION = 'v2026.06.07-123251';
 
 // ---------- DOM refs ----------
 const listView = document.getElementById('list-view');
@@ -2002,7 +2002,7 @@ function tutorialSteps() {
     {
       screen: 'home',
       target: () => document.getElementById('settings-btn'),
-      text: 'This is the home screen, and here is the settings button.',
+      text: 'On the home screen, the settings button is in the upper right.',
     },
     {
       screen: 'home',
@@ -2013,12 +2013,7 @@ function tutorialSteps() {
       screen: 'customers',
       setup: () => showCustomers(),
       target: () => document.getElementById('customers-fab'),
-      text: 'After clicking on the customers card, you see a list of all customers and you can add a new one by clicking on the blue +.',
-    },
-    {
-      screen: 'customers',
-      target: () => document.querySelector('#customers-list .note-card'),
-      text: 'You can search or scroll to select a customer.',
+      text: 'Tapping the customers card brings up the list of customers.  Add a new customer with the blue +.',
     },
     {
       screen: 'customer-notes',
@@ -2029,7 +2024,7 @@ function tutorialSteps() {
         return true;
       },
       target: () => document.querySelector('#customer-notes-list .note-card'),
-      text: 'After clicking on a customer, it shows you the list of notes for that customer. The default note\'s title should be the customer\'s name.',
+      text: 'After clicking on a customer, it shows you the list of notes for that customer. The default note\'s title is treated as the customer\'s name.',
     },
     {
       screen: 'customer-notes',
