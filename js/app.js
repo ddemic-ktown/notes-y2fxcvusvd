@@ -3,7 +3,7 @@ import { Storage } from "./storage.js";
 import { auth, googleProvider, signInWithPopup, signOut, onAuthStateChanged } from "./firebase-init.js";
 import { parseHoursNote, generateIIF, fuzzyMatchCustomer } from "./iif.js";
 
-const APP_VERSION = 'v2026.06.07-131021';
+const APP_VERSION = 'v2026.06.07-132111';
 
 // ---------- DOM refs ----------
 const listView = document.getElementById('list-view');
@@ -1996,6 +1996,8 @@ const tutorialOverlay = document.getElementById('tutorial-overlay');
 const tutorialBubble = document.getElementById('tutorial-bubble');
 const tutorialText = document.getElementById('tutorial-text');
 const tutorialNext = document.getElementById('tutorial-next');
+const tutorialBack = document.getElementById('tutorial-back');
+const tutorialProgress = document.getElementById('tutorial-progress');
 const tutorialClose = document.getElementById('tutorial-close');
 const tutorialBtn = document.getElementById('tutorial-btn');
 
@@ -2017,7 +2019,7 @@ function tutorialSteps() {
       screen: 'customers',
       setup: () => showCustomers(),
       target: () => document.getElementById('customers-fab'),
-      text: 'Tapping the customers card brings up the list of customers.  Add a new customer with the blue +.',
+      text: 'After tapping the customers card, the list of all customers is shown. Add a new customer with the blue +.',
     },
     {
       screen: 'customer-notes',
@@ -2175,6 +2177,8 @@ async function runTutorialStep(index) {
   await new Promise(r => setTimeout(r, 30));
 
   tutorialText.textContent = step.text;
+  if (tutorialProgress) tutorialProgress.textContent = `${index + 1} of ${steps.length}`;
+  if (tutorialBack) tutorialBack.hidden = (index === 0);
   tutorialOverlay.hidden = false;
   // Render bubble off-screen first to measure height
   tutorialBubble.style.top = '-9999px';
@@ -2205,6 +2209,13 @@ function endTutorial() {
 if (tutorialNext) tutorialNext.addEventListener('click', () => {
   clearHighlights();
   tutorialStepIndex++;
+  runTutorialStep(tutorialStepIndex);
+});
+
+if (tutorialBack) tutorialBack.addEventListener('click', () => {
+  if (tutorialStepIndex === 0) return;
+  clearHighlights();
+  tutorialStepIndex--;
   runTutorialStep(tutorialStepIndex);
 });
 
