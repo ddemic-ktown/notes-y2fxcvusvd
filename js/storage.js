@@ -24,6 +24,7 @@ let _orgId = null;
 let _role = null; // 'admin' | 'employee' | 'customer'
 let _unsubs = [];
 let _ready = false;
+let _customersReady = false;
 
 function emit() { for (const cb of _listeners) cb(); }
 function uid() {
@@ -57,6 +58,7 @@ function attachListeners() {
   }));
   _unsubs.push(onSnapshot(customersCol(), (snap) => {
     _cache.customers = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    _customersReady = true;
     emit();
   }));
   _unsubs.push(onSnapshot(settingsDoc(), (snap) => {
@@ -140,6 +142,7 @@ export const Storage = {
   async init(userId, userEmail) {
     _uid = userId;
     _ready = false;
+    _customersReady = false;
     _cache.notes = [];
     _cache.customers = [];
     _cache.settings = { ...DEFAULT_SETTINGS };
@@ -157,6 +160,7 @@ export const Storage = {
     detachListeners();
     _uid = null; _orgId = null; _role = null;
     _ready = false;
+    _customersReady = false;
     _cache.notes = []; _cache.customers = [];
     _cache.settings = { ...DEFAULT_SETTINGS };
     _cache.members = []; _cache.invites = [];
@@ -296,8 +300,10 @@ export const Storage = {
     const results = [];
     for (const note of _cache.notes) {
       if (!note.customerId) continue;
-      if (!_cache.customers.find(c => c.id === note.customerId)) {
+      if (_customersReady && !_cache.customers.find(c => c.id === note.customerId)) {
         // Orphaned note — its customer was deleted but the note survived.
+        // Only treat it as orphaned once the customers list has actually
+        // finished loading, so we never mistake "not loaded yet" for "deleted".
         // Clean it up so it stops reappearing in search results.
         this.deleteNote(note.id);
         continue;
