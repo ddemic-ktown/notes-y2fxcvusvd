@@ -3,7 +3,7 @@ import { Storage } from "./storage.js";
 import { auth, googleProvider, signInWithPopup, signOut, onAuthStateChanged } from "./firebase-init.js";
 import { parseHoursNote, generateIIF, fuzzyMatchCustomer } from "./iif.js";
 
-const APP_VERSION = 'v75';
+const APP_VERSION = 'v76';
 
 // ---------- DOM refs ----------
 const listView = document.getElementById('list-view');
@@ -1990,27 +1990,41 @@ function tutorialSteps() {
       target: () => document.querySelector('#customer-notes-view .home-btn'),
       text: 'You can click the home button any time to go back to the home screen.',
     },
-    {
-      screen: 'home',
-      setup: () => goHome(),
-      target: () => document.querySelector('[data-section="notes"]'),
-      text: 'The home screen, in addition to the customers card, also has general notes that are not assigned to any customer.',
-    },
-    {
-      screen: 'home',
-      target: () => document.querySelector('[data-section="aggregator"]'),
-      text: 'There are also aggregator cards that show paragraphs marked with keywords, such as todo, to buy, materials, etc.',
-    },
-    {
-      screen: 'home',
-      target: () => document.getElementById('fab'),
-      text: 'Tapping the blue + on the home screen will add a new general note.',
-    },
-    {
-      screen: 'home',
-      target: () => document.querySelector('[data-section="recent"]'),
-      text: 'And finally, the home screen shows the customer notes that have been edited last.',
-    },
+    // Home section steps — ordered to match the current settings pinned order
+    ...(() => {
+      const sectionSteps = {
+        notes: [
+          {
+            screen: 'home',
+            target: () => document.querySelector('[data-section="notes"]'),
+            text: 'The home screen, in addition to the customers card, also has general notes that are not assigned to any customer.',
+          },
+          {
+            screen: 'home',
+            target: () => document.getElementById('fab'),
+            text: 'Tapping the blue + on the home screen will add a new general note.',
+          },
+        ],
+        aggregator: [
+          {
+            screen: 'home',
+            target: () => document.querySelector('[data-section="aggregator"]'),
+            text: 'There are also aggregator cards that show paragraphs marked with keywords, such as todo, to buy, materials, etc.',
+          },
+        ],
+        recent: [
+          {
+            screen: 'home',
+            target: () => document.querySelector('[data-section="recent"]'),
+            text: 'And finally, the home screen shows the customer notes that have been edited last.',
+          },
+        ],
+      };
+      const ordered = getPinnedOrder().flatMap(key => sectionSteps[key] || []);
+      // First step navigates home; rest rely on screen === 'home' auto-navigation
+      if (ordered.length) ordered[0] = { ...ordered[0], setup: () => goHome() };
+      return ordered;
+    })(),
   ];
 }
 
@@ -2091,8 +2105,8 @@ async function runTutorialStep(index) {
   if (!target) { endTutorial(); return; }
 
   // Scroll target into view if needed
-  target.scrollIntoView({ block: 'center', behavior: 'smooth' });
-  await new Promise(r => setTimeout(r, 80));
+  target.scrollIntoView({ block: 'center', behavior: 'instant' });
+  await new Promise(r => setTimeout(r, 30));
 
   tutorialText.textContent = step.text;
   tutorialOverlay.hidden = false;
