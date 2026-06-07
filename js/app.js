@@ -3,7 +3,7 @@ import { Storage } from "./storage.js";
 import { auth, googleProvider, signInWithPopup, signOut, onAuthStateChanged } from "./firebase-init.js";
 import { parseHoursNote, generateIIF, fuzzyMatchCustomer } from "./iif.js";
 
-const APP_VERSION = 'v76';
+const APP_VERSION = 'v2026.06.07-121801';
 
 // ---------- DOM refs ----------
 const listView = document.getElementById('list-view');
@@ -14,6 +14,7 @@ const aggregatorView = document.getElementById('aggregator-view');
 const sectionView = document.getElementById('section-view');
 const sectionViewTitle = document.getElementById('section-view-title');
 const sectionViewList = document.getElementById('section-view-list');
+const sectionViewControls = document.getElementById('section-view-controls');
 const aggregatorList = document.getElementById('aggregator-list');
 const aggregatorTitle = document.getElementById('aggregator-title');
 const editorView = document.getElementById('editor-view');
@@ -233,6 +234,7 @@ async function setCustomerSort(v) {
 
 let customerSearchTerm = '';
 let customerNotesSearchTerm = '';
+let sectionRecentLimit = 50;
 let homeSearchTerm = '';
 
 // ---------- editor state ----------
@@ -344,6 +346,40 @@ function showSection(key) {
 
 function renderSectionView(key) {
   if (!sectionViewList) return;
+  // Show/hide count control for recent section
+  if (sectionViewControls) {
+    if (key === 'recent') {
+      sectionViewControls.hidden = false;
+      sectionViewControls.innerHTML = `
+        <span style="font-size:13px;color:var(--ink-soft);margin-right:8px;">Showing:</span>
+        <div class="stepper" style="flex-shrink:0;">
+          <button class="stepper-btn" id="section-recent-down">−</button>
+          <input id="section-recent-input" type="number" min="1" value="${sectionRecentLimit}" style="width:56px;text-align:center;" />
+          <button class="stepper-btn" id="section-recent-up">+</button>
+        </div>`;
+      setTimeout(() => {
+        const inp = document.getElementById('section-recent-input');
+        const dn = document.getElementById('section-recent-down');
+        const up = document.getElementById('section-recent-up');
+        if (inp) inp.addEventListener('change', () => {
+          const n = parseInt(inp.value, 10);
+          if (!Number.isNaN(n) && n > 0) { sectionRecentLimit = n; renderSectionView('recent'); }
+        });
+        if (dn) dn.addEventListener('click', () => {
+          sectionRecentLimit = Math.max(1, sectionRecentLimit - 10);
+          if (inp) inp.value = sectionRecentLimit;
+          renderSectionView('recent');
+        });
+        if (up) up.addEventListener('click', () => {
+          sectionRecentLimit += 10;
+          if (inp) inp.value = sectionRecentLimit;
+          renderSectionView('recent');
+        });
+      }, 0);
+    } else {
+      sectionViewControls.hidden = true;
+    }
+  }
 
   if (key === 'aggregator') {
     const keywords = getKeywords();
@@ -380,7 +416,11 @@ function renderSectionView(key) {
   }
 
   if (key === 'recent') {
-    const all = Storage.listRecentCustomerNotes(9999);
+    if (!Storage.isReady()) {
+      sectionViewList.innerHTML = '<p class="empty-state" style="font-style:normal"><span class="nav-spinner" style="width:20px;height:20px;border-width:3px;"></span></p>';
+      return;
+    }
+    const all = Storage.listRecentCustomerNotes(sectionRecentLimit);
     if (!all.length) { sectionViewList.innerHTML = '<p class="empty-state">No customer notes yet.</p>'; return; }
     sectionViewList.innerHTML = all.map(n => {
       const def = Storage.getDefaultNoteForCustomer(n.customerId);
@@ -405,6 +445,10 @@ function renderSectionView(key) {
   }
 
   if (key === 'notes') {
+    if (!Storage.isReady()) {
+      sectionViewList.innerHTML = '<p class="empty-state" style="font-style:normal"><span class="nav-spinner" style="width:20px;height:20px;border-width:3px;"></span></p>';
+      return;
+    }
     const all = Storage.listNotes();
     if (!all.length) { sectionViewList.innerHTML = '<p class="empty-state">No general notes yet.</p>'; return; }
     sectionViewList.innerHTML = all.map(n => renderNoteCard(n)).join('');
@@ -702,7 +746,7 @@ function renderHomeSearchResults(term) {
 function renderNotesList() {
   if (homeSearchTerm.trim()) { renderHomeSearchResults(homeSearchTerm); return; }
   if (!Storage.isReady()) {
-    notesList.innerHTML = '<p class="empty-state" style="font-style:normal">Loading your data…</p>';
+    notesList.innerHTML = '<p class="empty-state" style="font-style:normal"><span class="nav-spinner" style="width:20px;height:20px;border-width:3px;"></span></p>';
     return;
   }
   const notes = Storage.listNotes();
@@ -805,7 +849,10 @@ function renderNotesList() {
   notesList.innerHTML = customersCard + pinnedBlock + olderHtml;
 
   notesList.querySelectorAll('[data-section]').forEach(btn => {
-    btn.addEventListener('click', () => showSection(btn.dataset.section));
+    btn.addEventListener('click', () => {
+      btn.innerHTML = '<span class="nav-spinner" style="width:14px;height:14px;border-width:2px;vertical-align:middle;"></span>';
+      setTimeout(() => showSection(btn.dataset.section), 0);
+    });
   });
 
   notesList.querySelectorAll('.note-card').forEach(card => {
@@ -893,6 +940,10 @@ function customerMatchesSearch(c, term) {
 
 function renderCustomersList() {
   updateSortButtons();
+  if (!Storage.isReady()) {
+    customersList.innerHTML = '<p class="empty-state" style="font-style:normal"><span class="nav-spinner" style="width:20px;height:20px;border-width:3px;"></span></p>';
+    return;
+  }
   const all = Storage.listCustomers();
   const term = customerSearchTerm.trim().toLowerCase();
   const filtered = all.filter(c => customerMatchesSearch(c, term));

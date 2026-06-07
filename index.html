@@ -33,7 +33,7 @@
       <input id="home-search-input" class="search-input home-search-input" type="search" placeholder="Search all notes…" autocomplete="off" />
     </header>
     <main id="notes-list" class="notes-list">
-      <p class="empty-state">No notes yet. Tap <strong>+</strong> to add one.</p>
+      <p class="empty-state" style="font-style:normal"><span class="nav-spinner" style="width:20px;height:20px;border-width:3px;"></span></p>
     </main>
     <button id="fab" class="fab" aria-label="New note">+</button>
   </section>
@@ -54,7 +54,7 @@
       </div>
     </header>
     <main id="customers-list" class="notes-list">
-      <p class="empty-state">No customers yet. Tap <strong>+</strong> to add one.</p>
+      <p class="empty-state" style="font-style:normal"><span class="nav-spinner" style="width:20px;height:20px;border-width:3px;"></span></p>
     </main>
     <button id="customers-fab" class="fab" aria-label="New customer">+</button>
   </section>
@@ -85,9 +85,12 @@
 
   <!-- SECTION DETAIL VIEW -->
   <section id="section-view" class="screen">
-    <header class="app-header">
-      <button class="icon-btn date-btn home-btn" aria-label="Home">Home</button>
-      <h1 id="section-view-title" style="font-size:17px;margin:0;flex:1;"></h1>
+    <header class="app-header customers-header">
+      <div class="customers-header-top">
+        <button class="icon-btn date-btn home-btn" aria-label="Home">Home</button>
+        <h1 id="section-view-title" style="font-size:17px;margin:0;flex:1;"></h1>
+      </div>
+      <div id="section-view-controls" class="customers-header-bottom" hidden></div>
     </header>
     <main id="section-view-list" class="notes-list"></main>
   </section>
