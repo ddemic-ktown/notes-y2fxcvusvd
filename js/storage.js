@@ -296,6 +296,12 @@ export const Storage = {
     const results = [];
     for (const note of _cache.notes) {
       if (!note.customerId) continue;
+      if (!_cache.customers.find(c => c.id === note.customerId)) {
+        // Orphaned note — its customer was deleted but the note survived.
+        // Clean it up so it stops reappearing in search results.
+        this.deleteNote(note.id);
+        continue;
+      }
       const lines = (note.body || "").split("\n");
       let i = 0;
       while (i < lines.length) {

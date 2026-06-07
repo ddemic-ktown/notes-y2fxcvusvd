@@ -3,7 +3,7 @@ import { Storage } from "./storage.js";
 import { auth, googleProvider, signInWithPopup, signOut, onAuthStateChanged } from "./firebase-init.js";
 import { parseHoursNote, generateIIF, fuzzyMatchCustomer } from "./iif.js";
 
-const APP_VERSION = 'v2026.06.07-132111';
+const APP_VERSION = 'v2026.06.07-141200';
 
 // ---------- DOM refs ----------
 const listView = document.getElementById('list-view');
@@ -535,7 +535,11 @@ function showCustomerNotes(customerId, returnTo) {
   if (customerNotesSearchInput) customerNotesSearchInput.value = '';
   window.scrollTo(0, 0);
   const customer = Storage.getCustomer(customerId);
-  if (!customer) { showCustomers(); return; }
+  if (!customer) {
+    alert('This customer no longer exists — it may have been deleted.');
+    showCustomers();
+    return;
+  }
   const def = Storage.ensureDefaultNoteForCustomer(customerId);
   const { title } = splitTitleAndBody(def.body);
   activeCustomerId = customerId;
