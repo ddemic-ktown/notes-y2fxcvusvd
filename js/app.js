@@ -3,7 +3,7 @@ import { Storage } from "./storage.js";
 import { auth, googleProvider, signInWithPopup, signOut, onAuthStateChanged } from "./firebase-init.js";
 import { parseHoursNote, generateIIF, fuzzyMatchCustomer } from "./iif.js";
 
-const APP_VERSION = 'v2026.06.07-124229';
+const APP_VERSION = 'v2026.06.07-125652';
 
 // ---------- DOM refs ----------
 const listView = document.getElementById('list-view');
@@ -1049,6 +1049,10 @@ function goHome() {
   homeSearchTerm = '';
   if (homeSearchInput) homeSearchInput.value = '';
   showNotes();
+  // Check GitHub for a newer version every time we land on the home screen.
+  // If one is found, it's downloaded, activated, and applied automatically —
+  // no button or prompt needed.
+  if (swReg) swReg.update().catch(() => {});
 }
 document.querySelectorAll('.home-btn').forEach(btn => {
   btn.addEventListener('click', goHome);
@@ -2211,22 +2215,15 @@ if (tutorialBtn) tutorialBtn.addEventListener('click', () => {
   runTutorialStep(0);
 });
 
-const updateBtn = document.getElementById('update-btn');
-
-function showUpdateAvailable() {
-  if (appVersionEl) appVersionEl.textContent = APP_VERSION + ' — newer version detected';
-  if (updateBtn) updateBtn.hidden = false;
-}
-
-function triggerUpdate() {
+// Activate a newly-downloaded service worker as soon as it's ready —
+// no user action required. The 'controllerchange' listener below reloads
+// the page once the new worker takes over, so the update is picked up
+// transparently.
+function applyWaitingUpdate() {
   if (swReg && swReg.waiting) {
     swReg.waiting.postMessage('SKIP_WAITING');
-  } else {
-    window.location.reload();
   }
 }
-
-if (updateBtn) updateBtn.addEventListener('click', triggerUpdate);
 
 if ('serviceWorker' in navigator) {
   // Reload as soon as the new SW takes control
@@ -2237,8 +2234,8 @@ if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then((reg) => {
     swReg = reg;
 
-    // A SW is already waiting from a previous update check — show button immediately
-    if (reg.waiting) showUpdateAvailable();
+    // A newer SW already finished downloading from a previous check — apply it now
+    if (reg.waiting && navigator.serviceWorker.controller) applyWaitingUpdate();
 
     reg.update().catch(() => {});
 
@@ -2250,10 +2247,9 @@ if ('serviceWorker' in navigator) {
     reg.addEventListener('updatefound', () => {
       const installing = reg.installing;
       if (!installing) return;
-      showUpdateAvailable();
       installing.addEventListener('statechange', () => {
         if (installing.state === 'installed' && navigator.serviceWorker.controller) {
-          showUpdateAvailable();
+          applyWaitingUpdate();
         }
       });
     });
