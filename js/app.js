@@ -3,7 +3,7 @@ import { Storage } from "./storage.js";
 import { auth, googleProvider, signInWithPopup, signOut, onAuthStateChanged } from "./firebase-init.js";
 import { parseHoursNote, generateIIF, fuzzyMatchCustomer } from "./iif.js";
 
-const APP_VERSION = 'v72';
+const APP_VERSION = 'v74';
 
 // ---------- DOM refs ----------
 const listView = document.getElementById('list-view');
@@ -325,6 +325,7 @@ function showAggregator(keyword) {
   activeKeyword = keyword;
   returnScreen = 'aggregator';
   hideAllScreens();
+  window.scrollTo(0, 0);
   aggregatorTitle.textContent = keyword;
   renderAggregatorList(keyword);
   aggregatorView.classList.add('active');
@@ -333,6 +334,7 @@ function showAggregator(keyword) {
 
 function showSection(key) {
   hideAllScreens();
+  window.scrollTo(0, 0);
   const titles = { aggregator: 'Aggregators', recent: "Recent Customer's Notes", notes: 'General Notes' };
   sectionViewTitle.textContent = titles[key] || key;
   renderSectionView(key);
@@ -446,6 +448,7 @@ function renderAggregatorList(keyword) {
 
 function showSettings() {
   hideAllScreens();
+  window.scrollTo(0, 0);
   recentCountInput.value = getRecentCount();
   aggregatorCountInput.value = getAggregatorCount();
   if (generalNotesCountInput) generalNotesCountInput.value = getGeneralNotesCount();
@@ -476,6 +479,7 @@ function showCustomers() {
   returnScreen = 'customers';
   activeCustomerId = null;
   hideAllScreens();
+  window.scrollTo(0, 0);
   customersView.classList.add('active');
   renderCustomersList();
   if (isDesktop) setTimeout(() => customerSearchInput.focus(), 50);
@@ -485,6 +489,7 @@ function showCustomers() {
 function showCustomerNotes(customerId, returnTo) {
   customerNotesSearchTerm = '';
   if (customerNotesSearchInput) customerNotesSearchInput.value = '';
+  window.scrollTo(0, 0);
   const customer = Storage.getCustomer(customerId);
   if (!customer) { showCustomers(); return; }
   const def = Storage.ensureDefaultNoteForCustomer(customerId);
@@ -1945,41 +1950,61 @@ function tutorialSteps() {
   return [
     {
       screen: 'home',
+      target: () => document.getElementById('settings-btn'),
+      text: 'This is the home screen, and here is the settings button.',
+    },
+    {
+      screen: 'home',
       target: () => document.querySelector('#notes-list .note-card[data-nav="customers"]'),
       text: 'Click here to view and add customers.',
     },
     {
-      screen: 'home',
-      target: () => document.getElementById('settings-btn'),
-      text: 'You can change settings, import contacts, and do other cool things here.',
-    },
-    {
       screen: 'customers',
       setup: () => showCustomers(),
-      target: () => document.querySelector('#customers-list .note-card'),
-      text: 'You can search or scroll to select a customer.',
+      target: () => document.getElementById('customers-fab'),
+      text: 'After clicking on the customers card, you see a list of all customers and you can add a new one by clicking on the blue +.',
     },
     {
       screen: 'customers',
-      target: () => document.getElementById('customers-fab'),
-      text: 'You can add new customers by clicking here.',
+      target: () => document.querySelector('#customers-list .note-card'),
+      text: 'You can search or scroll to select a customer.',
     },
     {
       screen: 'customer-notes',
       setup: () => {
         const customers = Storage.listCustomers();
         if (!customers.length) return false;
-        const c = customers[0];
-        showCustomerNotes(c.id);
+        showCustomerNotes(customers[0].id);
         return true;
       },
       target: () => document.querySelector('#customer-notes-list .note-card'),
-      text: 'Each customer has a default note. The title should be the customer\'s name.',
+      text: 'After clicking on a customer, it shows you the list of notes for that customer. The default note\'s title should be the customer\'s name.',
     },
     {
       screen: 'customer-notes',
       target: () => document.getElementById('customer-notes-fab'),
-      text: 'You can add new notes by tapping the + right here.',
+      text: 'You can add new notes to the selected customer by tapping the blue +.',
+    },
+    {
+      screen: 'customer-notes',
+      target: () => document.querySelector('#customer-notes-view .home-btn'),
+      text: 'You can click the home button any time to go back to the home screen.',
+    },
+    {
+      screen: 'home',
+      setup: () => goHome(),
+      target: () => document.querySelector('[data-section="notes"]'),
+      text: 'The home screen, in addition to the customers card, also has general notes that are not assigned to any customer.',
+    },
+    {
+      screen: 'home',
+      target: () => document.querySelector('[data-section="aggregator"]'),
+      text: 'There are also aggregator cards that show paragraphs marked with keywords, such as todo, to buy, materials, etc.',
+    },
+    {
+      screen: 'home',
+      target: () => document.querySelector('[data-section="recent"]'),
+      text: 'And finally, the home screen shows the customer notes that have been edited last.',
     },
   ];
 }
