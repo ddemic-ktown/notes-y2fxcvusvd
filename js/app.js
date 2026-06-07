@@ -3,7 +3,7 @@ import { Storage } from "./storage.js";
 import { auth, googleProvider, signInWithPopup, signOut, onAuthStateChanged } from "./firebase-init.js";
 import { parseHoursNote, generateIIF, fuzzyMatchCustomer } from "./iif.js";
 
-const APP_VERSION = 'v71';
+const APP_VERSION = 'v72';
 
 // ---------- DOM refs ----------
 const listView = document.getElementById('list-view');
@@ -11,6 +11,9 @@ const customersView = document.getElementById('customers-view');
 const customerNotesView = document.getElementById('customer-notes-view');
 const settingsView = document.getElementById('settings-view');
 const aggregatorView = document.getElementById('aggregator-view');
+const sectionView = document.getElementById('section-view');
+const sectionViewTitle = document.getElementById('section-view-title');
+const sectionViewList = document.getElementById('section-view-list');
 const aggregatorList = document.getElementById('aggregator-list');
 const aggregatorTitle = document.getElementById('aggregator-title');
 const editorView = document.getElementById('editor-view');
@@ -311,6 +314,7 @@ function hideAllScreens() {
   customerNotesView.classList.remove('active');
   settingsView.classList.remove('active');
   aggregatorView.classList.remove('active');
+  if (sectionView) sectionView.classList.remove('active');
   editorView.classList.remove('active');
   if (signinView) signinView.classList.remove('active');
   // Body class controls page-level scroll lock for editor screen
@@ -325,6 +329,90 @@ function showAggregator(keyword) {
   renderAggregatorList(keyword);
   aggregatorView.classList.add('active');
   if (!handlingPopstate) history.pushState({ screen: 'aggregator', keyword }, '');
+}
+
+function showSection(key) {
+  hideAllScreens();
+  const titles = { aggregator: 'Aggregators', recent: "Recent Customer's Notes", notes: 'General Notes' };
+  sectionViewTitle.textContent = titles[key] || key;
+  renderSectionView(key);
+  sectionView.classList.add('active');
+  if (!handlingPopstate) history.pushState({ screen: 'section', key }, '');
+}
+
+function renderSectionView(key) {
+  if (!sectionViewList) return;
+
+  if (key === 'aggregator') {
+    const keywords = getKeywords();
+    if (!keywords.length) {
+      sectionViewList.innerHTML = '<p class="empty-state">No aggregator keywords configured.</p>';
+      return;
+    }
+    const html = keywords.map(kw => {
+      const matches = Storage.aggregateParagraphsByKeyword(kw);
+      const count = matches.length;
+      let previewHtml = '';
+      if (count > 0) {
+        const m = matches[0];
+        const def = Storage.getDefaultNoteForCustomer(m.customerId);
+        const customerName = def ? (splitTitleAndBody(def.body).title || '').trim() : '';
+        const list = stripKeywordToList(m.paragraph, kw);
+        const notePart = Storage.getNote(m.noteId) ? ` - ${escapeHtml((splitTitleAndBody(Storage.getNote(m.noteId).body).title || '').trim())}` : '';
+        previewHtml = `<span class="match-customer">${escapeHtml(customerName || 'Unnamed customer')}</span>${notePart} - ${escapeHtml(list || '(empty)')}`;
+      }
+      return `
+        <article class="note-card keyword-card" data-keyword="${escapeHtml(kw)}">
+          <div class="note-head">
+            <p class="note-title">${escapeHtml(kw)}</p>
+            <span class="note-date">${count} ${count === 1 ? 'match' : 'matches'}</span>
+          </div>
+          ${previewHtml ? `<p class="note-preview">${previewHtml}</p>` : ''}
+        </article>`;
+    }).join('');
+    sectionViewList.innerHTML = html;
+    sectionViewList.querySelectorAll('.note-card[data-keyword]').forEach(card => {
+      card.addEventListener('click', () => showAggregator(card.dataset.keyword));
+    });
+    return;
+  }
+
+  if (key === 'recent') {
+    const all = Storage.listRecentCustomerNotes(9999);
+    if (!all.length) { sectionViewList.innerHTML = '<p class="empty-state">No customer notes yet.</p>'; return; }
+    sectionViewList.innerHTML = all.map(n => {
+      const def = Storage.getDefaultNoteForCustomer(n.customerId);
+      const name = def ? (splitTitleAndBody(def.body).title || '').trim() : '';
+      const { title, body } = splitTitleAndBody(n.body);
+      const safeTitle = title.trim() ? escapeHtml(title) : '<span style="color:var(--ink-soft);font-style:italic">Untitled</span>';
+      const preview = (body.split('\n').find(l => l.trim()) || '').trim();
+      return `
+        <article class="note-card home-pinned" data-id="${n.id}">
+          <span class="customer-tag">${escapeHtml(name || 'Unnamed customer')}</span>
+          <div class="note-head"><p class="note-title">${safeTitle}</p><span class="note-date">${formatDateTime(n.updated)}</span></div>
+          ${preview ? `<p class="note-preview">${escapeHtml(preview)}</p>` : ''}
+        </article>`;
+    }).join('');
+    sectionViewList.querySelectorAll('.note-card').forEach(card => {
+      card.addEventListener('click', () => {
+        const note = Storage.getNote(card.dataset.id);
+        if (note) { returnScreen = 'customer-notes'; activeCustomerId = note.customerId; showEditor(note, 'note'); }
+      });
+    });
+    return;
+  }
+
+  if (key === 'notes') {
+    const all = Storage.listNotes();
+    if (!all.length) { sectionViewList.innerHTML = '<p class="empty-state">No general notes yet.</p>'; return; }
+    sectionViewList.innerHTML = all.map(n => renderNoteCard(n)).join('');
+    sectionViewList.querySelectorAll('.note-card').forEach(card => {
+      card.addEventListener('click', () => {
+        const note = Storage.getNote(card.dataset.id);
+        if (note) { returnScreen = 'notes'; showEditor(note, 'note'); }
+      });
+    });
+  }
 }
 
 function renderAggregatorList(keyword) {
@@ -698,14 +786,22 @@ function renderNotesList() {
     ? `<p class="section-label">Older general notes:</p>` + olderNotes.map(n => renderNoteCard(n)).join('')
     : '';
 
-  const sectionLabel = (text) => `<p class="section-label">${text}</p>`;
+  const sectionLabel = (text, key) => `
+    <p class="section-label">
+      <button class="section-label-btn" data-section="${key}">${text}</button>
+      <button class="section-label-all" data-section="${key}">See all ›</button>
+    </p>`;
   const pinnedBlock = getPinnedOrder().map(key => {
-    if (key === 'aggregator') return sectionLabel('Aggregators:') + keywordHtml;
-    if (key === 'recent') return sectionLabel('Recent Notes:') + recentHtml;
-    if (key === 'notes') return sectionLabel('General Notes:') + notesHtml;
+    if (key === 'aggregator') return sectionLabel('Aggregators:', 'aggregator') + keywordHtml;
+    if (key === 'recent') return sectionLabel("Recent Customer's Notes:", 'recent') + recentHtml;
+    if (key === 'notes') return sectionLabel('General Notes:', 'notes') + notesHtml;
     return '';
   }).join('');
   notesList.innerHTML = customersCard + pinnedBlock + olderHtml;
+
+  notesList.querySelectorAll('[data-section]').forEach(btn => {
+    btn.addEventListener('click', () => showSection(btn.dataset.section));
+  });
 
   notesList.querySelectorAll('.note-card').forEach(card => {
     card.addEventListener('click', () => {
@@ -1375,6 +1471,11 @@ window.addEventListener('popstate', (e) => {
     handlingPopstate = false; return;
   }
 
+  // Section view → home
+  if (sectionView && sectionView.classList.contains('active')) {
+    showNotes(); handlingPopstate = false; return;
+  }
+
   // Screen-based: if customer-notes is showing, always go to customers
   if (customerNotesView.classList.contains('active')) {
     const ret = customerNotesReturnTo;
@@ -1391,6 +1492,7 @@ window.addEventListener('popstate', (e) => {
     handlingPopstate = false; return;
   }
   if (screen === 'aggregator') { showAggregator(e.state.keyword); handlingPopstate = false; return; }
+  if (screen === 'section') { showSection(e.state.key); handlingPopstate = false; return; }
   if (screen === 'settings') { showSettings(); handlingPopstate = false; return; }
   showNotes();
   handlingPopstate = false;

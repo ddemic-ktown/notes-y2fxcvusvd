@@ -483,6 +483,31 @@ input[type="search"]::-webkit-search-cancel-button {
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--ink-soft);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.section-label-btn {
+  background: none;
+  border: none;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ink-soft);
+  cursor: pointer;
+  padding: 0;
+  text-align: left;
+  flex: 1;
+}
+.section-label-btn:active { opacity: 0.6; }
+.section-label-all {
+  font-size: 0.7rem;
+  font-weight: 500;
+  color: var(--accent);
+  letter-spacing: 0;
+  text-transform: none;
+  flex-shrink: 0;
 }
 
 .empty-state {
