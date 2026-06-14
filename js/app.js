@@ -3,7 +3,7 @@ import { Storage } from "./storage.js";
 import { auth, googleProvider, signInWithPopup, signOut, onAuthStateChanged } from "./firebase-init.js";
 import { parseHoursNote, generateIIF, fuzzyMatchCustomer } from "./iif.js";
 
-const APP_VERSION = 'v2026.06.14-000003';
+const APP_VERSION = 'v2026.06.14-000004';
 
 // ---------- DOM refs ----------
 const listView = document.getElementById('list-view');

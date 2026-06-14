@@ -49,6 +49,27 @@ function recallScore(qWords, haystackText) {
   return matched / qWords.length;
 }
 
+// Length-weighted recall: longer/more-distinctive words count more than short ones.
+// e.g. "tamarack" (weight 6) vs "rob" (weight 1) — avoids short first-name false matches.
+function weightedRecallScore(qWords, haystackText) {
+  if (!qWords.length) return 0;
+  const hWords = new Set(normalize(haystackText).split(' ').filter(w => w.length > 1));
+  let matched = 0;
+  let total = 0;
+  for (const w of qWords) {
+    const weight = Math.max(1, w.length - 2);
+    total += weight;
+    if (hWords.has(w)) { matched += weight; continue; }
+    for (const hw of hWords) {
+      const dist = levenshtein(w, hw);
+      if (dist <= Math.max(1, Math.floor(Math.max(w.length, hw.length) * 0.3))) {
+        matched += weight * 0.7; break;
+      }
+    }
+  }
+  return total > 0 ? matched / total : 0;
+}
+
 // Reverse-direction match: scans a chunk of free-form text (e.g. one line of
 // a work note) for mentions of a *known* customer — checking both their name
 // and any other recorded info (address, notes, etc. from their default note).
@@ -58,6 +79,7 @@ function recallScore(qWords, haystackText) {
 // (title + everything else, e.g. address)
 export function matchCustomerToText(text, customers) {
   if (!customers.length) return { name: '', score: 0 };
+  const textWords = queryWords(text);
   let best = { name: '', score: 0 };
   for (const c of customers) {
     const nameWords = queryWords(c.name || '');
@@ -65,9 +87,16 @@ export function matchCustomerToText(text, customers) {
     const infoWords = queryWords(c.searchText || c.name || '');
     const nameScore = recallScore(nameWords, text);
     const infoScore = recallScore(infoWords, text);
-    // The name is the primary signal; recorded info (which includes the
-    // address) helps confirm the match or break ties between similar names.
-    const score = Math.max(nameScore, nameScore * 0.6 + infoScore * 0.4);
+    // Reverse score: what fraction (by word weight) of the text's words appear
+    // in this customer's full info? A customer whose note contains ALL the
+    // clue words from the line (e.g. both "rob" and "tamarack") scores much
+    // higher than one whose name merely shares a short word like "rob".
+    const reverseScore = weightedRecallScore(textWords, c.searchText || c.name || '');
+    const score = Math.max(
+      nameScore,
+      reverseScore * 0.7,
+      nameScore * 0.5 + infoScore * 0.3 + reverseScore * 0.2
+    );
     if (score > best.score) best = { name: c.name, score };
   }
   return best;
