@@ -3,7 +3,7 @@ import { Storage } from "./storage.js";
 import { auth, googleProvider, signInWithPopup, signOut, onAuthStateChanged } from "./firebase-init.js";
 import { parseHoursNote, generateIIF, fuzzyMatchCustomer } from "./iif.js";
 
-const APP_VERSION = 'v2026.06.13-212617';
+const APP_VERSION = 'v2026.06.14-000003';
 
 // ---------- DOM refs ----------
 const listView = document.getElementById('list-view');
@@ -2005,7 +2005,18 @@ function openIIFModal() {
 
   const reviewCount = iifParsedEntries.filter(e => e.needsReview).length;
   const total = iifParsedEntries.length;
-  iifStatus.textContent = `${total} entr${total === 1 ? 'y' : 'ies'} parsed from your hours note.`;
+
+  // Check for last export marker to show parsing cutoff
+  const markerRe = /^\/\/\s*----\s*IIF exported:\s*(.+?)\s*----/im;
+  const allBodyLines = body.split('\n');
+  let lastMarkerText = '';
+  for (let i = allBodyLines.length - 1; i >= 0; i--) {
+    const m = allBodyLines[i].match(markerRe);
+    if (m) { lastMarkerText = m[1].trim(); break; }
+  }
+
+  iifStatus.innerHTML = `${total} entr${total === 1 ? 'y' : 'ies'} parsed from your hours note.`
+    + (lastMarkerText ? `<br><span style="font-size:12px;color:var(--ink-soft);">📅 Parsing from ${escapeHtml(lastMarkerText)} onward</span>` : '');
   if (iifReviewNote) iifReviewNote.textContent = reviewCount ? `⚠ ${reviewCount} entr${reviewCount === 1 ? 'y needs' : 'ies need'} review (orange rows)` : '';
 
   renderIIFEntries(iifParsedEntries);
@@ -2028,6 +2039,21 @@ if (iifDownloadBtn) iifDownloadBtn.addEventListener('click', () => {
   a.download = `hours-${new Date().toISOString().slice(0,10)}.iif`;
   a.click();
   URL.revokeObjectURL(url);
+
+  // Append export marker to the hours note so next export starts from here
+  const hoursNote = findHoursNote();
+  if (hoursNote) {
+    const now = new Date();
+    const mm = String(now.getMonth() + 1).padStart(2, '0');
+    const dd = String(now.getDate()).padStart(2, '0');
+    const yyyy = now.getFullYear();
+    let h = now.getHours();
+    const min = String(now.getMinutes()).padStart(2, '0');
+    const ampm = h >= 12 ? 'pm' : 'am';
+    h = h % 12 || 12;
+    const marker = `\n// ---- IIF exported: ${mm}/${dd}/${yyyy} ${h}:${min}${ampm} ----`;
+    Storage.updateNote(hoursNote.id, hoursNote.body + marker);
+  }
 });
 
 // ---------- orphaned notes view ----------

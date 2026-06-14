@@ -150,6 +150,8 @@ export function formatDuration(hours) {
   return `${h}:${String(m).padStart(2, '0')}`;
 }
 
+const EXPORT_MARKER_RE = /^\/\/\s*----\s*IIF exported:/i;
+
 // ---------- Main parser ----------
 // employees = [{ name: 'Davor' }, ...] — passed in from app settings
 export function parseHoursNote(text, customers, employees) {
@@ -158,7 +160,17 @@ export function parseHoursNote(text, customers, employees) {
     ? employees.map(e => (typeof e === 'string' ? e : e.name).trim())
     : ['Davor', 'Janet'];
 
-  const lines = text.split('\n');
+  const allLines = text.split('\n');
+
+  // Only parse lines after the last export marker (if any)
+  let startIndex = 0;
+  for (let i = allLines.length - 1; i >= 0; i--) {
+    if (EXPORT_MARKER_RE.test(allLines[i].trim())) {
+      startIndex = i + 1;
+      break;
+    }
+  }
+  const lines = allLines.slice(startIndex);
   const entries = [];
   let currentDate = null;
   let activeEmployees = [];
