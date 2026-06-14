@@ -3,7 +3,7 @@ import { Storage } from "./storage.js";
 import { auth, googleProvider, signInWithPopup, signOut, onAuthStateChanged } from "./firebase-init.js";
 import { parseHoursNote, generateIIF, fuzzyMatchCustomer } from "./iif.js";
 
-const APP_VERSION = 'v2026.06.13-205836';
+const APP_VERSION = 'v2026.06.13-210720';
 
 // ---------- DOM refs ----------
 const listView = document.getElementById('list-view');
@@ -74,6 +74,8 @@ const orphanView = document.getElementById('orphan-view');
 const orphanList = document.getElementById('orphan-list');
 const orphanSelectAllBtn = document.getElementById('orphan-select-all-btn');
 const orphanDeleteSelectedBtn = document.getElementById('orphan-delete-selected-btn');
+const orphanSortAlphaBtn = document.getElementById('orphan-sort-alpha');
+const orphanSortRecentBtn = document.getElementById('orphan-sort-recent');
 
 // ---------- settings (backed by Firestore via Storage) ----------
 const PINNED_SECTIONS = {
@@ -2016,9 +2018,33 @@ if (iifDownloadBtn) iifDownloadBtn.addEventListener('click', () => {
 });
 
 // ---------- orphaned notes view ----------
+let _orphanSort = 'recent'; // 'alpha' | 'recent'
+
+function updateOrphanSortButtons() {
+  if (orphanSortAlphaBtn) orphanSortAlphaBtn.setAttribute('aria-pressed', _orphanSort === 'alpha');
+  if (orphanSortRecentBtn) orphanSortRecentBtn.setAttribute('aria-pressed', _orphanSort === 'recent');
+}
+
+function sortOrphans(orphans) {
+  const sorted = orphans.slice();
+  if (_orphanSort === 'alpha') {
+    sorted.sort((a, b) => {
+      const at = splitTitleAndBody(a.body).title.trim().toLowerCase();
+      const bt = splitTitleAndBody(b.body).title.trim().toLowerCase();
+      if (!at && bt) return 1;
+      if (at && !bt) return -1;
+      return at.localeCompare(bt);
+    });
+  } else {
+    sorted.sort((a, b) => new Date(b.updated).getTime() - new Date(a.updated).getTime());
+  }
+  return sorted;
+}
+
 function renderOrphanList() {
   if (!orphanList) return;
-  const orphans = Storage.listOrphanedNotes();
+  const orphans = sortOrphans(Storage.listOrphanedNotes());
+  updateOrphanSortButtons();
   if (orphans.length === 0) {
     orphanList.innerHTML = '<p class="empty-state">No orphaned notes.</p>';
     if (orphanDeleteSelectedBtn) orphanDeleteSelectedBtn.disabled = true;
@@ -2075,6 +2101,22 @@ if (orphanDeleteSelectedBtn) {
     orphanList.querySelectorAll('.orphan-cb:checked').forEach(cb => {
       Storage.deleteNote(cb.dataset.id);
     });
+    renderOrphanList();
+  });
+}
+
+if (orphanSortAlphaBtn) {
+  orphanSortAlphaBtn.addEventListener('click', () => {
+    if (_orphanSort === 'alpha') return;
+    _orphanSort = 'alpha';
+    renderOrphanList();
+  });
+}
+
+if (orphanSortRecentBtn) {
+  orphanSortRecentBtn.addEventListener('click', () => {
+    if (_orphanSort === 'recent') return;
+    _orphanSort = 'recent';
     renderOrphanList();
   });
 }
