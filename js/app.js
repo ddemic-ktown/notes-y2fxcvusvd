@@ -3,7 +3,7 @@ import { Storage } from "./storage.js";
 import { auth, googleProvider, signInWithPopup, signOut, onAuthStateChanged } from "./firebase-init.js";
 import { parseHoursNote, generateIIF, fuzzyMatchCustomer } from "./iif.js";
 
-const APP_VERSION = 'v2026.06.13-200730';
+const APP_VERSION = 'v2026.06.13-205836';
 
 // ---------- DOM refs ----------
 const listView = document.getElementById('list-view');
@@ -70,10 +70,10 @@ const noteSearchCount = document.getElementById('note-search-count');
 const searchPrevBtn = document.getElementById('search-prev-btn');
 const searchNextBtn = document.getElementById('search-next-btn');
 const deleteBtn = document.getElementById('delete-btn');
-const orphanModal = document.getElementById('orphan-modal');
-const orphanNotesList = document.getElementById('orphan-notes-list');
-const orphanDeleteBtn = document.getElementById('orphan-delete-btn');
-const orphanIgnoreBtn = document.getElementById('orphan-ignore-btn');
+const orphanView = document.getElementById('orphan-view');
+const orphanList = document.getElementById('orphan-list');
+const orphanSelectAllBtn = document.getElementById('orphan-select-all-btn');
+const orphanDeleteSelectedBtn = document.getElementById('orphan-delete-selected-btn');
 
 // ---------- settings (backed by Firestore via Storage) ----------
 const PINNED_SECTIONS = {
@@ -321,6 +321,7 @@ function hideAllScreens() {
   settingsView.classList.remove('active');
   aggregatorView.classList.remove('active');
   if (sectionView) sectionView.classList.remove('active');
+  if (orphanView) orphanView.classList.remove('active');
   editorView.classList.remove('active');
   if (signinView) signinView.classList.remove('active');
   // Body class controls page-level scroll lock for editor screen
@@ -854,7 +855,16 @@ function renderNotesList() {
     if (key === 'notes') return sectionLabel('General Notes:', 'notes') + notesHtml;
     return '';
   }).join('');
-  notesList.innerHTML = customersCard + pinnedBlock + olderHtml;
+  const orphanCount = Storage.listOrphanedNotes().length;
+  const orphanCard = `
+    <article class="note-card orphan-nav-card" data-nav="orphans" style="opacity:${orphanCount > 0 ? '1' : '0.45'};">
+      <div class="note-head">
+        <p class="note-title">Orphaned Notes</p>
+        <span class="note-date">${orphanCount}</span>
+      </div>
+      <p class="note-preview">${orphanCount > 0 ? 'Tap to review notes with no customer' : 'No orphaned notes'}</p>
+    </article>`;
+  notesList.innerHTML = customersCard + pinnedBlock + olderHtml + orphanCard;
 
   notesList.querySelectorAll('[data-section]').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -871,15 +881,16 @@ function renderNotesList() {
         setTimeout(showCustomers, 0);
       }
       else if (card.dataset.keyword) showAggregator(card.dataset.keyword);
+      else if (card.dataset.nav === 'orphans') {
+        const count = Storage.listOrphanedNotes().length;
+        if (count > 0) showOrphanNotes();
+      }
       else {
         const note = Storage.getNote(card.dataset.id);
         if (note) { returnScreen = 'notes'; showEditor(note, 'note'); }
       }
     });
   });
-
-  // Check for orphaned notes after render — deferred so it runs outside the render cycle
-  setTimeout(maybeShowOrphanDialog, 0);
 }
 
 function renderNoteCard(n) {
@@ -1833,6 +1844,8 @@ function rerenderCurrent() {
     showCustomerNotes(activeCustomerId, customerNotesReturnTo);
   } else if (aggregatorView.classList.contains('active') && activeKeyword) {
     renderAggregatorList(activeKeyword);
+  } else if (orphanView && orphanView.classList.contains('active')) {
+    renderOrphanList();
   } else if (settingsView.classList.contains('active')) {
     recentCountInput.value = getRecentCount();
     aggregatorCountInput.value = getAggregatorCount();
@@ -2002,41 +2015,67 @@ if (iifDownloadBtn) iifDownloadBtn.addEventListener('click', () => {
   URL.revokeObjectURL(url);
 });
 
-// ---------- orphaned notes dialog ----------
-let _orphanDialogShown = false;
-
-function maybeShowOrphanDialog() {
-  if (!orphanModal) return;
-  if (_orphanDialogShown) return;       // already responded this session
-  if (!orphanModal.hidden) return;      // already visible
+// ---------- orphaned notes view ----------
+function renderOrphanList() {
+  if (!orphanList) return;
   const orphans = Storage.listOrphanedNotes();
-  if (orphans.length === 0) return;
-
-  _orphanDialogShown = true;
-
-  orphanNotesList.innerHTML = orphans.map(n => {
-    const { title } = splitTitleAndBody(n.body);
-    const label = title.trim() || '(Untitled note)';
-    return `<li style="padding:6px 0; border-bottom:1px solid var(--line); font-size:14px;">${escapeHtml(label)}</li>`;
+  if (orphans.length === 0) {
+    orphanList.innerHTML = '<p class="empty-state">No orphaned notes.</p>';
+    if (orphanDeleteSelectedBtn) orphanDeleteSelectedBtn.disabled = true;
+    return;
+  }
+  orphanList.innerHTML = orphans.map(n => {
+    const { title, body } = splitTitleAndBody(n.body);
+    const safeTitle = title.trim()
+      ? escapeHtml(title)
+      : '<span style="color:var(--ink-soft);font-style:italic">Untitled</span>';
+    const firstLine = (body.split('\n').find(l => l.trim()) || '').trim();
+    const safePreview = firstLine ? escapeHtml(firstLine) : '';
+    return `
+      <label class="orphan-item">
+        <input type="checkbox" class="orphan-cb" data-id="${n.id}" />
+        <div class="orphan-item-body">
+          <p class="note-title" style="margin:0;font-size:15px;">${safeTitle}</p>
+          ${safePreview ? `<p class="note-preview" style="margin:2px 0 0;">${safePreview}</p>` : ''}
+        </div>
+      </label>`;
   }).join('');
 
-  orphanModal.hidden = false;
-  orphanModal.dataset.orphanIds = orphans.map(n => n.id).join(',');
-}
-
-if (orphanDeleteBtn) {
-  orphanDeleteBtn.addEventListener('click', () => {
-    const ids = (orphanModal.dataset.orphanIds || '').split(',').filter(Boolean);
-    ids.forEach(id => Storage.deleteNote(id));
-    orphanModal.hidden = true;
-    delete orphanModal.dataset.orphanIds;
+  orphanList.querySelectorAll('.orphan-cb').forEach(cb => {
+    cb.addEventListener('change', updateOrphanDeleteBtn);
   });
 }
 
-if (orphanIgnoreBtn) {
-  orphanIgnoreBtn.addEventListener('click', () => {
-    orphanModal.hidden = true;
-    delete orphanModal.dataset.orphanIds;
+function updateOrphanDeleteBtn() {
+  if (!orphanDeleteSelectedBtn || !orphanList) return;
+  const anyChecked = orphanList.querySelector('.orphan-cb:checked') !== null;
+  orphanDeleteSelectedBtn.disabled = !anyChecked;
+}
+
+function showOrphanNotes() {
+  hideAllScreens();
+  orphanView.classList.add('active');
+  window.scrollTo(0, 0);
+  history.pushState({ screen: 'orphans' }, '');
+  renderOrphanList();
+  if (orphanDeleteSelectedBtn) orphanDeleteSelectedBtn.disabled = true;
+}
+
+if (orphanSelectAllBtn) {
+  orphanSelectAllBtn.addEventListener('click', () => {
+    const cbs = orphanList.querySelectorAll('.orphan-cb');
+    const allChecked = [...cbs].every(cb => cb.checked);
+    cbs.forEach(cb => { cb.checked = !allChecked; });
+    updateOrphanDeleteBtn();
+  });
+}
+
+if (orphanDeleteSelectedBtn) {
+  orphanDeleteSelectedBtn.addEventListener('click', () => {
+    orphanList.querySelectorAll('.orphan-cb:checked').forEach(cb => {
+      Storage.deleteNote(cb.dataset.id);
+    });
+    renderOrphanList();
   });
 }
 
