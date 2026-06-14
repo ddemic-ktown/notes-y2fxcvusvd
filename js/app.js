@@ -3,7 +3,7 @@ import { Storage } from "./storage.js";
 import { auth, googleProvider, signInWithPopup, signOut, onAuthStateChanged } from "./firebase-init.js";
 import { parseHoursNote, generateIIF, fuzzyMatchCustomer } from "./iif.js";
 
-const APP_VERSION = 'v2026.06.13-211324';
+const APP_VERSION = 'v2026.06.13-212617';
 
 // ---------- DOM refs ----------
 const listView = document.getElementById('list-view');
@@ -1667,9 +1667,13 @@ function renderAssignCustomerList(filter) {
   }
   assignCustomerList.innerHTML = customers.map(c => {
     const def = Storage.getDefaultNoteForCustomer(c.id);
-    const name = def ? (splitTitleAndBody(def.body).title || '').trim() : '';
-    const display = name || 'Unnamed customer';
-    return `<li class="assign-customer-item" data-id="${c.id}" style="padding:12px 16px;cursor:pointer;font-size:15px;border-bottom:1px solid var(--line);">${escapeHtml(display)}</li>`;
+    const { title, body } = def ? splitTitleAndBody(def.body) : { title: '', body: '' };
+    const name = title.trim() || 'Unnamed customer';
+    const secondLine = (body.split('\n').find(l => l.trim()) || '').trim();
+    return `<li class="assign-customer-item" data-id="${c.id}" style="padding:10px 16px;cursor:pointer;border-bottom:1px solid var(--line);">
+      <p style="margin:0;font-size:15px;">${escapeHtml(name)}</p>
+      ${secondLine ? `<p style="margin:2px 0 0;font-size:12px;color:var(--ink-soft);">${escapeHtml(secondLine)}</p>` : ''}
+    </li>`;
   }).join('');
   assignCustomerList.querySelectorAll('.assign-customer-item').forEach(item => {
     item.addEventListener('click', () => {
