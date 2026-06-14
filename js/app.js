@@ -3,7 +3,7 @@ import { Storage } from "./storage.js";
 import { auth, googleProvider, signInWithPopup, signOut, onAuthStateChanged } from "./firebase-init.js";
 import { parseHoursNote, generateIIF, fuzzyMatchCustomer } from "./iif.js";
 
-const APP_VERSION = 'v2026.06.13-210720';
+const APP_VERSION = 'v2026.06.13-211324';
 
 // ---------- DOM refs ----------
 const listView = document.getElementById('list-view');
@@ -594,6 +594,8 @@ function showEditor(record, type, cursorHint) {
     backLabel = 'Customers';
   } else if (returnScreen === 'aggregator' && activeKeyword) {
     backLabel = activeKeyword;
+  } else if (returnScreen === 'orphans') {
+    backLabel = 'Orphaned Notes';
   }
   if (backBtn) {
     if (backLabel) {
@@ -630,7 +632,8 @@ function showEditor(record, type, cursorHint) {
   const assignBtnEl = document.getElementById('assign-btn');
   if (assignBtnEl) assignBtnEl.hidden = (Storage.getRole() !== 'admin' || type !== 'note');
   const assignCustomerBtnEl = document.getElementById('assign-customer-btn');
-  if (assignCustomerBtnEl) assignCustomerBtnEl.hidden = !(type === 'note' && !record.customerId);
+  const isOrphaned = type === 'note' && !!record.customerId && !Storage.getCustomer(record.customerId);
+  if (assignCustomerBtnEl) assignCustomerBtnEl.hidden = !(type === 'note' && (!record.customerId || isOrphaned));
   const editorIifBtnEl = document.getElementById('editor-iif-btn');
   if (editorIifBtnEl) {
     const isHoursNote = type === 'note' && (splitTitleAndBody(record.body).title || '').trim().toLowerCase() === 'hours';
@@ -687,6 +690,11 @@ function returnFromEditor() {
     showCustomers();
     if (handlingPopstate && currentPopstateTarget !== 'customers') {
       history.pushState({ screen: 'customers' }, '');
+    }
+  } else if (returnScreen === 'orphans') {
+    showOrphanNotes();
+    if (handlingPopstate && currentPopstateTarget !== 'orphans') {
+      history.pushState({ screen: 'orphans' }, '');
     }
   } else {
     showNotes();
@@ -1576,6 +1584,7 @@ window.addEventListener('popstate', (e) => {
     handlingPopstate = false; return;
   }
   if (screen === 'aggregator') { showAggregator(e.state.keyword); handlingPopstate = false; return; }
+  if (screen === 'orphans') { showOrphanNotes(); handlingPopstate = false; return; }
   if (screen === 'section') { showSection(e.state.key); handlingPopstate = false; return; }
   if (screen === 'settings') { showSettings(); handlingPopstate = false; return; }
   showNotes();
@@ -2058,17 +2067,24 @@ function renderOrphanList() {
     const firstLine = (body.split('\n').find(l => l.trim()) || '').trim();
     const safePreview = firstLine ? escapeHtml(firstLine) : '';
     return `
-      <label class="orphan-item">
+      <div class="orphan-item">
         <input type="checkbox" class="orphan-cb" data-id="${n.id}" />
-        <div class="orphan-item-body">
+        <div class="orphan-item-body" data-id="${n.id}">
           <p class="note-title" style="margin:0;font-size:15px;">${safeTitle}</p>
           ${safePreview ? `<p class="note-preview" style="margin:2px 0 0;">${safePreview}</p>` : ''}
         </div>
-      </label>`;
+      </div>`;
   }).join('');
 
   orphanList.querySelectorAll('.orphan-cb').forEach(cb => {
     cb.addEventListener('change', updateOrphanDeleteBtn);
+  });
+
+  orphanList.querySelectorAll('.orphan-item-body').forEach(el => {
+    el.addEventListener('click', () => {
+      const note = Storage.getNote(el.dataset.id);
+      if (note) { returnScreen = 'orphans'; showEditor(note, 'note'); }
+    });
   });
 }
 
