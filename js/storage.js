@@ -301,11 +301,8 @@ export const Storage = {
     for (const note of _cache.notes) {
       if (!note.customerId) continue;
       if (_customersReady && !_cache.customers.find(c => c.id === note.customerId)) {
-        // Orphaned note — its customer was deleted but the note survived.
-        // Only treat it as orphaned once the customers list has actually
-        // finished loading, so we never mistake "not loaded yet" for "deleted".
-        // Clean it up so it stops reappearing in search results.
-        this.deleteNote(note.id);
+        // Orphaned note — skip it in aggregation results.
+        // The app will prompt the user to delete or ignore orphaned notes.
         continue;
       }
       const lines = (note.body || "").split("\n");
@@ -335,6 +332,13 @@ export const Storage = {
     }
     results.sort((a, b) => new Date(b.updated).getTime() - new Date(a.updated).getTime());
     return results;
+  },
+
+  listOrphanedNotes() {
+    if (!_customersReady) return [];
+    return _cache.notes.filter(n =>
+      n.customerId && !_cache.customers.find(c => c.id === n.customerId)
+    );
   },
 
   // ---------- Settings ----------

@@ -292,6 +292,21 @@
     </div>
   </div>
 
+  <!-- Orphaned Notes Modal -->
+  <div id="orphan-modal" class="modal-overlay" hidden>
+    <div class="modal-panel">
+      <div class="modal-header">
+        <h2 class="modal-title">Orphaned Notes Found</h2>
+      </div>
+      <p class="muted" style="font-size:13px; margin:0 0 12px;">These notes belong to customers that no longer exist. What would you like to do?</p>
+      <ul id="orphan-notes-list" class="members-list" style="max-height:200px; overflow-y:auto;"></ul>
+      <div style="display:flex; gap:8px; margin-top:14px;">
+        <button id="orphan-delete-btn" class="primary" style="flex:1; padding:10px; border:none; border-radius:var(--radius); font-weight:600; font-size:15px; cursor:pointer; background:var(--danger); color:#fff;">Delete</button>
+        <button id="orphan-ignore-btn" style="flex:1; padding:10px; border:1px solid var(--line); border-radius:var(--radius); font-weight:600; font-size:15px; cursor:pointer; background:var(--surface); color:var(--ink);">Ignore</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Tutorial Overlay -->
   <div id="tutorial-overlay" class="tutorial-overlay" hidden>
     <div id="tutorial-bubble" class="tutorial-bubble">

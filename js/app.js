@@ -3,7 +3,7 @@ import { Storage } from "./storage.js";
 import { auth, googleProvider, signInWithPopup, signOut, onAuthStateChanged } from "./firebase-init.js";
 import { parseHoursNote, generateIIF, fuzzyMatchCustomer } from "./iif.js";
 
-const APP_VERSION = 'v2026.06.07-142452';
+const APP_VERSION = 'v2026.06.13-193904';
 
 // ---------- DOM refs ----------
 const listView = document.getElementById('list-view');
@@ -70,6 +70,10 @@ const noteSearchCount = document.getElementById('note-search-count');
 const searchPrevBtn = document.getElementById('search-prev-btn');
 const searchNextBtn = document.getElementById('search-next-btn');
 const deleteBtn = document.getElementById('delete-btn');
+const orphanModal = document.getElementById('orphan-modal');
+const orphanNotesList = document.getElementById('orphan-notes-list');
+const orphanDeleteBtn = document.getElementById('orphan-delete-btn');
+const orphanIgnoreBtn = document.getElementById('orphan-ignore-btn');
 
 // ---------- settings (backed by Firestore via Storage) ----------
 const PINNED_SECTIONS = {
@@ -873,6 +877,9 @@ function renderNotesList() {
       }
     });
   });
+
+  // Check for orphaned notes after render — deferred so it runs outside the render cycle
+  setTimeout(maybeShowOrphanDialog, 0);
 }
 
 function renderNoteCard(n) {
@@ -1994,6 +2001,44 @@ if (iifDownloadBtn) iifDownloadBtn.addEventListener('click', () => {
   a.click();
   URL.revokeObjectURL(url);
 });
+
+// ---------- orphaned notes dialog ----------
+const _ignoredOrphanIds = new Set();
+
+function maybeShowOrphanDialog() {
+  if (!orphanModal) return;
+  const orphans = Storage.listOrphanedNotes().filter(n => !_ignoredOrphanIds.has(n.id));
+  if (orphans.length === 0) return;
+
+  orphanNotesList.innerHTML = orphans.map(n => {
+    const { title } = splitTitleAndBody(n.body);
+    const label = title.trim() || '(Untitled note)';
+    return `<li style="padding:6px 0; border-bottom:1px solid var(--line); font-size:14px;">${escapeHtml(label)}</li>`;
+  }).join('');
+
+  orphanModal.hidden = false;
+
+  // Store current orphan IDs on the modal so handlers know which to act on
+  orphanModal.dataset.orphanIds = orphans.map(n => n.id).join(',');
+}
+
+if (orphanDeleteBtn) {
+  orphanDeleteBtn.addEventListener('click', () => {
+    const ids = (orphanModal.dataset.orphanIds || '').split(',').filter(Boolean);
+    ids.forEach(id => Storage.deleteNote(id));
+    orphanModal.hidden = true;
+    delete orphanModal.dataset.orphanIds;
+  });
+}
+
+if (orphanIgnoreBtn) {
+  orphanIgnoreBtn.addEventListener('click', () => {
+    const ids = (orphanModal.dataset.orphanIds || '').split(',').filter(Boolean);
+    ids.forEach(id => _ignoredOrphanIds.add(id));
+    orphanModal.hidden = true;
+    delete orphanModal.dataset.orphanIds;
+  });
+}
 
 // ---------- tutorial ----------
 const tutorialOverlay = document.getElementById('tutorial-overlay');
