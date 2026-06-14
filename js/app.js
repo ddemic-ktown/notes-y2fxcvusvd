@@ -3,7 +3,7 @@ import { Storage } from "./storage.js";
 import { auth, googleProvider, signInWithPopup, signOut, onAuthStateChanged } from "./firebase-init.js";
 import { parseHoursNote, generateIIF, fuzzyMatchCustomer } from "./iif.js";
 
-const APP_VERSION = 'v2026.06.13-193904';
+const APP_VERSION = 'v2026.06.13-200730';
 
 // ---------- DOM refs ----------
 const listView = document.getElementById('list-view');
@@ -2003,12 +2003,16 @@ if (iifDownloadBtn) iifDownloadBtn.addEventListener('click', () => {
 });
 
 // ---------- orphaned notes dialog ----------
-const _ignoredOrphanIds = new Set();
+let _orphanDialogShown = false;
 
 function maybeShowOrphanDialog() {
   if (!orphanModal) return;
-  const orphans = Storage.listOrphanedNotes().filter(n => !_ignoredOrphanIds.has(n.id));
+  if (_orphanDialogShown) return;       // already responded this session
+  if (!orphanModal.hidden) return;      // already visible
+  const orphans = Storage.listOrphanedNotes();
   if (orphans.length === 0) return;
+
+  _orphanDialogShown = true;
 
   orphanNotesList.innerHTML = orphans.map(n => {
     const { title } = splitTitleAndBody(n.body);
@@ -2017,8 +2021,6 @@ function maybeShowOrphanDialog() {
   }).join('');
 
   orphanModal.hidden = false;
-
-  // Store current orphan IDs on the modal so handlers know which to act on
   orphanModal.dataset.orphanIds = orphans.map(n => n.id).join(',');
 }
 
@@ -2033,8 +2035,6 @@ if (orphanDeleteBtn) {
 
 if (orphanIgnoreBtn) {
   orphanIgnoreBtn.addEventListener('click', () => {
-    const ids = (orphanModal.dataset.orphanIds || '').split(',').filter(Boolean);
-    ids.forEach(id => _ignoredOrphanIds.add(id));
     orphanModal.hidden = true;
     delete orphanModal.dataset.orphanIds;
   });
