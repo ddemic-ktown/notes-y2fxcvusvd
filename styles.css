@@ -542,6 +542,11 @@ input[type="search"]::-webkit-search-cancel-button {
   font-style: italic;
 }
 
+.empty-state.error-state {
+  color: #c0392b;
+  font-style: normal;
+}
+
 /* Orphaned notes view */
 .orphan-item {
   display: flex;

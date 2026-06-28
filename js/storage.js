@@ -25,6 +25,7 @@ let _role = null; // 'admin' | 'employee' | 'customer'
 let _unsubs = [];
 let _ready = false;
 let _customersReady = false;
+let _notesError = null;
 
 function emit() { for (const cb of _listeners) cb(); }
 function uid() {
@@ -43,16 +44,22 @@ function orgDoc()       { return doc(db, `orgs/${_orgId}`); }
 // ---------- listeners ----------
 function attachListeners() {
   detachListeners();
-  _unsubs.push(onSnapshot(notesCol(), (snap) => {
-    const all = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-    // Non-admins only see notes with no assignedTo (shared with all) or their uid in assignedTo
-    if (_role === 'admin') {
-      _cache.notes = all;
-    } else {
-      _cache.notes = all.filter(n =>
-        Array.isArray(n.assignedTo) && n.assignedTo.includes(_uid)
-      );
-    }
+  // Admins can listen to the full notes collection. Employee/customer roles must
+  // scope the query itself (assignedTo array-contains uid) to match firestore.rules —
+  // Firestore rejects an unscoped collection listener when the rule depends on a
+  // per-document field like assignedTo, rather than silently filtering results.
+  const notesQuery = _role === 'admin'
+    ? notesCol()
+    : query(notesCol(), where('assignedTo', 'array-contains', _uid));
+  _unsubs.push(onSnapshot(notesQuery, (snap) => {
+    _cache.notes = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    _notesError = null;
+    _ready = true;
+    emit();
+  }, (err) => {
+    console.warn('notes listener error', err);
+    _cache.notes = [];
+    _notesError = (err && (err.message || err.code)) ? `${err.code || 'error'}: ${err.message || err}` : String(err);
     _ready = true;
     emit();
   }));
@@ -135,6 +142,7 @@ async function resolveOrg(userId, userEmail) {
 export const Storage = {
   onChange(cb) { _listeners.add(cb); return () => _listeners.delete(cb); },
   isReady() { return _ready; },
+  getNotesError() { return _notesError; },
   getRole() { return _role; },
   getOrgId() { return _orgId; },
   getUid() { return _uid; },
@@ -143,6 +151,7 @@ export const Storage = {
     _uid = userId;
     _ready = false;
     _customersReady = false;
+    _notesError = null;
     _cache.notes = [];
     _cache.customers = [];
     _cache.settings = { ...DEFAULT_SETTINGS };
@@ -161,6 +170,7 @@ export const Storage = {
     _uid = null; _orgId = null; _role = null;
     _ready = false;
     _customersReady = false;
+    _notesError = null;
     _cache.notes = []; _cache.customers = [];
     _cache.settings = { ...DEFAULT_SETTINGS };
     _cache.members = []; _cache.invites = [];

@@ -3,7 +3,8 @@ import { Storage } from "./storage.js";
 import { auth, googleProvider, signInWithPopup, signOut, onAuthStateChanged } from "./firebase-init.js";
 import { parseHoursNote, generateIIF, fuzzyMatchCustomer } from "./iif.js";
 
-const APP_VERSION = 'v2026.06.14-000004';
+// Version format: v YYYY.MM.DD-HHMM (Pacific time) — bump both APP_VERSION and sw.js VERSION on every change.
+const APP_VERSION = 'v2026.06.28-1018';
 
 // ---------- DOM refs ----------
 const listView = document.getElementById('list-view');
@@ -290,6 +291,15 @@ function escapeHtml(s) {
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
   }[c]));
 }
+// Returns an empty-state message for notes lists, swapping in the Firestore error
+// (if the notes listener failed) instead of the misleading "no notes yet" text.
+function notesEmptyState(defaultMessage) {
+  const err = Storage.getNotesError();
+  if (err) {
+    return `<p class="empty-state error-state">Couldn't load notes — ${escapeHtml(err)}</p>`;
+  }
+  return `<p class="empty-state">${defaultMessage}</p>`;
+}
 function formatDate(iso) {
   const d = new Date(iso);
   const now = new Date();
@@ -428,7 +438,7 @@ function renderSectionView(key) {
       return;
     }
     const all = Storage.listRecentCustomerNotes(sectionRecentLimit);
-    if (!all.length) { sectionViewList.innerHTML = '<p class="empty-state">No customer notes yet.</p>'; return; }
+    if (!all.length) { sectionViewList.innerHTML = notesEmptyState('No customer notes yet.'); return; }
     sectionViewList.innerHTML = all.map(n => {
       const def = Storage.getDefaultNoteForCustomer(n.customerId);
       const name = def ? (splitTitleAndBody(def.body).title || '').trim() : '';
@@ -457,7 +467,7 @@ function renderSectionView(key) {
       return;
     }
     const all = Storage.listNotes();
-    if (!all.length) { sectionViewList.innerHTML = '<p class="empty-state">No general notes yet.</p>'; return; }
+    if (!all.length) { sectionViewList.innerHTML = notesEmptyState('No general notes yet.'); return; }
     sectionViewList.innerHTML = all.map(n => renderNoteCard(n)).join('');
     sectionViewList.querySelectorAll('.note-card').forEach(card => {
       card.addEventListener('click', () => {
@@ -845,7 +855,9 @@ function renderNotesList() {
 
   let notesHtml = '';
   if (notes.length === 0) {
-    notesHtml = '<p class="empty-state">No notes yet. Tap <strong>+</strong> to add one.</p>';
+    notesHtml = Storage.getNotesError()
+      ? notesEmptyState('No notes yet.')
+      : '<p class="empty-state">No notes yet. Tap <strong>+</strong> to add one.</p>';
   } else {
     notesHtml = recentNotes.map(n => renderNoteCard(n)).join('');
   }

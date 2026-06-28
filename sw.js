@@ -1,5 +1,6 @@
 // Service worker — offline cache for Note Aggregator
-const VERSION = 'na-2026.06.14-000004';
+// Version format: na-YYYY.MM.DD-HHMM (Pacific time) — must match APP_VERSION in app.js.
+const VERSION = 'na-2026.06.28-1018';
 const CORE = [
   './',
   './index.html',
