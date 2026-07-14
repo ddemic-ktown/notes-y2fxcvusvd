@@ -12,6 +12,7 @@ import { parseHoursNote, generateIIF, fuzzyMatchCustomer } from "./iif.js";
 // delete entries beyond 10, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.07.14-1159', 'Hours notes can use first names — matched to full employee names from Settings'],
   ['v2026.07.14-1155', 'IIF parses only the selected date range — much faster on big notes'],
   ['v2026.07.14-1146', 'Employees classified as apprentice/journeyman; IIF uses matching QB service item'],
   ['v2026.07.14-1137', 'IIF generator: date range filter and loading spinner'],
@@ -158,8 +159,8 @@ async function addEmployee(name, type) {
   if (!n) return false;
   const list = getEmployees();
   if (list.some(e => e.name.toLowerCase() === n.toLowerCase())) return false;
-  const capitalized = n.charAt(0).toUpperCase() + n.slice(1).toLowerCase();
-  await setEmployees([...list, { name: capitalized, type: type === 'apprentice' ? 'apprentice' : 'journeyman' }]);
+  // Save exactly as typed — the name must match QuickBooks' employee list verbatim
+  await setEmployees([...list, { name: n, type: type === 'apprentice' ? 'apprentice' : 'journeyman' }]);
   return true;
 }
 async function removeEmployee(name) {

@@ -225,17 +225,26 @@ export function parseHoursNote(text, customers, employees, range = {}) {
     }
     if (!currentDate) continue;
 
-    // Detect employees from the configured list
+    // Detect employees from the configured list. Notes usually mention just the
+    // first name ("davor"), while settings hold the full QuickBooks name
+    // ("Davor Demic(Hours)") — match either, but always report the full name.
+    const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const empDefs = empList.map(full => {
+      const first = full.trim().split(/[\s(]+/)[0];
+      return {
+        full,
+        fullRe: new RegExp(`\\b${esc(full)}(?!\\w)`, 'i'),
+        firstRe: new RegExp(`\\b${esc(first)}\\b`, 'i'),
+      };
+    });
     let working = stripped;
-    const foundEmps = empList.filter(emp =>
-      new RegExp(`\\b${emp.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(working)
-    );
+    const foundDefs = empDefs.filter(d => d.fullRe.test(working) || d.firstRe.test(working));
 
     let employeesFound = [];
     let employeeConfidence = 1.0;
 
-    if (foundEmps.length > 0) {
-      employeesFound = foundEmps.map(e => e.charAt(0).toUpperCase() + e.slice(1).toLowerCase());
+    if (foundDefs.length > 0) {
+      employeesFound = foundDefs.map(d => d.full);
       activeEmployees = employeesFound.slice();
     } else {
       employeesFound = activeEmployees.slice();
@@ -246,10 +255,12 @@ export function parseHoursNote(text, customers, employees, range = {}) {
     // skip the hours parsing and expensive customer matching entirely.
     if ((range.from && currentDate < range.from) || (range.to && currentDate > range.to)) continue;
 
-    // Remove employee names and "and" between them
+    // Remove employee name mentions (full or first) and "and" between them
     let cleaned = working;
-    for (const emp of empList) {
-      cleaned = cleaned.replace(new RegExp(`\\b${emp.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'gi'), '');
+    for (const d of empDefs) {
+      cleaned = cleaned
+        .replace(new RegExp(d.fullRe.source, 'gi'), '')
+        .replace(new RegExp(d.firstRe.source, 'gi'), '');
     }
     cleaned = cleaned.replace(/\band\b/gi, '').trim();
 
