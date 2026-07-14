@@ -12,6 +12,7 @@ import { parseHoursNote, generateIIF, fuzzyMatchCustomer } from "./iif.js";
 // delete entries beyond 10, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.07.13-2203', 'Customer role locked down: view assigned notes only, read-only editor'],
   ['v2026.07.13-2146', 'Fix invited users failing to join; error banner on account load failure'],
   ['v2026.07.13-2134', 'What\'s new section in Settings'],
   ['v2026.07.13-2116', 'Invite button emails a sign-in link'],
@@ -650,8 +651,13 @@ function showEditor(record, type, cursorHint) {
   noteSearchCount.style.display = showNoteOnly ? '' : 'none';
   searchPrevBtn.style.display = showNoteOnly ? '' : 'none';
   searchNextBtn.style.display = showNoteOnly ? '' : 'none';
-  if (editorMoreBtn) editorMoreBtn.closest('.editor-more-wrap').style.display = showNoteOnly ? '' : 'none';
+  if (editorMoreBtn) editorMoreBtn.closest('.editor-more-wrap').style.display = (showNoteOnly && !isCustomerRole()) ? '' : 'none';
   closeMoreDropdown();
+
+  // Customer role: view-only editor.
+  const readOnly = isCustomerRole();
+  titleInput.readOnly = readOnly;
+  bodyInput.readOnly = readOnly;
 
   const sameAsBack = returnScreen === 'customer-notes'
     && record.customerId && record.customerId === activeCustomerId;
@@ -808,6 +814,21 @@ function renderNotesList() {
   }
   const notes = Storage.listNotes();
   const customersCount = Storage.listCustomers().length;
+
+  // Customer role: simplified home — only the notes shared with them.
+  if (isCustomerRole()) {
+    const assigned = Storage.listAllNotes();
+    notesList.innerHTML = assigned.length === 0
+      ? '<p class="empty-state">No notes have been shared with you yet.</p>'
+      : '<p class="section-label">Your notes:</p>' + assigned.map(n => renderNoteCard(n)).join('');
+    notesList.querySelectorAll('.note-card[data-id]').forEach(card => {
+      card.addEventListener('click', () => {
+        const note = Storage.getNote(card.dataset.id);
+        if (note) { returnScreen = 'notes'; showEditor(note, 'note'); }
+      });
+    });
+    return;
+  }
 
   const customersCard = `
     <article class="note-card nav-card" data-nav="customers">
@@ -1461,6 +1482,7 @@ customerLinkBtn.addEventListener('click', () => {
 });
 
 bodyInput.addEventListener('click', () => {
+  if (isCustomerRole()) return; // view-only: no checkbox toggling
   const value = bodyInput.value;
   const pos = bodyInput.selectionStart;
   if (pos == null) return;
@@ -1896,9 +1918,16 @@ function applyRoleUI(role) {
     document.getElementById('customer-notes-fab'),
     document.getElementById('delete-btn'),
     document.getElementById('list-fab'),
+    document.getElementById('fab'),
   ];
   writeControls.forEach(el => { if (el) el.style.display = isCustomer ? 'none' : ''; });
+  // Hide staff-only settings rows
+  document.querySelectorAll('[data-staff-only]').forEach(el => {
+    el.style.display = isCustomer ? 'none' : '';
+  });
 }
+
+function isCustomerRole() { return Storage.getRole() === 'customer'; }
 
 // ---------- Users tab ----------
 function renderMembersList() {

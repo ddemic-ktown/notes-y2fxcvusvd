@@ -63,11 +63,16 @@ function attachListeners() {
     _ready = true;
     emit();
   }));
-  _unsubs.push(onSnapshot(customersCol(), (snap) => {
-    _cache.customers = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  // Customer-role users may not read customer records (firestore.rules) — skip the listener.
+  if (_role === 'customer') {
     _customersReady = true;
-    emit();
-  }));
+  } else {
+    _unsubs.push(onSnapshot(customersCol(), (snap) => {
+      _cache.customers = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      _customersReady = true;
+      emit();
+    }));
+  }
   _unsubs.push(onSnapshot(settingsDoc(), (snap) => {
     _cache.settings = snap.exists() ? { ...DEFAULT_SETTINGS, ...snap.data() } : { ...DEFAULT_SETTINGS };
     emit();

@@ -64,9 +64,9 @@ service cloud.firestore {
         allow write: if isAdmin() || isEmployee();
       }
 
-      // Customers — members can read, admin/employee can write
+      // Customers — staff only; customer-role users may not read customer records
       match /customers/{customerId} {
-        allow read: if isMember();
+        allow read: if isAdmin() || isEmployee();
         allow write: if isAdmin() || isEmployee();
       }
 

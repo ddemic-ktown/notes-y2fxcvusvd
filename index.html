@@ -153,7 +153,7 @@
       <h1>Settings</h1>
     </header>
     <main class="settings-main">
-      <div class="setting-row">
+      <div class="setting-row" data-staff-only>
         <label for="setting-recent-count">Number of recent customer notes on home screen</label>
         <div class="stepper">
           <button class="stepper-btn" id="recent-count-down">−</button>
@@ -162,7 +162,7 @@
         </div>
       </div>
 
-      <div class="setting-row">
+      <div class="setting-row" data-staff-only>
         <label for="setting-aggregator-count">Number of aggregator notes on home screen</label>
         <div class="stepper">
           <button class="stepper-btn" id="aggregator-count-down">−</button>
@@ -171,7 +171,7 @@
         </div>
       </div>
 
-      <div class="setting-row">
+      <div class="setting-row" data-staff-only>
         <label for="setting-general-notes-count">Number of recent general notes on home screen</label>
         <p class="muted" style="font-size:13px;margin:2px 0 6px;">Extra notes appear at the bottom of the home screen.</p>
         <div class="stepper">
@@ -181,13 +181,13 @@
         </div>
       </div>
 
-      <div class="setting-row setting-list-row">
+      <div class="setting-row setting-list-row" data-staff-only>
         <h3 class="setting-list-title">Home screen section order</h3>
         <p class="muted" style="margin:0 0 8px; font-size:13px;">Reorder the sections shown on the home screen, below the Customers card.</p>
         <ul id="pinned-order-list" class="reorder-list"></ul>
       </div>
 
-      <div class="setting-row setting-list-row">
+      <div class="setting-row setting-list-row" data-staff-only>
         <h3 class="setting-list-title">Aggregator Keywords</h3>
         <div class="keyword-add">
           <input id="keyword-input" type="text" placeholder="Add a keyword" autocomplete="off" />
@@ -196,7 +196,7 @@
         <ul id="keyword-list" class="keyword-list"></ul>
       </div>
 
-      <div class="setting-row setting-list-row">
+      <div class="setting-row setting-list-row" data-staff-only>
         <h3 class="setting-list-title">Time Logger — Employees</h3>
         <p class="muted" style="margin:0 0 8px; font-size:13px;">Names the Time Logger recognises as employees when parsing your hours note.</p>
         <div class="keyword-add">
@@ -206,7 +206,7 @@
         <ul id="employee-list" class="keyword-list"></ul>
       </div>
 
-      <div class="setting-row setting-list-row">
+      <div class="setting-row setting-list-row" data-staff-only>
         <h3 class="setting-list-title">Import customers from CSV</h3>
         <p class="muted" style="margin:0 0 8px; font-size:13px;">
           Paste rows from a spreadsheet. First row is treated as column headers (unchecked → first row is a customer). Each row becomes a customer; non-empty cells are joined as lines in their default note.
@@ -230,7 +230,7 @@
         </div>
       </div>
 
-      <div class="setting-row setting-list-row">
+      <div class="setting-row setting-list-row" data-staff-only>
         <h3 class="setting-list-title">Users</h3>
         <ul id="members-list" class="members-list"></ul>
         <h4 class="setting-sub-title">Pending Invites</h4>
@@ -254,7 +254,7 @@
         <button id="signout-btn" class="secondary">Sign out</button>
       </div>
 
-      <div class="setting-row">
+      <div class="setting-row" data-staff-only>
         <label>QuickBooks</label>
         <p class="muted" style="font-size:13px;margin:4px 0 8px;">Parses your "hours" note and generates a .iif file for QuickBooks Desktop.</p>
         <button id="iif-btn" class="secondary" style="margin-top:6px;">Generate IIF file</button>
