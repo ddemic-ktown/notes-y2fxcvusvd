@@ -12,6 +12,7 @@ import { parseHoursNote, generateIIF, fuzzyMatchCustomer } from "./iif.js";
 // delete entries beyond 10, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.07.14-1222', 'IIF date range defaults to the last two weeks'],
   ['v2026.07.14-1218', 'Export markers retired — the date range decides what gets parsed'],
   ['v2026.07.14-1214', 'IIF table rows have checkboxes — download includes only checked rows'],
   ['v2026.07.14-1205', 'IIF date range moved to Settings, set before generating'],
@@ -2270,6 +2271,17 @@ const editorIifBtn = document.getElementById('editor-iif-btn');
 let iifParsedEntries = [];
 const iifFromDate = document.getElementById('iif-from-date');
 const iifToDate = document.getElementById('iif-to-date');
+
+// Default the IIF date range to the last two weeks (user can still change or clear it)
+(function setDefaultIIFRange() {
+  const fmt = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  if (iifFromDate && !iifFromDate.value) {
+    const d = new Date();
+    d.setDate(d.getDate() - 14);
+    iifFromDate.value = fmt(d);
+  }
+  if (iifToDate && !iifToDate.value) iifToDate.value = fmt(new Date());
+})();
 
 function getCustomerNamesList() {
   return Storage.listCustomers().map(c => {
