@@ -12,6 +12,7 @@ import { parseHoursNote, generateIIF, fuzzyMatchCustomer } from "./iif.js";
 // delete entries beyond 10, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.07.13-2146', 'Fix invited users failing to join; error banner on account load failure'],
   ['v2026.07.13-2134', 'What\'s new section in Settings'],
   ['v2026.07.13-2116', 'Invite button emails a sign-in link'],
   ['v2026.07.13-2103', 'Sign in with email link or password, forgot-password flow'],
@@ -2047,16 +2048,23 @@ onAuthStateChanged(auth, async (user) => {
     return;
   }
   // Signed in — resolve org (creates or joins), then migrate if needed
-  await Storage.init(user.uid, user.email);
-  // Wait for initial snapshots
-  await new Promise((resolve) => {
-    const un = Storage.onChange(() => {
-      if (Storage.isReady()) { un(); resolve(); }
+  try {
+    await Storage.init(user.uid, user.email);
+    // Wait for initial snapshots
+    await new Promise((resolve) => {
+      const un = Storage.onChange(() => {
+        if (Storage.isReady()) { un(); resolve(); }
+      });
     });
-  });
-  // Subscribe before migration so we catch the snapshot update
-  unsubStorage = Storage.onChange(rerenderCurrent);
-  await Storage.maybeMigrateFromOldPath(user.uid);
+    // Subscribe before migration so we catch the snapshot update
+    unsubStorage = Storage.onChange(rerenderCurrent);
+    await Storage.maybeMigrateFromOldPath(user.uid);
+  } catch (err) {
+    console.error('Account load failed:', err);
+    showInitError(user, err);
+    return;
+  }
+  hideInitError();
   // Hide write controls for customer role
   applyRoleUI(Storage.getRole());
   showNotes();
@@ -2065,6 +2073,27 @@ onAuthStateChanged(auth, async (user) => {
     pendingPasswordPrompt = false;
     showSetPasswordModal();
   }
+});
+
+// ---------- init error banner ----------
+const initErrorBanner = document.getElementById('init-error-banner');
+const initErrorText = document.getElementById('init-error-text');
+function showInitError(user, err) {
+  if (!initErrorBanner) return;
+  const detail = (err && (err.message || err.code)) ? (err.message || err.code) : String(err);
+  initErrorText.textContent =
+    `You're signed in as ${user.email || 'unknown'}, but your account couldn't be loaded: ${detail}`;
+  initErrorBanner.hidden = false;
+}
+function hideInitError() {
+  if (initErrorBanner) initErrorBanner.hidden = true;
+}
+const initErrorRetry = document.getElementById('init-error-retry');
+if (initErrorRetry) initErrorRetry.addEventListener('click', () => window.location.reload());
+const initErrorSignout = document.getElementById('init-error-signout');
+if (initErrorSignout) initErrorSignout.addEventListener('click', async () => {
+  hideInitError();
+  await signOut(auth);
 });
 
 window.addEventListener('beforeunload', () => {

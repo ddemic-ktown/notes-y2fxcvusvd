@@ -76,10 +76,13 @@ function attachListeners() {
     _cache.members = snap.docs.map(d => ({ uid: d.id, ...d.data() }));
     emit();
   }));
-  _unsubs.push(onSnapshot(invitesCol(), (snap) => {
-    _cache.invites = snap.docs.map(d => ({ email: d.id, ...d.data() }));
-    emit();
-  }));
+  // Only admins may read invites (firestore.rules) — skip the listener for other roles.
+  if (_role === 'admin') {
+    _unsubs.push(onSnapshot(invitesCol(), (snap) => {
+      _cache.invites = snap.docs.map(d => ({ email: d.id, ...d.data() }));
+      emit();
+    }));
+  }
 }
 
 function detachListeners() {

@@ -48,9 +48,14 @@ service cloud.firestore {
         allow write: if request.auth != null;
       }
 
-      // Invites subcollection — admin only
+      // Invites subcollection — admin only, except the invited user may
+      // delete their own invite doc while accepting it at sign-in
+      // (doc ID = email lowercased with dots replaced by commas).
       match /invites/{inviteId} {
-        allow read, write: if isAdmin();
+        allow read, create, update: if isAdmin();
+        allow delete: if isAdmin() ||
+          (request.auth != null && request.auth.token.email != null &&
+           inviteId == request.auth.token.email.lower().replace('\\.', ','));
       }
 
       // Settings — members can read, only admin/employee can write

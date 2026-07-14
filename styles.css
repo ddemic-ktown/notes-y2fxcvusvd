@@ -130,6 +130,28 @@ body.editor-open {
   flex: 1;
   border-top: 1px solid var(--line);
 }
+.init-error-banner {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  z-index: 1000;
+  background: var(--danger);
+  color: #fff;
+  padding: 12px 16px;
+  font-size: 14px;
+}
+.init-error-banner p { margin: 0 0 8px; }
+.init-error-actions { display: flex; gap: 8px; }
+.init-error-actions button {
+  background: rgba(255,255,255,0.15);
+  color: #fff;
+  border: 1px solid rgba(255,255,255,0.5);
+  border-radius: var(--radius);
+  padding: 6px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
 .changelog-list { list-style: none; margin: 0; padding: 0; }
 .changelog-item { font-size: 13px; color: var(--ink-soft); padding: 4px 0; }
 .changelog-ver { color: var(--accent); font-weight: 600; margin-right: 6px; }
