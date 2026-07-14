@@ -1146,13 +1146,15 @@ input[type="search"]::-webkit-search-cancel-button {
 }
 
 .editor-body-highlight mark {
-  background: rgba(255, 200, 0, 0.45);
+  background: rgba(255, 200, 0, 0.35);
   color: transparent;
   border-radius: 2px;
 }
 
 .editor-body-highlight mark.current-match {
-  background: rgba(255, 140, 0, 0.65);
+  background: rgba(255, 64, 0, 0.55);
+  outline: 2px solid rgba(255, 64, 0, 0.9);
+  outline-offset: 1px;
 }
 
 .editor-body-input {

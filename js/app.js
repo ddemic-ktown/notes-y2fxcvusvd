@@ -12,6 +12,7 @@ import { parseHoursNote, generateIIF, fuzzyMatchCustomer } from "./iif.js";
 // delete entries beyond 10, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.07.13-2345', 'Current search match now clearly stands out from other matches'],
   ['v2026.07.13-2340', 'Search matches now center in the text area accurately'],
   ['v2026.07.13-2333', 'In-note search arrows dismiss the keyboard on mobile'],
   ['v2026.07.13-2325', 'Removing a user now un-shares their notes; stale Shared badges cleaned up'],
