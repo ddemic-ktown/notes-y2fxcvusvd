@@ -12,6 +12,7 @@ import { parseHoursNote, generateIIF, fuzzyMatchCustomer } from "./iif.js";
 // delete entries beyond 10, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.07.14-1214', 'IIF table rows have checkboxes — download includes only checked rows'],
   ['v2026.07.14-1205', 'IIF date range moved to Settings, set before generating'],
   ['v2026.07.14-1159', 'Hours notes can use first names — matched to full employee names from Settings'],
   ['v2026.07.14-1155', 'IIF parses only the selected date range — much faster on big notes'],
@@ -2294,7 +2295,7 @@ function confidenceColor(score) {
 function renderIIFEntries(entries) {
   if (!iifTableBody) return;
   if (!entries.length) {
-    iifTableBody.innerHTML = '<tr><td colspan="5" style="padding:16px;color:var(--ink-soft);text-align:center;">No entries found.</td></tr>';
+    iifTableBody.innerHTML = '<tr><td colspan="6" style="padding:16px;color:var(--ink-soft);text-align:center;">No entries found.</td></tr>';
     return;
   }
 
@@ -2314,6 +2315,7 @@ function renderIIFEntries(entries) {
     const empColor = emp === '?' ? 'color:#dc2626' : '';
     return `
       <tr class="${rowClass}" title="${escapeHtml(e.raw)}">
+        <td><input type="checkbox" class="iif-row-check" data-idx="${idx}" data-emp="${escapeHtml(emp)}" checked /></td>
         <td style="white-space:nowrap;">${first ? (e.dateFormatted || '?') : ''}</td>
         <td style="white-space:nowrap;${empColor}">${escapeHtml(emp)}${issueIcon}</td>
         <td><input class="iif-cell-input iif-customer-input" data-idx="${idx}" value="${escapeHtml(e.customerMatched)}" placeholder="Customer" /></td>
@@ -2322,6 +2324,16 @@ function renderIIFEntries(entries) {
       </tr>
     `;
   }).join('');
+
+  // Row checkboxes: unchecked rows are excluded from the download.
+  // Exclusion is tracked per entry+employee, since multi-employee entries expand to one row each.
+  iifTableBody.querySelectorAll('.iif-row-check').forEach(cb => {
+    cb.addEventListener('change', () => {
+      const entry = iifParsedEntries[parseInt(cb.dataset.idx, 10)];
+      if (!entry._excludedEmps) entry._excludedEmps = {};
+      entry._excludedEmps[cb.dataset.emp] = !cb.checked;
+    });
+  });
 
   iifTableBody.querySelectorAll('.iif-customer-input').forEach(input => {
     input.addEventListener('input', () => {
@@ -2411,7 +2423,14 @@ if (iifModal) iifModal.addEventListener('click', e => { if (e.target === iifModa
 if (editorIifBtn) editorIifBtn.addEventListener('click', openIIFModal);
 
 if (iifDownloadBtn) iifDownloadBtn.addEventListener('click', () => {
-  const iif = generateIIF(iifParsedEntries, getEmployeeTypeMap());
+  // Only include checked rows (per entry+employee)
+  const includedEntries = iifParsedEntries
+    .map(e => ({
+      ...e,
+      employees: e.employees.filter(emp => !(e._excludedEmps && e._excludedEmps[emp])),
+    }))
+    .filter(e => e.employees.length > 0);
+  const iif = generateIIF(includedEntries, getEmployeeTypeMap());
   const blob = new Blob([iif], { type: 'text/plain' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
