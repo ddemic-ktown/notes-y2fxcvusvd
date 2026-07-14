@@ -9,7 +9,10 @@ import { parseHoursNote, generateIIF, fuzzyMatchCustomer } from "./iif.js";
 
 // Version format: vYYYY.MM.DD-HHMM (Pacific time) — bump both APP_VERSION and sw.js VERSION on every change.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
-const APP_VERSION = 'v2026.07.13-2103';
+const APP_VERSION = 'v2026.07.13-2116';
+
+// Canonical site address — all emailed sign-in links point here.
+const APP_URL = 'https://ddemic-ktown.github.io/notes-y2fxcvusvd/';
 
 // ---------- DOM refs ----------
 const listView = document.getElementById('list-view');
@@ -1784,7 +1787,7 @@ async function sendMagicLink(email) {
   }
   try {
     await sendSignInLinkToEmail(auth, email, {
-      url: window.location.origin + window.location.pathname,
+      url: APP_URL,
       handleCodeInApp: true,
     });
     window.localStorage.setItem(EMAIL_FOR_SIGNIN_KEY, email);
@@ -1958,8 +1961,16 @@ if (inviteBtn) {
     if (inviteStatus) inviteStatus.textContent = 'Sending…';
     try {
       await Storage.inviteUser(email, role);
+      // Email them a sign-in link that doubles as the invite.
+      // Note: no localStorage write here — this browser isn't the one signing in.
+      try {
+        await sendSignInLinkToEmail(auth, email, { url: APP_URL, handleCodeInApp: true });
+        if (inviteStatus) inviteStatus.textContent = `Invited ${email} — sign-in link sent.`;
+      } catch (mailErr) {
+        console.error(mailErr);
+        if (inviteStatus) inviteStatus.textContent = `Invite created, but the email failed: ${mailErr.message || mailErr}`;
+      }
       if (inviteEmailInput) inviteEmailInput.value = '';
-      if (inviteStatus) inviteStatus.textContent = `Invited ${email}.`;
       renderMembersList();
     } catch (e) {
       if (inviteStatus) inviteStatus.textContent = 'Failed: ' + (e.message || e);
