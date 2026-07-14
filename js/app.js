@@ -12,6 +12,7 @@ import { parseHoursNote, generateIIF, fuzzyMatchCustomer } from "./iif.js";
 // delete entries beyond 10, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.07.14-1039', 'New bookkeeper role: sees everything, edits nothing, QuickBooks export'],
   ['v2026.07.14-1029', 'Back button no longer exits the app from sub-screens'],
   ['v2026.07.13-2345', 'Current search match now clearly stands out from other matches'],
   ['v2026.07.13-2340', 'Search matches now center in the text area accurately'],
@@ -659,14 +660,14 @@ function showEditor(record, type, cursorHint) {
   noteSearchCount.style.display = showNoteOnly ? '' : 'none';
   searchPrevBtn.style.display = showNoteOnly ? '' : 'none';
   searchNextBtn.style.display = showNoteOnly ? '' : 'none';
-  if (editorMoreBtn) editorMoreBtn.closest('.editor-more-wrap').style.display = (showNoteOnly && !isCustomerRole()) ? '' : 'none';
+  if (editorMoreBtn) editorMoreBtn.closest('.editor-more-wrap').style.display = (showNoteOnly && !isReadOnlyRole()) ? '' : 'none';
   closeMoreDropdown();
 
-  // Customer role: view-only editor.
-  const readOnly = isCustomerRole();
+  // Customer/bookkeeper roles: view-only editor.
+  const readOnly = isReadOnlyRole();
   titleInput.readOnly = readOnly;
   bodyInput.readOnly = readOnly;
-  // Checkbox toolbar button mutates the note — hide it for customers
+  // Checkbox toolbar button mutates the note — hide it for read-only roles
   if (checkboxBtn) checkboxBtn.style.display = readOnly ? 'none' : '';
   // Shared badge in the editor header
   const editorSharedBadge = document.getElementById('editor-shared-badge');
@@ -698,7 +699,8 @@ function showEditor(record, type, cursorHint) {
   const editorIifBtnEl = document.getElementById('editor-iif-btn');
   if (editorIifBtnEl) {
     const isHoursNote = type === 'note' && (splitTitleAndBody(record.body).title || '').trim().toLowerCase() === 'hours';
-    editorIifBtnEl.hidden = !isHoursNote;
+    // Editor IIF is admin-only (bookkeepers use Settings → QuickBooks; employees have no IIF access)
+    editorIifBtnEl.hidden = !(isAdminRole() && isHoursNote);
   }
 
   hideAllScreens();
@@ -833,7 +835,8 @@ function renderNotesList() {
   const customersCount = Storage.listCustomers().length;
 
   // Customer/employee roles: simplified home — only the notes assigned to them.
-  if (!isAdminRole()) {
+  // (Admin and bookkeeper get the full home.)
+  if (!canViewAllRole()) {
     const assigned = Storage.listAllNotes();
     const emptyState = isCustomerRole()
       ? '<p class="empty-state">No notes have been shared with you yet.</p>'
@@ -997,13 +1000,13 @@ function renderNoteCard(n) {
   // Customer tag: admins use the live lookup, others the stored snapshot
   let customerTag = '';
   if (n.customerId) {
-    const name = isAdminRole()
+    const name = canViewAllRole()
       ? Storage.getCustomerNameSnapshot(n.customerId)
       : (n.customerName || '');
     customerTag = `<span class="customer-tag">${escapeHtml(name || 'Unnamed customer')}</span>`;
   }
-  // Shared badge for admins: this note is visible to assigned users
-  const sharedBadge = (isAdminRole() && Array.isArray(n.assignedTo) && n.assignedTo.length > 0)
+  // Shared badge for admin/bookkeeper: this note is visible to assigned users
+  const sharedBadge = (canViewAllRole() && Array.isArray(n.assignedTo) && n.assignedTo.length > 0)
     ? '<span class="shared-badge" title="Shared with assigned users">Shared</span>'
     : '';
   return `
@@ -1351,7 +1354,7 @@ titleInput.addEventListener('input', scheduleSave);
 bodyInput.addEventListener('input', scheduleSave);
 
 checkboxBtn.addEventListener('click', () => {
-  if (isCustomerRole()) return; // view-only
+  if (isReadOnlyRole()) return; // view-only
   if (!currentId) return;
   toggleCheckboxOnSelection();
 });
@@ -1526,7 +1529,7 @@ customerLinkBtn.addEventListener('click', () => {
 });
 
 bodyInput.addEventListener('click', () => {
-  if (isCustomerRole()) return; // view-only: no checkbox toggling
+  if (isReadOnlyRole()) return; // view-only: no checkbox toggling
   const value = bodyInput.value;
   const pos = bodyInput.selectionStart;
   if (pos == null) return;
@@ -1973,17 +1976,31 @@ function applyRoleUI(role) {
     document.getElementById('list-fab'),
   ];
   adminControls.forEach(el => { if (el) el.style.display = isAdminRole ? '' : 'none'; });
-  // Home + FAB: admins and employees can create general notes; customers cannot
+  // Home + FAB: admins and employees can create general notes; read-only roles cannot
   const homeFab = document.getElementById('fab');
-  if (homeFab) homeFab.style.display = isCustomer ? 'none' : '';
+  if (homeFab) homeFab.style.display = (isCustomer || role === 'bookkeeper') ? 'none' : '';
   // Admin-only settings rows
   document.querySelectorAll('[data-staff-only]').forEach(el => {
     el.style.display = isAdminRole ? '' : 'none';
+  });
+  // QuickBooks/IIF tools: admin and bookkeeper (read-only export)
+  document.querySelectorAll('[data-role-iif]').forEach(el => {
+    el.style.display = (isAdminRole || role === 'bookkeeper') ? '' : 'none';
+  });
+  // Orphan view write controls: admin only
+  ['orphan-select-all-btn', 'orphan-delete-selected-btn'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = isAdminRole ? '' : 'none';
   });
 }
 
 function isCustomerRole() { return Storage.getRole() === 'customer'; }
 function isAdminRole() { return Storage.getRole() === 'admin'; }
+function isBookkeeperRole() { return Storage.getRole() === 'bookkeeper'; }
+// Bookkeeper and customer can never modify anything
+function isReadOnlyRole() { return isCustomerRole() || isBookkeeperRole(); }
+// Admin and bookkeeper see all notes and customers
+function canViewAllRole() { return isAdminRole() || isBookkeeperRole(); }
 
 // ---------- Users tab ----------
 function renderMembersList() {

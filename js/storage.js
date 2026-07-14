@@ -48,7 +48,7 @@ function attachListeners() {
   // scope the query itself (assignedTo array-contains uid) to match firestore.rules —
   // Firestore rejects an unscoped collection listener when the rule depends on a
   // per-document field like assignedTo, rather than silently filtering results.
-  const notesQuery = _role === 'admin'
+  const notesQuery = (_role === 'admin' || _role === 'bookkeeper')
     ? notesCol()
     : query(notesCol(), where('assignedTo', 'array-contains', _uid));
   _unsubs.push(onSnapshot(notesQuery, (snap) => {
@@ -63,8 +63,8 @@ function attachListeners() {
     _ready = true;
     emit();
   }));
-  // Only admins may read customer records (firestore.rules) — skip the listener otherwise.
-  if (_role !== 'admin') {
+  // Only admins and bookkeepers may read customer records (firestore.rules) — skip otherwise.
+  if (_role !== 'admin' && _role !== 'bookkeeper') {
     _customersReady = true;
   } else {
     _unsubs.push(onSnapshot(customersCol(), (snap) => {

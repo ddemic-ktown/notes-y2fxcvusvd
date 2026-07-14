@@ -241,6 +241,7 @@
           <select id="invite-role">
             <option value="admin">Admin</option>
             <option value="employee">Employee</option>
+            <option value="bookkeeper">Bookkeeper</option>
             <option value="customer">Customer</option>
           </select>
           <button id="invite-btn" class="primary">Invite</button>
@@ -254,7 +255,7 @@
         <button id="signout-btn" class="secondary">Sign out</button>
       </div>
 
-      <div class="setting-row" data-staff-only>
+      <div class="setting-row" data-role-iif>
         <label>QuickBooks</label>
         <p class="muted" style="font-size:13px;margin:4px 0 8px;">Parses your "hours" note and generates a .iif file for QuickBooks Desktop.</p>
         <button id="iif-btn" class="secondary" style="margin-top:6px;">Generate IIF file</button>

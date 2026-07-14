@@ -45,6 +45,8 @@ service cloud.firestore {
       function isAdmin() { return isMember() && memberRole() == 'admin'; }
       function isEmployee() { return isMember() && memberRole() == 'employee'; }
       function isCustomer() { return isMember() && memberRole() == 'customer'; }
+      // Bookkeeper: reads everything, writes nothing (no write rule ever includes it)
+      function isBookkeeper() { return isMember() && memberRole() == 'bookkeeper'; }
 
       // Org doc — invite-only: no self-created orgs. Members can read, admins can update.
       // (To enable self-signup, change create to: if request.auth != null — see HANDOFF.md)
@@ -89,15 +91,16 @@ service cloud.firestore {
         allow write: if isAdmin();
       }
 
-      // Customers — admin only
+      // Customers — admin (write) and bookkeeper (read-only)
       match /customers/{customerId} {
-        allow read, write: if isAdmin();
+        allow read: if isAdmin() || isBookkeeper();
+        allow write: if isAdmin();
       }
 
       // Notes
       match /notes/{noteId} {
-        // Admin sees everything
-        allow read: if isAdmin();
+        // Admin and bookkeeper see everything
+        allow read: if isAdmin() || isBookkeeper();
         // Employee and customer can only read if explicitly assigned
         allow read: if (isEmployee() || isCustomer()) &&
           ('assignedTo' in resource.data) &&
