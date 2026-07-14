@@ -12,6 +12,7 @@ import { parseHoursNote, generateIIF, fuzzyMatchCustomer } from "./iif.js";
 // delete entries beyond 10, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.07.14-1218', 'Export markers retired — the date range decides what gets parsed'],
   ['v2026.07.14-1214', 'IIF table rows have checkboxes — download includes only checked rows'],
   ['v2026.07.14-1205', 'IIF date range moved to Settings, set before generating'],
   ['v2026.07.14-1159', 'Hours notes can use first names — matched to full employee names from Settings'],
@@ -2353,7 +2354,6 @@ function renderIIFEntries(entries) {
   });
 }
 
-let iifLastMarkerText = '';
 let iifNoteBody = null;      // cached while the modal is open
 let iifCustomerNames = null; // cached while the modal is open
 
@@ -2380,8 +2380,7 @@ function runIIFParse() {
     const total = iifParsedEntries.length;
     const reviewCount = iifParsedEntries.filter(e => e.needsReview).length;
     const ranged = !!(range.from || range.to);
-    iifStatus.innerHTML = `${total} entr${total === 1 ? 'y' : 'ies'}${ranged ? ' in the selected date range' : ' parsed from your hours note'}.`
-      + (iifLastMarkerText ? `<br><span style="font-size:12px;color:var(--ink-soft);">📅 Parsing from ${escapeHtml(iifLastMarkerText)} onward</span>` : '');
+    iifStatus.innerHTML = `${total} entr${total === 1 ? 'y' : 'ies'}${ranged ? ' in the selected date range' : ' parsed from your hours note'}.`;
     if (iifReviewNote) iifReviewNote.textContent = reviewCount ? `⚠ ${reviewCount} entr${reviewCount === 1 ? 'y needs' : 'ies need'} review (orange rows)` : '';
     renderIIFEntries(iifParsedEntries);
     if (iifDownloadBtn) iifDownloadBtn.hidden = total === 0;
@@ -2402,15 +2401,6 @@ function openIIFModal() {
   // Cache the note body and customer list for re-parses while the modal is open
   iifNoteBody = splitTitleAndBody(note.body).body;
   iifCustomerNames = getCustomerNamesList();
-
-  // Check for last export marker to show parsing cutoff
-  const markerRe = /^\/\/\s*----\s*IIF exported:\s*(.+?)\s*----/im;
-  const allBodyLines = iifNoteBody.split('\n');
-  iifLastMarkerText = '';
-  for (let i = allBodyLines.length - 1; i >= 0; i--) {
-    const m = allBodyLines[i].match(markerRe);
-    if (m) { iifLastMarkerText = m[1].trim(); break; }
-  }
 
   iifModal.hidden = false;
   runIIFParse();
@@ -2438,21 +2428,7 @@ if (iifDownloadBtn) iifDownloadBtn.addEventListener('click', () => {
   a.download = `hours-${new Date().toISOString().slice(0,10)}.iif`;
   a.click();
   URL.revokeObjectURL(url);
-
-  // Append export marker to the hours note so next export starts from here
-  const hoursNote = findHoursNote();
-  if (hoursNote) {
-    const now = new Date();
-    const mm = String(now.getMonth() + 1).padStart(2, '0');
-    const dd = String(now.getDate()).padStart(2, '0');
-    const yyyy = now.getFullYear();
-    let h = now.getHours();
-    const min = String(now.getMinutes()).padStart(2, '0');
-    const ampm = h >= 12 ? 'pm' : 'am';
-    h = h % 12 || 12;
-    const marker = `\n// ---- IIF exported: ${mm}/${dd}/${yyyy} ${h}:${min}${ampm} ----`;
-    Storage.updateNote(hoursNote.id, hoursNote.body + marker);
-  }
+  // (Export markers retired — the Settings date range decides what gets parsed.)
 });
 
 // ---------- orphaned notes view ----------
