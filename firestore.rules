@@ -36,16 +36,31 @@ service cloud.firestore {
       function isEmployee() { return isMember() && memberRole() == 'employee'; }
       function isCustomer() { return isMember() && memberRole() == 'customer'; }
 
-      // Org doc — any authenticated user can create (bootstrap), members can read, admins can update
+      // Org doc — invite-only: no self-created orgs. Members can read, admins can update.
+      // (To enable self-signup, change create to: if request.auth != null — see HANDOFF.md)
       allow read: if isMember();
-      allow create: if request.auth != null;
+      allow create: if false;
       allow update, delete: if isAdmin();
+
+      // Helper: the requester's pending invite doc (inviteLookup keyed by email,
+      // lowercased with dots replaced by commas). Only admins write inviteLookup rows
+      // with an orgId, so this is trusted.
+      function inviteFor() {
+        return get(/databases/$(database)/documents/inviteLookup/$(request.auth.token.email.lower().replace('\\.', ',')));
+      }
 
       // Members subcollection
       match /members/{memberId} {
         allow read: if isMember() || request.auth.uid == memberId;
-        // Admins can add/edit/remove members; users can write their own doc on join
-        allow write: if request.auth != null;
+        // Admins manage members freely
+        allow write: if isAdmin();
+        // A user may create ONLY their own member doc, ONLY with a pending invite
+        // for this org, and ONLY with the role the admin chose in that invite.
+        allow create: if request.auth != null &&
+          request.auth.uid == memberId &&
+          request.auth.token.email != null &&
+          inviteFor().data.orgId == orgId &&
+          request.resource.data.role == inviteFor().data.role;
       }
 
       // Invites subcollection — admin only, except the invited user may

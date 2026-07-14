@@ -12,6 +12,7 @@ import { parseHoursNote, generateIIF, fuzzyMatchCustomer } from "./iif.js";
 // delete entries beyond 10, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.07.13-2301', 'Invite-only: no self-created orgs; removed users lose access; invite role enforced'],
   ['v2026.07.13-2243', 'Customer name on shared note cards, Shared badges, view-only checkbox fix'],
   ['v2026.07.13-2230', 'Employee role restricted: edit assigned notes, create own general notes, no delete'],
   ['v2026.07.13-2203', 'Customer role locked down: view assigned notes only, read-only editor'],
@@ -2146,9 +2147,14 @@ const initErrorBanner = document.getElementById('init-error-banner');
 const initErrorText = document.getElementById('init-error-text');
 function showInitError(user, err) {
   if (!initErrorBanner) return;
-  const detail = (err && (err.message || err.code)) ? (err.message || err.code) : String(err);
-  initErrorText.textContent =
-    `You're signed in as ${user.email || 'unknown'}, but your account couldn't be loaded: ${detail}`;
+  if (err && err.code === 'app/no-access') {
+    initErrorText.textContent =
+      `${user.email || 'This account'} doesn't have access to this app yet. Ask the administrator for an invite.`;
+  } else {
+    const detail = (err && (err.message || err.code)) ? (err.message || err.code) : String(err);
+    initErrorText.textContent =
+      `You're signed in as ${user.email || 'unknown'}, but your account couldn't be loaded: ${detail}`;
+  }
   initErrorBanner.hidden = false;
 }
 function hideInitError() {

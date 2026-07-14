@@ -96,7 +96,12 @@ function detachListeners() {
 }
 
 // ---------- org bootstrap ----------
-// Returns orgId. Creates org if none exists for this user, or joins via invite.
+// Invite-only mode: when false, users with no membership and no invite are rejected
+// instead of getting their own new org. To allow public self-signup later, set this
+// to true AND update firestore.rules — see "Enabling self-signup" in HANDOFF.md.
+const ALLOW_SELF_SIGNUP = false;
+
+// Returns orgId. Joins via invite, or (if self-signup enabled) creates a new org.
 async function resolveOrg(userId, userEmail) {
   // 1. Check if user already has an org membership doc anywhere
   //    We store a pointer in a top-level user doc: users/{uid}/orgId
@@ -132,7 +137,14 @@ async function resolveOrg(userId, userEmail) {
     }
   }
 
-  // 3. No org — create a new one, user becomes admin
+  // 3. No membership, no invite
+  if (!ALLOW_SELF_SIGNUP) {
+    const err = new Error('No membership or invite found for this account.');
+    err.code = 'app/no-access';
+    throw err;
+  }
+
+  // Self-signup: create a new org, user becomes admin
   const newOrgId = uid();
   const batch = writeBatch(db);
   batch.set(doc(db, `orgs/${newOrgId}`), { createdAt: nowIso(), createdBy: userId });
