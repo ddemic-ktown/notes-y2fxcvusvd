@@ -152,6 +152,16 @@ body.editor-open {
   cursor: pointer;
 }
 
+.iif-raw-row td {
+  background: var(--bg);
+  color: var(--ink-soft);
+  font-size: 12px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--line);
+  white-space: pre-wrap;
+}
+.iif-raw-label { font-weight: 600; color: var(--ink); margin-right: 4px; }
+
 .employee-type-select, #employee-type-input {
   background: var(--bg);
   color: var(--ink);

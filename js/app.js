@@ -12,6 +12,7 @@ import { parseHoursNote, generateIIF, fuzzyMatchCustomer } from "./iif.js";
 // delete entries beyond 10, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.07.14-1230', 'Tap an IIF table row to see the note line it came from'],
   ['v2026.07.14-1222', 'IIF date range defaults to the last two weeks'],
   ['v2026.07.14-1218', 'Export markers retired — the date range decides what gets parsed'],
   ['v2026.07.14-1214', 'IIF table rows have checkboxes — download includes only checked rows'],
@@ -2327,7 +2328,7 @@ function renderIIFEntries(entries) {
     const issueIcon = (first && e.issue) ? `<br><span style="font-size:10px;color:#d97706;">⚠ ${escapeHtml(e.issue)}</span>` : '';
     const empColor = emp === '?' ? 'color:#dc2626' : '';
     return `
-      <tr class="${rowClass}" title="${escapeHtml(e.raw)}">
+      <tr class="${rowClass} iif-main-row" title="${escapeHtml(e.raw)}" data-raw-idx="${idx}">
         <td><input type="checkbox" class="iif-row-check" data-idx="${idx}" data-emp="${escapeHtml(emp)}" checked /></td>
         <td style="white-space:nowrap;">${first ? (e.dateFormatted || '?') : ''}</td>
         <td style="white-space:nowrap;${empColor}">${escapeHtml(emp)}${issueIcon}</td>
@@ -2335,8 +2336,21 @@ function renderIIFEntries(entries) {
         <td><input class="iif-cell-input iif-hours-input" data-idx="${idx}" value="${e.hoursFormatted || ''}" placeholder="H:MM" /></td>
         <td>${first ? `<span class="iif-score" style="color:${scoreColor};">${e.confidence}%</span>` : ''}</td>
       </tr>
+      <tr class="iif-raw-row" data-raw-for="${idx}" hidden>
+        <td colspan="6"><span class="iif-raw-label">Note line:</span> ${escapeHtml(e.raw)}</td>
+      </tr>
     `;
   }).join('');
+
+  // Tap a row (not its checkbox/inputs) to show/hide the raw note line — hover
+  // tooltips don't exist on touch screens.
+  iifTableBody.querySelectorAll('.iif-main-row').forEach(row => {
+    row.addEventListener('click', (ev) => {
+      if (ev.target.closest('input, select, button, a')) return;
+      const rawRow = row.nextElementSibling;
+      if (rawRow && rawRow.classList.contains('iif-raw-row')) rawRow.hidden = !rawRow.hidden;
+    });
+  });
 
   // Row checkboxes: unchecked rows are excluded from the download.
   // Exclusion is tracked per entry+employee, since multi-employee entries expand to one row each.
