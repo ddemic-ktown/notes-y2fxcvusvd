@@ -12,6 +12,7 @@ import { parseHoursNote, generateIIF, fuzzyMatchCustomer } from "./iif.js";
 // delete entries beyond 10, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.07.14-1029', 'Back button no longer exits the app from sub-screens'],
   ['v2026.07.13-2345', 'Current search match now clearly stands out from other matches'],
   ['v2026.07.13-2340', 'Search matches now center in the text area accurately'],
   ['v2026.07.13-2333', 'In-note search arrows dismiss the keyboard on mobile'],
@@ -1647,6 +1648,13 @@ window.addEventListener('popstate', (e) => {
   currentPopstateTarget = screen;
 
   if (!screen) {
+    // Bottom of the history stack (stateless entry). If we're not on the home
+    // screen, show it (showNotes re-stamps this entry as home) instead of doing
+    // nothing — otherwise the next back press exits the app from a sub-screen.
+    if (!listView.classList.contains('active')) {
+      if (editorView.classList.contains('active')) commitAndCleanupEditor();
+      showNotes();
+    }
     handlingPopstate = false;
     return;
   }
@@ -1943,8 +1951,9 @@ async function completeEmailLinkSignin() {
     signinError.textContent = friendlyAuthError(err);
     showSignin();
   } finally {
-    // Remove the one-time-code params from the URL.
-    window.history.replaceState({}, document.title, window.location.origin + window.location.pathname);
+    // Remove the one-time-code params from the URL. Keep the screen state —
+    // a stateless bottom entry breaks the back button (exits the app).
+    window.history.replaceState({ screen: 'home' }, document.title, window.location.origin + window.location.pathname);
   }
 }
 const emailLinkSigninReady = completeEmailLinkSignin();
@@ -2421,7 +2430,7 @@ function showOrphanNotes() {
   hideAllScreens();
   orphanView.classList.add('active');
   window.scrollTo(0, 0);
-  history.pushState({ screen: 'orphans' }, '');
+  if (!handlingPopstate) history.pushState({ screen: 'orphans' }, '');
   renderOrphanList();
   if (orphanDeleteSelectedBtn) orphanDeleteSelectedBtn.disabled = true;
 }
