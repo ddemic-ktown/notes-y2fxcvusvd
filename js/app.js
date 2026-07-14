@@ -12,6 +12,7 @@ import { parseHoursNote, generateIIF, fuzzyMatchCustomer } from "./iif.js";
 // delete entries beyond 10, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.07.13-2340', 'Search matches now center in the text area accurately'],
   ['v2026.07.13-2333', 'In-note search arrows dismiss the keyboard on mobile'],
   ['v2026.07.13-2325', 'Removing a user now un-shares their notes; stale Shared badges cleaned up'],
   ['v2026.07.13-2301', 'Invite-only: no self-created orgs; removed users lose access; invite role enforced'],
@@ -1456,21 +1457,25 @@ function gotoMatch(index) {
   const n = searchMatches.length;
   searchIndex = ((index % n) + n) % n;
   const m = searchMatches[searchIndex];
+  updateSearchCount();
+  renderHighlights();
   if (m.inTitle) {
     // Don't focus the title (would raise the mobile keyboard) — flash it instead
     titleInput.classList.add('search-hit-flash');
     setTimeout(() => titleInput.classList.remove('search-hit-flash'), 800);
     bodyInput.scrollTop = 0;
+    if (highlightEl) highlightEl.scrollTop = 0;
   } else {
     bodyInput.setSelectionRange(m.start, m.end);
-    const before = bodyInput.value.substring(0, m.start);
-    const lineHeight = parseFloat(getComputedStyle(bodyInput).lineHeight) || 22;
-    const lineCount = (before.match(/\n/g) || []).length;
-    const target = lineCount * lineHeight - bodyInput.clientHeight / 2 + lineHeight;
-    bodyInput.scrollTop = Math.max(0, target);
+    // The highlight overlay mirrors the text exactly (wrapping included), so the
+    // current match's real position centers the scroll accurately.
+    const mark = highlightEl ? highlightEl.querySelector('mark.current-match') : null;
+    if (mark) {
+      const target = mark.offsetTop - (bodyInput.clientHeight / 2) + (mark.offsetHeight / 2);
+      bodyInput.scrollTop = Math.max(0, target);
+      highlightEl.scrollTop = bodyInput.scrollTop;
+    }
   }
-  updateSearchCount();
-  renderHighlights();
 }
 function resetNoteSearch() {
   noteSearchInput.value = '';
