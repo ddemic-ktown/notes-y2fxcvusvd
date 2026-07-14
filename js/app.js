@@ -12,6 +12,7 @@ import { parseHoursNote, generateIIF, fuzzyMatchCustomer } from "./iif.js";
 // delete entries beyond 10, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.07.14-1205', 'IIF date range moved to Settings, set before generating'],
   ['v2026.07.14-1159', 'Hours notes can use first names — matched to full employee names from Settings'],
   ['v2026.07.14-1155', 'IIF parses only the selected date range — much faster on big notes'],
   ['v2026.07.14-1146', 'Employees classified as apprentice/journeyman; IIF uses matching QB service item'],
@@ -2374,9 +2375,6 @@ function runIIFParse() {
     if (iifDownloadBtn) iifDownloadBtn.hidden = total === 0;
   }, 30);
 }
-
-if (iifFromDate) iifFromDate.addEventListener('change', runIIFParse);
-if (iifToDate) iifToDate.addEventListener('change', runIIFParse);
 
 function openIIFModal() {
   const note = findHoursNote();

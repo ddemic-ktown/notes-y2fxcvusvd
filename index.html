@@ -261,7 +261,11 @@
 
       <div class="setting-row" data-role-iif>
         <label>QuickBooks</label>
-        <p class="muted" style="font-size:13px;margin:4px 0 8px;">Parses your "hours" note and generates a .iif file for QuickBooks Desktop.</p>
+        <p class="muted" style="font-size:13px;margin:4px 0 8px;">Parses your "hours" note between the dates below and generates a .iif file for QuickBooks Desktop. Leave dates empty to parse everything.</p>
+        <div class="iif-range-row">
+          <label class="iif-range-label">From <input id="iif-from-date" type="date" class="iif-date-input" /></label>
+          <label class="iif-range-label">To <input id="iif-to-date" type="date" class="iif-date-input" /></label>
+        </div>
         <button id="iif-btn" class="secondary" style="margin-top:6px;">Generate IIF file</button>
       </div>
 
@@ -332,10 +336,6 @@
       <div class="modal-header">
         <h2 class="modal-title">Generate IIF File</h2>
         <button id="iif-modal-close" class="icon-btn" aria-label="Close">✕</button>
-      </div>
-      <div class="iif-range-row">
-        <label class="iif-range-label">From <input id="iif-from-date" type="date" class="iif-date-input" /></label>
-        <label class="iif-range-label">To <input id="iif-to-date" type="date" class="iif-date-input" /></label>
       </div>
       <div id="iif-status" class="iif-status"></div>
       <div id="iif-entries" class="iif-table-wrap">
