@@ -12,6 +12,7 @@ import { parseHoursNote, generateIIF, fuzzyMatchCustomer } from "./iif.js";
 // delete entries beyond 10, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.07.14-1146', 'Employees classified as apprentice/journeyman; IIF uses matching QB service item'],
   ['v2026.07.14-1137', 'IIF generator: date range filter and loading spinner'],
   ['v2026.07.14-1039', 'New bookkeeper role: sees everything, edits nothing, QuickBooks export'],
   ['v2026.07.14-1029', 'Back button no longer exits the app from sub-screens'],
@@ -132,22 +133,39 @@ function getKeywords() {
 async function setKeywords(list) { await Storage.setSetting('keywords', list); }
 
 // ---------- employees (Time Logger) ----------
+// Employees are { name, type } where type is 'apprentice' or 'journeyman'.
+// Legacy entries were plain strings — normalized here as journeyman.
+function normalizeEmployee(e) {
+  if (typeof e === 'string') return { name: e, type: 'journeyman' };
+  return { name: e.name, type: e.type === 'apprentice' ? 'apprentice' : 'journeyman' };
+}
 function getEmployees() {
   const arr = Storage.getSettings().employees;
-  return Array.isArray(arr) && arr.length ? arr : ['Davor', 'Janet'];
+  const list = Array.isArray(arr) && arr.length ? arr : ['Davor', 'Janet'];
+  return list.map(normalizeEmployee);
+}
+function getEmployeeNames() { return getEmployees().map(e => e.name); }
+// Map of lowercased employee name → type, for the IIF generator
+function getEmployeeTypeMap() {
+  const map = {};
+  getEmployees().forEach(e => { map[e.name.toLowerCase()] = e.type; });
+  return map;
 }
 async function setEmployees(list) { await Storage.setSetting('employees', list); }
-async function addEmployee(name) {
+async function addEmployee(name, type) {
   const n = (name || '').trim();
   if (!n) return false;
   const list = getEmployees();
-  if (list.some(e => e.toLowerCase() === n.toLowerCase())) return false;
+  if (list.some(e => e.name.toLowerCase() === n.toLowerCase())) return false;
   const capitalized = n.charAt(0).toUpperCase() + n.slice(1).toLowerCase();
-  await setEmployees([...list, capitalized]);
+  await setEmployees([...list, { name: capitalized, type: type === 'apprentice' ? 'apprentice' : 'journeyman' }]);
   return true;
 }
 async function removeEmployee(name) {
-  await setEmployees(getEmployees().filter(e => e !== name));
+  await setEmployees(getEmployees().filter(e => e.name !== name));
+}
+async function setEmployeeType(name, type) {
+  await setEmployees(getEmployees().map(e => e.name === name ? { ...e, type } : e));
 }
 function renderEmployeeList() {
   const list = getEmployees();
@@ -158,14 +176,23 @@ function renderEmployeeList() {
   }
   employeeListEl.innerHTML = list.map(e => `
     <li class="keyword-pill">
-      <span>${escapeHtml(e)}</span>
-      <button data-emp="${escapeHtml(e)}" aria-label="Remove ${escapeHtml(e)}">×</button>
+      <span>${escapeHtml(e.name)}</span>
+      <select class="employee-type-select" data-emp-type="${escapeHtml(e.name)}" aria-label="Classification for ${escapeHtml(e.name)}">
+        <option value="journeyman" ${e.type === 'journeyman' ? 'selected' : ''}>Journeyman</option>
+        <option value="apprentice" ${e.type === 'apprentice' ? 'selected' : ''}>Apprentice</option>
+      </select>
+      <button data-emp="${escapeHtml(e.name)}" aria-label="Remove ${escapeHtml(e.name)}">×</button>
     </li>
   `).join('');
   employeeListEl.querySelectorAll('button[data-emp]').forEach(btn => {
     btn.addEventListener('click', async () => {
       await removeEmployee(btn.dataset.emp);
       renderEmployeeList();
+    });
+  });
+  employeeListEl.querySelectorAll('select[data-emp-type]').forEach(sel => {
+    sel.addEventListener('change', async () => {
+      await setEmployeeType(sel.dataset.empType, sel.value);
     });
   });
 }
@@ -1263,7 +1290,8 @@ keywordInput.addEventListener('keydown', (e) => {
 });
 
 if (employeeAddBtn) employeeAddBtn.addEventListener('click', async () => {
-  if (await addEmployee(employeeInput.value)) {
+  const typeSel = document.getElementById('employee-type-input');
+  if (await addEmployee(employeeInput.value, typeSel ? typeSel.value : 'journeyman')) {
     employeeInput.value = '';
     renderEmployeeList();
   } else {
@@ -2365,7 +2393,7 @@ function openIIFModal() {
   setTimeout(() => {
     const { body } = splitTitleAndBody(note.body);
     const customerNames = getCustomerNamesList();
-    iifAllEntries = parseHoursNote(body, customerNames, getEmployees());
+    iifAllEntries = parseHoursNote(body, customerNames, getEmployeeNames());
 
     // Check for last export marker to show parsing cutoff
     const markerRe = /^\/\/\s*----\s*IIF exported:\s*(.+?)\s*----/im;
@@ -2387,7 +2415,7 @@ if (iifModal) iifModal.addEventListener('click', e => { if (e.target === iifModa
 if (editorIifBtn) editorIifBtn.addEventListener('click', openIIFModal);
 
 if (iifDownloadBtn) iifDownloadBtn.addEventListener('click', () => {
-  const iif = generateIIF(iifParsedEntries);
+  const iif = generateIIF(iifParsedEntries, getEmployeeTypeMap());
   const blob = new Blob([iif], { type: 'text/plain' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');

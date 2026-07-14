@@ -327,7 +327,13 @@ export function parseHoursNote(text, customers, employees) {
 }
 
 // ---------- IIF generation ----------
-export function generateIIF(entries, companyName = 'Company Organizer Ninja') {
+// QuickBooks service items per employee classification. These must exist as
+// Service-type items in the QB company file, with these exact names.
+const ITEM_APPRENTICE = 'Service Rates: Labour Rate';
+const ITEM_JOURNEYMAN = 'Service Rates: Standard Labour';
+
+// employeeTypeMap: lowercased employee name → 'apprentice' | 'journeyman'
+export function generateIIF(entries, employeeTypeMap = {}, companyName = 'Company Organizer Ninja') {
   const lines = [
     `!TIMERHDR\tVER\tREV\tCOMPANYNAME`,
     `TIMERHDR\t8\t0\t${companyName}`,
@@ -336,7 +342,8 @@ export function generateIIF(entries, companyName = 'Company Organizer Ninja') {
   for (const e of entries) {
     if (!e.employees.length || !e.hours || !e.customerMatched) continue;
     for (const emp of e.employees) {
-      lines.push(`TIMEACT\t${e.dateFormatted}\t${e.customerMatched}\t${emp}\tHourly\t${e.hoursFormatted}\t`);
+      const item = employeeTypeMap[emp.toLowerCase()] === 'apprentice' ? ITEM_APPRENTICE : ITEM_JOURNEYMAN;
+      lines.push(`TIMEACT\t${e.dateFormatted}\t${e.customerMatched}\t${emp}\t${item}\t${e.hoursFormatted}\t`);
     }
   }
   return lines.join('\n');

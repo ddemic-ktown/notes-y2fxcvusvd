@@ -152,6 +152,15 @@ body.editor-open {
   cursor: pointer;
 }
 
+.employee-type-select, #employee-type-input {
+  background: var(--bg);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 4px 6px;
+  font-size: 12px;
+}
+
 .iif-range-row { display: flex; gap: 14px; margin: 4px 0 10px; flex-wrap: wrap; }
 .iif-range-label { font-size: 13px; color: var(--ink-soft); display: flex; align-items: center; gap: 6px; }
 .iif-date-input {

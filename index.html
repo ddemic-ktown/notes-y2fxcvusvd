@@ -201,6 +201,10 @@
         <p class="muted" style="margin:0 0 8px; font-size:13px;">Names the Time Logger recognises as employees when parsing your hours note.</p>
         <div class="keyword-add">
           <input id="employee-input" type="text" placeholder="Add an employee" autocomplete="off" />
+          <select id="employee-type-input" aria-label="Classification">
+            <option value="journeyman">Journeyman</option>
+            <option value="apprentice">Apprentice</option>
+          </select>
           <button id="employee-add-btn">Add</button>
         </div>
         <ul id="employee-list" class="keyword-list"></ul>
