@@ -183,7 +183,10 @@ const EXPORT_MARKER_RE = /^\/\/\s*----\s*IIF exported:/i;
 
 // ---------- Main parser ----------
 // employees = [{ name: 'Davor' }, ...] — passed in from app settings
-export function parseHoursNote(text, customers, employees) {
+// range: optional { from: Date|null, to: Date|null } — days outside the range are
+// skipped BEFORE the expensive customer matching. Employee state is still tracked
+// across skipped days so "who's active" carries into the selected range correctly.
+export function parseHoursNote(text, customers, employees, range = {}) {
   // Normalise employee list — use passed-in list or fall back to defaults
   const empList = (employees && employees.length)
     ? employees.map(e => (typeof e === 'string' ? e : e.name).trim())
@@ -238,6 +241,10 @@ export function parseHoursNote(text, customers, employees) {
       employeesFound = activeEmployees.slice();
       employeeConfidence = activeEmployees.length > 0 ? 0.85 : 0;
     }
+
+    // Out of the selected date range — employee state is updated (above), but
+    // skip the hours parsing and expensive customer matching entirely.
+    if ((range.from && currentDate < range.from) || (range.to && currentDate > range.to)) continue;
 
     // Remove employee names and "and" between them
     let cleaned = working;

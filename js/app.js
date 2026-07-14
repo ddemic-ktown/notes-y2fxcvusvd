@@ -12,6 +12,7 @@ import { parseHoursNote, generateIIF, fuzzyMatchCustomer } from "./iif.js";
 // delete entries beyond 10, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.07.14-1155', 'IIF parses only the selected date range — much faster on big notes'],
   ['v2026.07.14-1146', 'Employees classified as apprentice/journeyman; IIF uses matching QB service item'],
   ['v2026.07.14-1137', 'IIF generator: date range filter and loading spinner'],
   ['v2026.07.14-1039', 'New bookkeeper role: sees everything, edits nothing, QuickBooks export'],
@@ -2263,7 +2264,6 @@ const iifReviewNote = document.getElementById('iif-review-note');
 const editorIifBtn = document.getElementById('editor-iif-btn');
 
 let iifParsedEntries = [];
-let iifAllEntries = [];
 const iifFromDate = document.getElementById('iif-from-date');
 const iifToDate = document.getElementById('iif-to-date');
 
@@ -2340,36 +2340,42 @@ function renderIIFEntries(entries) {
 }
 
 let iifLastMarkerText = '';
+let iifNoteBody = null;      // cached while the modal is open
+let iifCustomerNames = null; // cached while the modal is open
 
-// Filter parsed entries by the From/To date inputs, then render.
-// Entries with no parsed date are always kept (they need review anyway).
-function applyIIFDateFilter() {
+function iifRangeFromInputs() {
   const parseInput = (el, endOfDay) => {
     if (!el || !el.value) return null;
     const [y, mo, d] = el.value.split('-').map(Number);
     return new Date(y, mo - 1, d, endOfDay ? 23 : 0, endOfDay ? 59 : 0, endOfDay ? 59 : 0);
   };
-  const from = parseInput(iifFromDate, false);
-  const to = parseInput(iifToDate, true);
-  iifParsedEntries = iifAllEntries.filter(e => {
-    if (!e.date) return true;
-    if (from && e.date < from) return false;
-    if (to && e.date > to) return false;
-    return true;
-  });
-
-  const total = iifParsedEntries.length;
-  const reviewCount = iifParsedEntries.filter(e => e.needsReview).length;
-  const filtered = iifAllEntries.length !== total;
-  iifStatus.innerHTML = `${total} entr${total === 1 ? 'y' : 'ies'}${filtered ? ` shown (of ${iifAllEntries.length} parsed)` : ' parsed from your hours note'}.`
-    + (iifLastMarkerText ? `<br><span style="font-size:12px;color:var(--ink-soft);">📅 Parsing from ${escapeHtml(iifLastMarkerText)} onward</span>` : '');
-  if (iifReviewNote) iifReviewNote.textContent = reviewCount ? `⚠ ${reviewCount} entr${reviewCount === 1 ? 'y needs' : 'ies need'} review (orange rows)` : '';
-  renderIIFEntries(iifParsedEntries);
-  if (iifDownloadBtn) iifDownloadBtn.hidden = total === 0;
+  return { from: parseInput(iifFromDate, false), to: parseInput(iifToDate, true) };
 }
 
-if (iifFromDate) iifFromDate.addEventListener('change', applyIIFDateFilter);
-if (iifToDate) iifToDate.addEventListener('change', applyIIFDateFilter);
+// Parse the hours note (only the selected date range) and render the table.
+function runIIFParse() {
+  iifStatus.innerHTML = '<span class="nav-spinner" style="width:16px;height:16px;border-width:2px;vertical-align:middle;"></span> Parsing your hours note…';
+  if (iifTableBody) iifTableBody.innerHTML = '';
+  if (iifDownloadBtn) iifDownloadBtn.hidden = true;
+  if (iifReviewNote) iifReviewNote.textContent = '';
+
+  setTimeout(() => {
+    const range = iifRangeFromInputs();
+    iifParsedEntries = parseHoursNote(iifNoteBody, iifCustomerNames, getEmployeeNames(), range);
+
+    const total = iifParsedEntries.length;
+    const reviewCount = iifParsedEntries.filter(e => e.needsReview).length;
+    const ranged = !!(range.from || range.to);
+    iifStatus.innerHTML = `${total} entr${total === 1 ? 'y' : 'ies'}${ranged ? ' in the selected date range' : ' parsed from your hours note'}.`
+      + (iifLastMarkerText ? `<br><span style="font-size:12px;color:var(--ink-soft);">📅 Parsing from ${escapeHtml(iifLastMarkerText)} onward</span>` : '');
+    if (iifReviewNote) iifReviewNote.textContent = reviewCount ? `⚠ ${reviewCount} entr${reviewCount === 1 ? 'y needs' : 'ies need'} review (orange rows)` : '';
+    renderIIFEntries(iifParsedEntries);
+    if (iifDownloadBtn) iifDownloadBtn.hidden = total === 0;
+  }, 30);
+}
+
+if (iifFromDate) iifFromDate.addEventListener('change', runIIFParse);
+if (iifToDate) iifToDate.addEventListener('change', runIIFParse);
 
 function openIIFModal() {
   const note = findHoursNote();
@@ -2382,30 +2388,21 @@ function openIIFModal() {
     return;
   }
 
-  // Show the modal with a spinner immediately — parsing (fuzzy matching against
-  // every customer) can take a moment and used to look like nothing was happening.
-  iifStatus.innerHTML = '<span class="nav-spinner" style="width:16px;height:16px;border-width:2px;vertical-align:middle;"></span> Parsing your hours note…';
-  if (iifTableBody) iifTableBody.innerHTML = '';
-  if (iifDownloadBtn) iifDownloadBtn.hidden = true;
-  if (iifReviewNote) iifReviewNote.textContent = '';
+  // Cache the note body and customer list for re-parses while the modal is open
+  iifNoteBody = splitTitleAndBody(note.body).body;
+  iifCustomerNames = getCustomerNamesList();
+
+  // Check for last export marker to show parsing cutoff
+  const markerRe = /^\/\/\s*----\s*IIF exported:\s*(.+?)\s*----/im;
+  const allBodyLines = iifNoteBody.split('\n');
+  iifLastMarkerText = '';
+  for (let i = allBodyLines.length - 1; i >= 0; i--) {
+    const m = allBodyLines[i].match(markerRe);
+    if (m) { iifLastMarkerText = m[1].trim(); break; }
+  }
+
   iifModal.hidden = false;
-
-  setTimeout(() => {
-    const { body } = splitTitleAndBody(note.body);
-    const customerNames = getCustomerNamesList();
-    iifAllEntries = parseHoursNote(body, customerNames, getEmployeeNames());
-
-    // Check for last export marker to show parsing cutoff
-    const markerRe = /^\/\/\s*----\s*IIF exported:\s*(.+?)\s*----/im;
-    const allBodyLines = body.split('\n');
-    iifLastMarkerText = '';
-    for (let i = allBodyLines.length - 1; i >= 0; i--) {
-      const m = allBodyLines[i].match(markerRe);
-      if (m) { iifLastMarkerText = m[1].trim(); break; }
-    }
-
-    applyIIFDateFilter();
-  }, 30);
+  runIIFParse();
 }
 
 if (iifBtn) iifBtn.addEventListener('click', openIIFModal);
