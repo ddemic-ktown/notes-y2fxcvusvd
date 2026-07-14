@@ -10,12 +10,22 @@ service cloud.firestore {
       allow read, write: if request.auth != null && request.auth.uid == userId;
     }
 
-    // Invite lookup — readable by any authenticated user (needed at sign-in),
-    // writable only by org admins (enforced in org rules below) and by the
-    // invited user accepting their own invite
+    // Invite lookup — readable by any authenticated user (needed at sign-in).
+    // Created/updated only by an admin OF THE ORG named in the row (this is the
+    // trust anchor for invite-only membership — must never be world-writable).
+    // Deleted by the invited user (accepting) or an admin of the row's org (cancelling).
     match /inviteLookup/{emailKey} {
+      function isAdminOf(orgId) {
+        return request.auth != null &&
+          get(/databases/$(database)/documents/orgs/$(orgId)/members/$(request.auth.uid)).data.role == 'admin';
+      }
+      function isOwnEmailKey() {
+        return request.auth != null && request.auth.token.email != null &&
+          emailKey == request.auth.token.email.lower().replace('\\.', ',');
+      }
       allow read: if request.auth != null;
-      allow write: if request.auth != null;
+      allow create, update: if isAdminOf(request.resource.data.orgId);
+      allow delete: if isOwnEmailKey() || isAdminOf(resource.data.orgId);
     }
 
     // Org rules
