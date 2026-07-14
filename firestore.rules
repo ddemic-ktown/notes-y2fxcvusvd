@@ -58,16 +58,15 @@ service cloud.firestore {
            inviteId == request.auth.token.email.lower().replace('\\.', ','));
       }
 
-      // Settings — members can read, only admin/employee can write
+      // Settings — members can read, only admins can write
       match /settings/{doc} {
         allow read: if isMember();
-        allow write: if isAdmin() || isEmployee();
+        allow write: if isAdmin();
       }
 
-      // Customers — staff only; customer-role users may not read customer records
+      // Customers — admin only
       match /customers/{customerId} {
-        allow read: if isAdmin() || isEmployee();
-        allow write: if isAdmin() || isEmployee();
+        allow read, write: if isAdmin();
       }
 
       // Notes
@@ -78,8 +77,19 @@ service cloud.firestore {
         allow read: if (isEmployee() || isCustomer()) &&
           ('assignedTo' in resource.data) &&
           request.auth.uid in resource.data.assignedTo;
-        // Admin and employee can write
-        allow write: if isAdmin() || isEmployee();
+        // Admin can create/update/delete anything
+        allow create, update, delete: if isAdmin();
+        // Employee can create GENERAL notes only (no customerId), self-assigned
+        allow create: if isEmployee() &&
+          request.resource.data.customerId == null &&
+          request.resource.data.assignedTo is list &&
+          request.auth.uid in request.resource.data.assignedTo;
+        // Employee can update notes assigned to them, but not change the assignment
+        allow update: if isEmployee() &&
+          ('assignedTo' in resource.data) &&
+          request.auth.uid in resource.data.assignedTo &&
+          request.resource.data.assignedTo == resource.data.assignedTo;
+        // Employees and customers can never delete
       }
     }
   }

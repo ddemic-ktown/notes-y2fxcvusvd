@@ -12,6 +12,7 @@ import { parseHoursNote, generateIIF, fuzzyMatchCustomer } from "./iif.js";
 // delete entries beyond 10, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.07.13-2230', 'Employee role restricted: edit assigned notes, create own general notes, no delete'],
   ['v2026.07.13-2203', 'Customer role locked down: view assigned notes only, read-only editor'],
   ['v2026.07.13-2146', 'Fix invited users failing to join; error banner on account load failure'],
   ['v2026.07.13-2134', 'What\'s new section in Settings'],
@@ -672,12 +673,13 @@ function showEditor(record, type, cursorHint) {
     delete customerLinkBtn.dataset.customerId;
   }
 
-  deleteBtn.style.display = (type === 'note' && currentIsDefault) ? 'none' : '';
+  // Delete is admin-only (and never on default notes)
+  deleteBtn.style.display = (isAdminRole() && !(type === 'note' && currentIsDefault)) ? '' : 'none';
   const assignBtnEl = document.getElementById('assign-btn');
   if (assignBtnEl) assignBtnEl.hidden = (Storage.getRole() !== 'admin' || type !== 'note');
   const assignCustomerBtnEl = document.getElementById('assign-customer-btn');
   const isOrphaned = type === 'note' && !!record.customerId && !Storage.getCustomer(record.customerId);
-  if (assignCustomerBtnEl) assignCustomerBtnEl.hidden = !(type === 'note' && (!record.customerId || isOrphaned));
+  if (assignCustomerBtnEl) assignCustomerBtnEl.hidden = !(isAdminRole() && type === 'note' && (!record.customerId || isOrphaned));
   const editorIifBtnEl = document.getElementById('editor-iif-btn');
   if (editorIifBtnEl) {
     const isHoursNote = type === 'note' && (splitTitleAndBody(record.body).title || '').trim().toLowerCase() === 'hours';
@@ -815,11 +817,14 @@ function renderNotesList() {
   const notes = Storage.listNotes();
   const customersCount = Storage.listCustomers().length;
 
-  // Customer role: simplified home — only the notes shared with them.
-  if (isCustomerRole()) {
+  // Customer/employee roles: simplified home — only the notes assigned to them.
+  if (!isAdminRole()) {
     const assigned = Storage.listAllNotes();
-    notesList.innerHTML = assigned.length === 0
+    const emptyState = isCustomerRole()
       ? '<p class="empty-state">No notes have been shared with you yet.</p>'
+      : '<p class="empty-state">No notes yet. Tap <strong>+</strong> to add one.</p>';
+    notesList.innerHTML = assigned.length === 0
+      ? emptyState
       : '<p class="section-label">Your notes:</p>' + assigned.map(n => renderNoteCard(n)).join('');
     notesList.querySelectorAll('.note-card[data-id]').forEach(card => {
       card.addEventListener('click', () => {
@@ -1911,23 +1916,27 @@ if (signoutBtn) {
 
 // ---------- role-based UI ----------
 function applyRoleUI(role) {
+  const isAdminRole = role === 'admin';
   const isCustomer = role === 'customer';
-  // Hide write controls for customers
-  const writeControls = [
+  // Admin-only controls: customer creation, per-customer note creation, delete
+  const adminControls = [
     document.getElementById('customers-fab'),
     document.getElementById('customer-notes-fab'),
     document.getElementById('delete-btn'),
     document.getElementById('list-fab'),
-    document.getElementById('fab'),
   ];
-  writeControls.forEach(el => { if (el) el.style.display = isCustomer ? 'none' : ''; });
-  // Hide staff-only settings rows
+  adminControls.forEach(el => { if (el) el.style.display = isAdminRole ? '' : 'none'; });
+  // Home + FAB: admins and employees can create general notes; customers cannot
+  const homeFab = document.getElementById('fab');
+  if (homeFab) homeFab.style.display = isCustomer ? 'none' : '';
+  // Admin-only settings rows
   document.querySelectorAll('[data-staff-only]').forEach(el => {
-    el.style.display = isCustomer ? 'none' : '';
+    el.style.display = isAdminRole ? '' : 'none';
   });
 }
 
 function isCustomerRole() { return Storage.getRole() === 'customer'; }
+function isAdminRole() { return Storage.getRole() === 'admin'; }
 
 // ---------- Users tab ----------
 function renderMembersList() {

@@ -63,8 +63,8 @@ function attachListeners() {
     _ready = true;
     emit();
   }));
-  // Customer-role users may not read customer records (firestore.rules) — skip the listener.
-  if (_role === 'customer') {
+  // Only admins may read customer records (firestore.rules) — skip the listener otherwise.
+  if (_role !== 'admin') {
     _customersReady = true;
   } else {
     _unsubs.push(onSnapshot(customersCol(), (snap) => {
@@ -219,7 +219,8 @@ export const Storage = {
       body: opts.body || "",
       customerId: opts.customerId || null,
       isDefault: !!opts.isDefault,
-      assignedTo: [],
+      // Employees may only create notes assigned to themselves (firestore.rules)
+      assignedTo: _role === 'employee' ? [_uid] : [],
       created: now,
       updated: now,
     };
