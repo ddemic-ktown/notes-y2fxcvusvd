@@ -12,6 +12,7 @@ import { parseHoursNote, generateIIF, fuzzyMatchCustomer } from "./iif.js";
 // delete entries beyond 10, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.07.13-2333', 'In-note search arrows dismiss the keyboard on mobile'],
   ['v2026.07.13-2325', 'Removing a user now un-shares their notes; stale Shared badges cleaned up'],
   ['v2026.07.13-2301', 'Invite-only: no self-created orgs; removed users lose access; invite role enforced'],
   ['v2026.07.13-2243', 'Customer name on shared note cards, Shared badges, view-only checkbox fix'],
@@ -1456,8 +1457,10 @@ function gotoMatch(index) {
   searchIndex = ((index % n) + n) % n;
   const m = searchMatches[searchIndex];
   if (m.inTitle) {
-    titleInput.focus();
-    titleInput.setSelectionRange(m.start, m.end);
+    // Don't focus the title (would raise the mobile keyboard) — flash it instead
+    titleInput.classList.add('search-hit-flash');
+    setTimeout(() => titleInput.classList.remove('search-hit-flash'), 800);
+    bodyInput.scrollTop = 0;
   } else {
     bodyInput.setSelectionRange(m.start, m.end);
     const before = bodyInput.value.substring(0, m.start);
@@ -1489,8 +1492,9 @@ noteSearchInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') { e.preventDefault(); gotoMatch(searchIndex + (e.shiftKey ? -1 : 1)); }
   else if (e.key === 'Escape') { e.preventDefault(); resetNoteSearch(); }
 });
-searchPrevBtn.addEventListener('click', () => { gotoMatch(searchIndex - 1); noteSearchInput.focus(); });
-searchNextBtn.addEventListener('click', () => { gotoMatch(searchIndex + 1); noteSearchInput.focus(); });
+// Arrow navigation dismisses the keyboard (blur) — it stays down until a text field is tapped again
+searchPrevBtn.addEventListener('click', () => { gotoMatch(searchIndex - 1); noteSearchInput.blur(); });
+searchNextBtn.addEventListener('click', () => { gotoMatch(searchIndex + 1); noteSearchInput.blur(); });
 bodyInput.addEventListener('input', () => {
   if (noteSearchInput.value) {
     findMatches(noteSearchInput.value);

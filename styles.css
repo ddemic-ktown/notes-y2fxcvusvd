@@ -152,6 +152,13 @@ body.editor-open {
   cursor: pointer;
 }
 
+.search-hit-flash {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  border-radius: var(--radius);
+  transition: outline-color 0.3s;
+}
+
 .shared-badge {
   display: inline-block;
   background: var(--accent);
