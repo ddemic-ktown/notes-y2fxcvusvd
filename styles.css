@@ -152,6 +152,17 @@ body.editor-open {
   cursor: pointer;
 }
 
+.iif-range-row { display: flex; gap: 14px; margin: 4px 0 10px; flex-wrap: wrap; }
+.iif-range-label { font-size: 13px; color: var(--ink-soft); display: flex; align-items: center; gap: 6px; }
+.iif-date-input {
+  background: var(--bg);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 6px 8px;
+  font-size: 13px;
+}
+
 .search-hit-flash {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
