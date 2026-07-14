@@ -7,9 +7,16 @@ import {
 } from "./firebase-init.js";
 import { parseHoursNote, generateIIF, fuzzyMatchCustomer } from "./iif.js";
 
-// Version format: vYYYY.MM.DD-HHMM (Pacific time) — bump both APP_VERSION and sw.js VERSION on every change.
+// Version format: vYYYY.MM.DD-HHMM (Pacific time).
+// On every change: add a new entry at the TOP of CHANGELOG (APP_VERSION follows automatically),
+// delete entries beyond 10, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
-const APP_VERSION = 'v2026.07.13-2116';
+const CHANGELOG = [
+  ['v2026.07.13-2134', 'What\'s new section in Settings'],
+  ['v2026.07.13-2116', 'Invite button emails a sign-in link'],
+  ['v2026.07.13-2103', 'Sign in with email link or password, forgot-password flow'],
+];
+const APP_VERSION = CHANGELOG[0][0];
 
 // Canonical site address — all emailed sign-in links point here.
 const APP_URL = 'https://ddemic-ktown.github.io/notes-y2fxcvusvd/';
@@ -2067,6 +2074,14 @@ window.addEventListener('beforeunload', () => {
 // Display app version in the home toolbar
 const appVersionEl = document.getElementById('app-version');
 if (appVersionEl) appVersionEl.textContent = APP_VERSION;
+
+// "What's new" list in Settings — shows at most the 10 latest changelog entries.
+const changelogList = document.getElementById('changelog-list');
+if (changelogList) {
+  changelogList.innerHTML = CHANGELOG.slice(0, 10).map(([ver, desc]) => `
+    <li class="changelog-item"><span class="changelog-ver">${ver}</span> ${desc}</li>
+  `).join('');
+}
 
 // ---------- IIF generator ----------
 const iifBtn = document.getElementById('iif-btn');
