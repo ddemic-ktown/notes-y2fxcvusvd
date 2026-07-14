@@ -14,12 +14,36 @@
   <!-- SIGN-IN VIEW -->
   <section id="signin-view" class="screen">
     <div class="signin-card">
-      <h1>Note Aggregator</h1>
-      <p>Sign in with Google to access your notes from any device.</p>
-      <button id="signin-btn" class="primary">Sign in with Google</button>
+      <h1>JobPilot</h1>
+      <p>Sign in to access your notes from any device.</p>
+      <input id="signin-email" class="signin-input" type="email" placeholder="Email" autocomplete="email" />
+      <input id="signin-password" class="signin-input" type="password" placeholder="Password" autocomplete="current-password" />
+      <button id="email-signin-btn" class="primary">Sign in</button>
+      <button id="forgot-password-btn" class="signin-link-btn" type="button">Forgot password? Email me a sign-in link</button>
+      <div class="signin-divider"><span>or</span></div>
+      <button id="magic-link-btn" class="secondary">New here? Email me a sign-in link</button>
+      <button id="signin-btn" class="secondary">Sign in with Google</button>
+      <p id="signin-message" class="signin-message" role="status"></p>
       <p id="signin-error" class="signin-error" role="alert"></p>
     </div>
   </section>
+
+  <!-- SET PASSWORD MODAL -->
+  <div id="set-password-modal" class="modal-overlay" hidden>
+    <div class="modal-panel">
+      <div class="modal-header">
+        <h2 class="modal-title">Set a password</h2>
+      </div>
+      <p class="modal-hint">Set a password so you can sign in without an email link next time.</p>
+      <input id="set-password-input" class="signin-input" type="password" placeholder="New password (min 6 characters)" autocomplete="new-password" />
+      <input id="set-password-confirm" class="signin-input" type="password" placeholder="Confirm password" autocomplete="new-password" />
+      <p id="set-password-error" class="signin-error" role="alert"></p>
+      <div class="modal-actions">
+        <button id="set-password-skip" class="secondary" type="button">Skip</button>
+        <button id="set-password-save" class="primary" type="button">Save</button>
+      </div>
+    </div>
+  </div>
 
   <!-- LIST VIEW -->
   <section id="list-view" class="screen active">

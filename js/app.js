@@ -1,10 +1,15 @@
 // app.js — bootstraps auth, wires UI, and re-renders on Firestore cache updates.
 import { Storage } from "./storage.js";
-import { auth, googleProvider, signInWithPopup, signOut, onAuthStateChanged } from "./firebase-init.js";
+import {
+  auth, googleProvider, signInWithPopup, signOut, onAuthStateChanged,
+  sendSignInLinkToEmail, isSignInWithEmailLink, signInWithEmailLink,
+  signInWithEmailAndPassword, updatePassword,
+} from "./firebase-init.js";
 import { parseHoursNote, generateIIF, fuzzyMatchCustomer } from "./iif.js";
 
-// Version format: v YYYY.MM.DD-HHMM (Pacific time) — bump both APP_VERSION and sw.js VERSION on every change.
-const APP_VERSION = 'v2026.06.28-1018';
+// Version format: vYYYY.MM.DD-HHMM (Pacific time) — bump both APP_VERSION and sw.js VERSION on every change.
+// Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
+const APP_VERSION = 'v2026.07.13-2103';
 
 // ---------- DOM refs ----------
 const listView = document.getElementById('list-view');
@@ -22,6 +27,18 @@ const editorView = document.getElementById('editor-view');
 const signinView = document.getElementById('signin-view');
 const signinBtn = document.getElementById('signin-btn');
 const signinError = document.getElementById('signin-error');
+const signinMessage = document.getElementById('signin-message');
+const signinEmailInput = document.getElementById('signin-email');
+const signinPasswordInput = document.getElementById('signin-password');
+const emailSigninBtn = document.getElementById('email-signin-btn');
+const magicLinkBtn = document.getElementById('magic-link-btn');
+const forgotPasswordBtn = document.getElementById('forgot-password-btn');
+const setPasswordModal = document.getElementById('set-password-modal');
+const setPasswordInput = document.getElementById('set-password-input');
+const setPasswordConfirm = document.getElementById('set-password-confirm');
+const setPasswordError = document.getElementById('set-password-error');
+const setPasswordSave = document.getElementById('set-password-save');
+const setPasswordSkip = document.getElementById('set-password-skip');
 const signoutBtn = document.getElementById('signout-btn');
 const accountEmailEl = document.getElementById('account-email');
 
@@ -1731,6 +1748,7 @@ function showSignin() {
 if (signinBtn) {
   signinBtn.addEventListener('click', async () => {
     signinError.textContent = '';
+    if (signinMessage) signinMessage.textContent = '';
     try {
       await signInWithPopup(auth, googleProvider);
     } catch (err) {
@@ -1739,6 +1757,121 @@ if (signinBtn) {
     }
   });
 }
+
+// ---------- email link + password auth ----------
+const EMAIL_FOR_SIGNIN_KEY = 'emailForSignIn';
+
+function friendlyAuthError(err) {
+  const code = err && err.code ? err.code : '';
+  if (code === 'auth/invalid-credential' || code === 'auth/wrong-password' || code === 'auth/user-not-found') {
+    return 'Wrong email or password. If you haven’t set a password yet, use the sign-in link option below.';
+  }
+  if (code === 'auth/invalid-email') return 'Please enter a valid email address.';
+  if (code === 'auth/missing-password') return 'Please enter your password.';
+  if (code === 'auth/too-many-requests') return 'Too many attempts. Please try again later.';
+  if (code === 'auth/invalid-action-code' || code === 'auth/expired-action-code') {
+    return 'That sign-in link has expired or was already used. Request a new one.';
+  }
+  return err && err.message ? err.message : 'Sign-in failed.';
+}
+
+async function sendMagicLink(email) {
+  signinError.textContent = '';
+  if (signinMessage) signinMessage.textContent = '';
+  if (!email) {
+    signinError.textContent = 'Enter your email address first.';
+    return;
+  }
+  try {
+    await sendSignInLinkToEmail(auth, email, {
+      url: window.location.origin + window.location.pathname,
+      handleCodeInApp: true,
+    });
+    window.localStorage.setItem(EMAIL_FOR_SIGNIN_KEY, email);
+    if (signinMessage) signinMessage.textContent = `Sign-in link sent to ${email}. Check your inbox.`;
+  } catch (err) {
+    console.error(err);
+    signinError.textContent = friendlyAuthError(err);
+  }
+}
+
+if (emailSigninBtn) {
+  emailSigninBtn.addEventListener('click', async () => {
+    signinError.textContent = '';
+    if (signinMessage) signinMessage.textContent = '';
+    const email = (signinEmailInput.value || '').trim();
+    const password = signinPasswordInput.value || '';
+    if (!email || !password) {
+      signinError.textContent = 'Enter your email and password, or request a sign-in link.';
+      return;
+    }
+    try {
+      await signInWithEmailAndPassword(auth, email, password);
+    } catch (err) {
+      console.error(err);
+      signinError.textContent = friendlyAuthError(err);
+    }
+  });
+}
+
+if (magicLinkBtn) {
+  magicLinkBtn.addEventListener('click', () => sendMagicLink((signinEmailInput.value || '').trim()));
+}
+if (forgotPasswordBtn) {
+  forgotPasswordBtn.addEventListener('click', () => sendMagicLink((signinEmailInput.value || '').trim()));
+}
+
+function showSetPasswordModal() {
+  if (!setPasswordModal) return;
+  setPasswordInput.value = '';
+  setPasswordConfirm.value = '';
+  setPasswordError.textContent = '';
+  setPasswordModal.hidden = false;
+}
+
+if (setPasswordSave) {
+  setPasswordSave.addEventListener('click', async () => {
+    setPasswordError.textContent = '';
+    const pw = setPasswordInput.value;
+    if (pw.length < 6) { setPasswordError.textContent = 'Password must be at least 6 characters.'; return; }
+    if (pw !== setPasswordConfirm.value) { setPasswordError.textContent = 'Passwords don’t match.'; return; }
+    try {
+      await updatePassword(auth.currentUser, pw);
+      setPasswordModal.hidden = true;
+    } catch (err) {
+      console.error(err);
+      setPasswordError.textContent = err && err.message ? err.message : 'Could not set password.';
+    }
+  });
+}
+if (setPasswordSkip) {
+  setPasswordSkip.addEventListener('click', () => { setPasswordModal.hidden = true; });
+}
+
+// Complete magic-link sign-in if the page was opened from an emailed link.
+let pendingPasswordPrompt = false;
+async function completeEmailLinkSignin() {
+  if (!isSignInWithEmailLink(auth, window.location.href)) return;
+  let email = window.localStorage.getItem(EMAIL_FOR_SIGNIN_KEY);
+  if (!email) {
+    // Link was opened on a different device/browser than the one that requested it.
+    email = window.prompt('Please confirm your email address to finish signing in:');
+  }
+  if (!email) return;
+  try {
+    await signInWithEmailLink(auth, email.trim(), window.location.href);
+    window.localStorage.removeItem(EMAIL_FOR_SIGNIN_KEY);
+    pendingPasswordPrompt = true;
+  } catch (err) {
+    console.error(err);
+    signinError.textContent = friendlyAuthError(err);
+    showSignin();
+  } finally {
+    // Remove the one-time-code params from the URL.
+    window.history.replaceState({}, document.title, window.location.origin + window.location.pathname);
+  }
+}
+const emailLinkSigninReady = completeEmailLinkSignin();
 if (signoutBtn) {
   signoutBtn.addEventListener('click', async () => { await signOut(auth); });
 }
@@ -1888,6 +2021,9 @@ let unsubStorage = null;
 onAuthStateChanged(auth, async (user) => {
   if (unsubStorage) { unsubStorage(); unsubStorage = null; }
   if (!user) {
+    // Give a pending magic-link sign-in a chance to complete before showing the sign-in screen.
+    await emailLinkSigninReady;
+    if (auth.currentUser) return; // link sign-in succeeded; a new auth event will follow
     Storage.signedOut();
     showSignin();
     return;
@@ -1906,6 +2042,11 @@ onAuthStateChanged(auth, async (user) => {
   // Hide write controls for customer role
   applyRoleUI(Storage.getRole());
   showNotes();
+  // First magic-link sign-in (or forgot-password): prompt to set a password.
+  if (pendingPasswordPrompt) {
+    pendingPasswordPrompt = false;
+    showSetPasswordModal();
+  }
 });
 
 window.addEventListener('beforeunload', () => {
