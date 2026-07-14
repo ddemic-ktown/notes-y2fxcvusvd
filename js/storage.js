@@ -221,6 +221,7 @@ export const Storage = {
       isDefault: !!opts.isDefault,
       // Employees may only create notes assigned to themselves (firestore.rules)
       assignedTo: _role === 'employee' ? [_uid] : [],
+      customerName: opts.customerId ? this.getCustomerNameSnapshot(opts.customerId) : '',
       created: now,
       updated: now,
     };
@@ -238,6 +239,17 @@ export const Storage = {
     _cache.notes[i] = next;
     emit();
     setDoc(doc(notesCol(), id), stripId(next)).catch(err => console.warn("updateNote", err));
+    // Admin renamed a customer (default note title) — propagate to that customer's notes
+    if (_role === 'admin' && next.isDefault && next.customerId) {
+      const name = this.getCustomerNameSnapshot(next.customerId);
+      _cache.notes.forEach((n, idx) => {
+        if (n.customerId === next.customerId && !n.isDefault && (n.customerName || '') !== name) {
+          const updated = { ...n, customerName: name };
+          _cache.notes[idx] = updated;
+          setDoc(doc(notesCol(), n.id), stripId(updated)).catch(err => console.warn("propagate customerName", err));
+        }
+      });
+    }
     return next;
   },
 
@@ -272,6 +284,15 @@ export const Storage = {
   getCustomer(id) { return _cache.customers.find(c => c.id === id) || null; },
   getDefaultNoteForCustomer(customerId) {
     return _cache.notes.find(n => n.customerId === customerId && n.isDefault) || null;
+  },
+
+  // Denormalized customer name (first line of the default note) so non-admin
+  // viewers can display it without read access to the default note.
+  getCustomerNameSnapshot(customerId) {
+    const def = this.getDefaultNoteForCustomer(customerId);
+    if (!def) return '';
+    const nl = (def.body || '').indexOf('\n');
+    return (nl === -1 ? (def.body || '') : def.body.slice(0, nl)).trim();
   },
 
   createCustomer() {
@@ -378,10 +399,27 @@ export const Storage = {
   assignUsersToNote(noteId, uids) {
     const i = _cache.notes.findIndex(n => n.id === noteId);
     if (i === -1) return;
-    const next = { ..._cache.notes[i], assignedTo: uids };
+    const note = _cache.notes[i];
+    // Refresh the denormalized customer name at share time
+    const customerName = note.customerId ? this.getCustomerNameSnapshot(note.customerId) : (note.customerName || '');
+    const next = { ...note, assignedTo: uids, customerName };
     _cache.notes[i] = next;
     emit();
     setDoc(doc(notesCol(), noteId), stripId(next)).catch(err => console.warn("assignUsersToNote", err));
+  },
+
+  // One-time catch-up: stamp customerName onto already-shared notes that lack it.
+  backfillAssignedCustomerNames() {
+    if (_role !== 'admin') return;
+    _cache.notes.forEach((n, idx) => {
+      if (!n.customerId || n.isDefault) return;
+      if (!Array.isArray(n.assignedTo) || n.assignedTo.length === 0) return;
+      const name = this.getCustomerNameSnapshot(n.customerId);
+      if ((n.customerName || '') === name) return;
+      const updated = { ...n, customerName: name };
+      _cache.notes[idx] = updated;
+      setDoc(doc(notesCol(), n.id), stripId(updated)).catch(err => console.warn("backfill customerName", err));
+    });
   },
   getMember(uid) { return _cache.members.find(m => m.uid === uid) || null; },
 

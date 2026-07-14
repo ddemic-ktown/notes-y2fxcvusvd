@@ -12,6 +12,7 @@ import { parseHoursNote, generateIIF, fuzzyMatchCustomer } from "./iif.js";
 // delete entries beyond 10, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.07.13-2243', 'Customer name on shared note cards, Shared badges, view-only checkbox fix'],
   ['v2026.07.13-2230', 'Employee role restricted: edit assigned notes, create own general notes, no delete'],
   ['v2026.07.13-2203', 'Customer role locked down: view assigned notes only, read-only editor'],
   ['v2026.07.13-2146', 'Fix invited users failing to join; error banner on account load failure'],
@@ -659,6 +660,14 @@ function showEditor(record, type, cursorHint) {
   const readOnly = isCustomerRole();
   titleInput.readOnly = readOnly;
   bodyInput.readOnly = readOnly;
+  // Checkbox toolbar button mutates the note — hide it for customers
+  if (checkboxBtn) checkboxBtn.style.display = readOnly ? 'none' : '';
+  // Shared badge in the editor header
+  const editorSharedBadge = document.getElementById('editor-shared-badge');
+  if (editorSharedBadge) {
+    const isShared = type === 'note' && Array.isArray(record.assignedTo) && record.assignedTo.length > 0;
+    editorSharedBadge.hidden = !(isAdminRole() && isShared);
+  }
 
   const sameAsBack = returnScreen === 'customer-notes'
     && record.customerId && record.customerId === activeCustomerId;
@@ -891,9 +900,12 @@ function renderNotesList() {
       : '<span style="color:var(--ink-soft);font-style:italic">Untitled</span>';
     const firstBodyLine = (body.split('\n').find(l => l.trim() !== '') || '').trim();
     const safePreview = firstBodyLine ? escapeHtml(firstBodyLine) : '';
+    const sharedBadge = (Array.isArray(n.assignedTo) && n.assignedTo.length > 0)
+      ? '<span class="shared-badge" title="Shared with assigned users">Shared</span>'
+      : '';
     return `
       <article class="note-card home-pinned" data-id="${n.id}" data-kind="note">
-        <span class="customer-tag">${tag}</span>
+        <span class="customer-tag">${tag}</span>${sharedBadge}
         <div class="note-head">
           <p class="note-title">${safeTitle}</p>
           <span class="note-date">${formatDateTime(n.updated)}</span>
@@ -976,8 +988,21 @@ function renderNoteCard(n) {
     : '<span style="color:var(--ink-soft);font-style:italic">Untitled</span>';
   const safePreview = body.trim() ? escapeHtml(body) : '';
   const pinned = n.isDefault ? 'pinned' : '';
+  // Customer tag: admins use the live lookup, others the stored snapshot
+  let customerTag = '';
+  if (n.customerId) {
+    const name = isAdminRole()
+      ? Storage.getCustomerNameSnapshot(n.customerId)
+      : (n.customerName || '');
+    customerTag = `<span class="customer-tag">${escapeHtml(name || 'Unnamed customer')}</span>`;
+  }
+  // Shared badge for admins: this note is visible to assigned users
+  const sharedBadge = (isAdminRole() && Array.isArray(n.assignedTo) && n.assignedTo.length > 0)
+    ? '<span class="shared-badge" title="Shared with assigned users">Shared</span>'
+    : '';
   return `
     <article class="note-card ${pinned}" data-id="${n.id}" data-kind="note">
+      ${customerTag}${sharedBadge}
       <div class="note-head">
         <p class="note-title">${safeTitle}</p>
         <span class="note-date">${formatDateTime(n.updated)}</span>
@@ -1320,6 +1345,7 @@ titleInput.addEventListener('input', scheduleSave);
 bodyInput.addEventListener('input', scheduleSave);
 
 checkboxBtn.addEventListener('click', () => {
+  if (isCustomerRole()) return; // view-only
   if (!currentId) return;
   toggleCheckboxOnSelection();
 });
@@ -2106,6 +2132,8 @@ onAuthStateChanged(auth, async (user) => {
   // Hide write controls for customer role
   applyRoleUI(Storage.getRole());
   showNotes();
+  // One-time catch-up: stamp customer names onto already-shared notes
+  Storage.backfillAssignedCustomerNames();
   // First magic-link sign-in (or forgot-password): prompt to set a password.
   if (pendingPasswordPrompt) {
     pendingPasswordPrompt = false;
