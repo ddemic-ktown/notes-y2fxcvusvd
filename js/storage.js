@@ -442,11 +442,47 @@ export const Storage = {
 
   async removeMember(memberUid) {
     await deleteDoc(doc(membersCol(), memberUid));
-    // Also clear their user pointer if it points to this org
-    const userSnap = await getDoc(doc(db, `users/${memberUid}`));
-    if (userSnap.exists() && userSnap.data().orgId === _orgId) {
-      await deleteDoc(doc(db, `users/${memberUid}`));
+    // Un-share: strip their uid from all notes' assignedTo (edits the field only — nothing is deleted)
+    this.unassignUidFromAllNotes(memberUid);
+    // Best-effort: clear their user pointer if it points to this org.
+    // NOTE: firestore.rules only allow the user themselves to write users/{uid},
+    // so this usually fails — harmless under invite-only (stale pointer still gets "no access").
+    try {
+      const userSnap = await getDoc(doc(db, `users/${memberUid}`));
+      if (userSnap.exists() && userSnap.data().orgId === _orgId) {
+        await deleteDoc(doc(db, `users/${memberUid}`));
+      }
+    } catch (e) {
+      console.warn('removeMember: could not clear user pointer (expected under current rules)', e);
     }
+  },
+
+  // Remove a uid from every note's assignedTo list. Field edit only; no deletions.
+  unassignUidFromAllNotes(memberUid) {
+    _cache.notes.forEach((n, idx) => {
+      if (!Array.isArray(n.assignedTo) || !n.assignedTo.includes(memberUid)) return;
+      const updated = { ...n, assignedTo: n.assignedTo.filter(u => u !== memberUid) };
+      _cache.notes[idx] = updated;
+      setDoc(doc(notesCol(), n.id), stripId(updated)).catch(err => console.warn("unassign", err));
+    });
+    emit();
+  },
+
+  // Sweep: drop uids that are no longer members from all assignedTo lists.
+  // (assignedTo only ever contains member uids — the assign modal lists members,
+  // and employee self-assignment requires membership — so this is safe.)
+  cleanupOrphanedAssignments() {
+    if (_role !== 'admin') return;
+    const memberUids = new Set(_cache.members.map(m => m.uid));
+    _cache.notes.forEach((n, idx) => {
+      if (!Array.isArray(n.assignedTo) || n.assignedTo.length === 0) return;
+      const kept = n.assignedTo.filter(u => memberUids.has(u));
+      if (kept.length === n.assignedTo.length) return;
+      const updated = { ...n, assignedTo: kept };
+      _cache.notes[idx] = updated;
+      setDoc(doc(notesCol(), n.id), stripId(updated)).catch(err => console.warn("cleanup assignments", err));
+    });
+    emit();
   },
 
   // ---------- Invites ----------
