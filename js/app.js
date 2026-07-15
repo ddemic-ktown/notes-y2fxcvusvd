@@ -13,6 +13,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 10, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.07.14-1950', 'Files card sits below the customer default note, collapsed until tapped'],
   ['v2026.07.14-1943', 'Per-customer files: photos/documents stored on this device, shareable via share sheet'],
   ['v2026.07.14-1230', 'Tap an IIF table row to see the note line it came from'],
   ['v2026.07.14-1222', 'IIF date range defaults to the last two weeks'],
@@ -1159,8 +1160,13 @@ function renderCustomerNotesList(customerId) {
   const notes = words.length
     ? all.filter(n => words.every(w => (n.body || '').toLowerCase().includes(w)))
     : all;
+  // Detach the persistent files section before re-rendering so innerHTML doesn't destroy it
+  const filesSection = document.getElementById('customer-files-section');
+  if (filesSection) filesSection.remove();
+
   if (notes.length === 0 && words.length) {
     customerNotesList.innerHTML = `<p class="empty-state">No notes match "${escapeHtml(customerNotesSearchTerm)}".</p>`;
+    if (filesSection) customerNotesList.insertAdjacentElement('afterbegin', filesSection);
     return;
   }
   customerNotesList.innerHTML = notes.map(renderNoteCard).join('');
@@ -1170,6 +1176,12 @@ function renderCustomerNotesList(customerId) {
       if (note) showEditor(note, 'note');
     });
   });
+  // Place the files card right below the customer's default (pinned) note
+  if (filesSection) {
+    const defCard = customerNotesList.querySelector('.note-card.pinned');
+    if (defCard) defCard.insertAdjacentElement('afterend', filesSection);
+    else customerNotesList.insertAdjacentElement('afterbegin', filesSection);
+  }
 }
 
 // ---------- editor save / back / delete ----------
