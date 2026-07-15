@@ -102,9 +102,26 @@
         <input id="customer-notes-search" class="search-input" type="search" placeholder="Search notes…" autocomplete="off" style="flex:1;" />
       </div>
     </header>
-    <main id="customer-notes-list" class="notes-list"></main>
+    <main class="notes-list">
+      <div id="customer-files-section" class="customer-files-section">
+        <div class="files-header">
+          <button id="customer-files-toggle" class="section-label-btn files-toggle" type="button">Files (0) ▸</button>
+          <label class="files-add-btn">+ Add
+            <input id="customer-file-input" type="file" multiple hidden />
+          </label>
+        </div>
+        <p class="files-local-note" hidden id="customer-files-note">Stored only on this device — not backed up, not visible to others.</p>
+        <ul id="customer-files-list" class="customer-files-list" hidden></ul>
+      </div>
+      <div id="customer-notes-list"></div>
+    </main>
     <button id="customer-notes-fab" class="fab" aria-label="New note for this customer">+</button>
   </section>
+
+  <!-- IMAGE LIGHTBOX (local customer files) -->
+  <div id="file-lightbox" class="file-lightbox" hidden>
+    <img id="file-lightbox-img" alt="" />
+  </div>
 
   <!-- AGGREGATOR VIEW (one per keyword) -->
   <section id="aggregator-view" class="screen">

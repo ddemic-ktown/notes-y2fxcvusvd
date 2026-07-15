@@ -6,12 +6,14 @@ import {
   signInWithEmailAndPassword, updatePassword,
 } from "./firebase-init.js";
 import { parseHoursNote, generateIIF, fuzzyMatchCustomer } from "./iif.js";
+import { LocalFiles } from "./files.js";
 
 // Version format: vYYYY.MM.DD-HHMM (Pacific time).
 // On every change: add a new entry at the TOP of CHANGELOG (APP_VERSION follows automatically),
 // delete entries beyond 10, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.07.14-1943', 'Per-customer files: photos/documents stored on this device, shareable via share sheet'],
   ['v2026.07.14-1230', 'Tap an IIF table row to see the note line it came from'],
   ['v2026.07.14-1222', 'IIF date range defaults to the last two weeks'],
   ['v2026.07.14-1218', 'Export markers retired — the date range decides what gets parsed'],
@@ -632,9 +634,11 @@ function showCustomerNotes(customerId, returnTo) {
   }
   const def = Storage.ensureDefaultNoteForCustomer(customerId);
   const { title } = splitTitleAndBody(def.body);
+  if (activeCustomerId !== customerId) filesExpanded = false;
   activeCustomerId = customerId;
   returnScreen = 'customer-notes';
   customerNotesReturnTo = returnTo || { screen: 'customers' };
+  renderCustomerFiles(customerId);
   customerNotesTitle.textContent = title.trim() ? title.trim() : 'Unnamed customer';
   if (customerNotesBackBtn) {
     if (customerNotesReturnTo.screen === 'aggregator' && customerNotesReturnTo.keyword) {
@@ -2250,6 +2254,121 @@ window.addEventListener('beforeunload', () => {
 // Display app version in the home toolbar
 const appVersionEl = document.getElementById('app-version');
 if (appVersionEl) appVersionEl.textContent = APP_VERSION;
+
+// ---------- local customer files (on-device only) ----------
+LocalFiles.requestPersistence();
+
+const filesToggle = document.getElementById('customer-files-toggle');
+const filesListEl = document.getElementById('customer-files-list');
+const filesNoteEl = document.getElementById('customer-files-note');
+const fileInput = document.getElementById('customer-file-input');
+const fileLightbox = document.getElementById('file-lightbox');
+const fileLightboxImg = document.getElementById('file-lightbox-img');
+let filesExpanded = false;
+let fileObjectUrls = [];
+
+function fmtFileSize(bytes) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+async function renderCustomerFiles(customerId) {
+  if (!filesListEl) return;
+  fileObjectUrls.forEach(u => URL.revokeObjectURL(u));
+  fileObjectUrls = [];
+  let recs = [];
+  try { recs = await LocalFiles.list(customerId); } catch (e) { console.warn('files list', e); }
+  if (filesToggle) filesToggle.textContent = `Files (${recs.length}) ${filesExpanded ? '▾' : '▸'}`;
+  filesListEl.hidden = !filesExpanded;
+  if (filesNoteEl) filesNoteEl.hidden = !filesExpanded;
+  if (!filesExpanded) return;
+  if (recs.length === 0) {
+    filesListEl.innerHTML = '<li class="file-row file-row-empty">No files yet. Use + Add to attach photos or documents.</li>';
+    return;
+  }
+  filesListEl.innerHTML = recs.map(r => {
+    const isImage = (r.type || '').startsWith('image/');
+    let thumb = '<span class="file-icon">📄</span>';
+    if (isImage) {
+      const url = URL.createObjectURL(r.blob);
+      fileObjectUrls.push(url);
+      thumb = `<img class="file-thumb" src="${url}" alt="" data-open="${r.id}" />`;
+    }
+    return `
+      <li class="file-row" data-id="${r.id}">
+        ${thumb}
+        <div class="file-meta" data-open="${r.id}">
+          <span class="file-name">${escapeHtml(r.name)}</span>
+          <span class="file-info">${fmtFileSize(r.size)} · ${formatDateTime(r.addedAt)}</span>
+        </div>
+        <button class="file-share-btn" data-share="${r.id}" aria-label="Share file">Share</button>
+        <button class="file-delete-btn" data-del="${r.id}" aria-label="Delete file">✕</button>
+      </li>
+    `;
+  }).join('');
+
+  filesListEl.querySelectorAll('[data-open]').forEach(el => {
+    el.addEventListener('click', async () => {
+      const rec = await LocalFiles.get(el.dataset.open);
+      if (!rec) return;
+      const url = URL.createObjectURL(rec.blob);
+      fileObjectUrls.push(url);
+      if ((rec.type || '').startsWith('image/')) {
+        fileLightboxImg.src = url;
+        fileLightbox.hidden = false;
+      } else {
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = rec.name;
+        a.click();
+      }
+    });
+  });
+  filesListEl.querySelectorAll('[data-share]').forEach(btn => {
+    btn.addEventListener('click', async (ev) => {
+      ev.stopPropagation();
+      const rec = await LocalFiles.get(btn.dataset.share);
+      if (!rec) return;
+      const result = await LocalFiles.share(rec);
+      if (result === 'unsupported') {
+        // Desktop fallback: download instead
+        const url = URL.createObjectURL(rec.blob);
+        fileObjectUrls.push(url);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = rec.name;
+        a.click();
+      }
+    });
+  });
+  filesListEl.querySelectorAll('[data-del]').forEach(btn => {
+    btn.addEventListener('click', async (ev) => {
+      ev.stopPropagation();
+      if (!confirm('Delete this file from this device?')) return;
+      await LocalFiles.remove(btn.dataset.del);
+      renderCustomerFiles(customerId);
+    });
+  });
+}
+
+if (filesToggle) filesToggle.addEventListener('click', () => {
+  filesExpanded = !filesExpanded;
+  if (activeCustomerId) renderCustomerFiles(activeCustomerId);
+});
+if (fileInput) fileInput.addEventListener('change', async () => {
+  if (!activeCustomerId || !fileInput.files || fileInput.files.length === 0) return;
+  for (const f of fileInput.files) {
+    try { await LocalFiles.add(activeCustomerId, f); } catch (e) { console.warn('file add', e); }
+  }
+  fileInput.value = '';
+  filesExpanded = true;
+  renderCustomerFiles(activeCustomerId);
+});
+if (fileLightbox) fileLightbox.addEventListener('click', () => {
+  fileLightbox.hidden = true;
+  fileLightboxImg.src = '';
+});
 
 // "What's new" list in Settings — shows at most the 10 latest changelog entries.
 const changelogList = document.getElementById('changelog-list');
