@@ -13,6 +13,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 10, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.07.18-0352', 'Tap a Shared pill to see who the note is shared with'],
   ['v2026.07.18-0327', 'Shared pill only counts employees/customers; bookkeepers removed from share list'],
   ['v2026.07.18-0313', 'PDFs and documents open in a viewer tab instead of downloading a copy'],
   ['v2026.07.18-0250', 'Swipe left/right in the photo viewer to move between pictures'],
@@ -22,27 +23,6 @@ const CHANGELOG = [
   ['v2026.07.14-1943', 'Per-customer files: photos/documents stored on this device, shareable via share sheet'],
   ['v2026.07.14-1230', 'Tap an IIF table row to see the note line it came from'],
   ['v2026.07.14-1222', 'IIF date range defaults to the last two weeks'],
-  ['v2026.07.14-1218', 'Export markers retired — the date range decides what gets parsed'],
-  ['v2026.07.14-1214', 'IIF table rows have checkboxes — download includes only checked rows'],
-  ['v2026.07.14-1205', 'IIF date range moved to Settings, set before generating'],
-  ['v2026.07.14-1159', 'Hours notes can use first names — matched to full employee names from Settings'],
-  ['v2026.07.14-1155', 'IIF parses only the selected date range — much faster on big notes'],
-  ['v2026.07.14-1146', 'Employees classified as apprentice/journeyman; IIF uses matching QB service item'],
-  ['v2026.07.14-1137', 'IIF generator: date range filter and loading spinner'],
-  ['v2026.07.14-1039', 'New bookkeeper role: sees everything, edits nothing, QuickBooks export'],
-  ['v2026.07.14-1029', 'Back button no longer exits the app from sub-screens'],
-  ['v2026.07.13-2345', 'Current search match now clearly stands out from other matches'],
-  ['v2026.07.13-2340', 'Search matches now center in the text area accurately'],
-  ['v2026.07.13-2333', 'In-note search arrows dismiss the keyboard on mobile'],
-  ['v2026.07.13-2325', 'Removing a user now un-shares their notes; stale Shared badges cleaned up'],
-  ['v2026.07.13-2301', 'Invite-only: no self-created orgs; removed users lose access; invite role enforced'],
-  ['v2026.07.13-2243', 'Customer name on shared note cards, Shared badges, view-only checkbox fix'],
-  ['v2026.07.13-2230', 'Employee role restricted: edit assigned notes, create own general notes, no delete'],
-  ['v2026.07.13-2203', 'Customer role locked down: view assigned notes only, read-only editor'],
-  ['v2026.07.13-2146', 'Fix invited users failing to join; error banner on account load failure'],
-  ['v2026.07.13-2134', 'What\'s new section in Settings'],
-  ['v2026.07.13-2116', 'Invite button emails a sign-in link'],
-  ['v2026.07.13-2103', 'Sign in with email link or password, forgot-password flow'],
 ];
 const APP_VERSION = CHANGELOG[0][0];
 
@@ -2081,6 +2061,55 @@ function isSharedWithLimitedUsers(note) {
     return !!m && (m.role === 'employee' || m.role === 'customer');
   });
 }
+
+// ---------- shared pill tooltip (tap a pill → who is this shared with) ----------
+const sharedTooltip = document.getElementById('shared-tooltip');
+let sharedTooltipTimer = null;
+
+function hideSharedTooltip() {
+  if (!sharedTooltip) return;
+  sharedTooltip.hidden = true;
+  if (sharedTooltipTimer) { clearTimeout(sharedTooltipTimer); sharedTooltipTimer = null; }
+}
+
+function showSharedTooltip(pillEl, note) {
+  if (!sharedTooltip || !note) return;
+  const people = (note.assignedTo || [])
+    .map(uid => Storage.getMember(uid))
+    .filter(m => m && (m.role === 'employee' || m.role === 'customer'));
+  if (people.length === 0) return;
+  sharedTooltip.innerHTML = 'Shared with:<br>' + people.map(m =>
+    `${escapeHtml(m.name || m.email || m.uid)}<span class="tooltip-role">${m.role}</span>`
+  ).join('<br>');
+  sharedTooltip.hidden = false;
+  // Position above the pill, clamped to the viewport; below it if no room
+  const r = pillEl.getBoundingClientRect();
+  const tw = sharedTooltip.offsetWidth;
+  let left = r.left + r.width / 2 - tw / 2;
+  left = Math.max(8, Math.min(left, window.innerWidth - tw - 8));
+  let top = r.top - sharedTooltip.offsetHeight - 8;
+  if (top < 8) top = r.bottom + 8;
+  sharedTooltip.style.left = `${left}px`;
+  sharedTooltip.style.top = `${top}px`;
+  sharedTooltipTimer = setTimeout(hideSharedTooltip, 4000);
+}
+
+// Capture-phase so a pill tap never falls through to the card (which opens the note)
+document.addEventListener('click', (e) => {
+  const pill = e.target.closest ? e.target.closest('.shared-badge') : null;
+  if (!pill) { hideSharedTooltip(); return; }
+  e.stopPropagation();
+  e.preventDefault();
+  let note = null;
+  if (pill.id === 'editor-shared-badge') {
+    note = currentId ? Storage.getNote(currentId) : null;
+  } else {
+    const card = pill.closest('.note-card');
+    note = card ? Storage.getNote(card.dataset.id) : null;
+  }
+  hideSharedTooltip();
+  showSharedTooltip(pill, note);
+}, true);
 
 // ---------- Users tab ----------
 function renderMembersList() {
