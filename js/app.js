@@ -13,6 +13,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 10, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.07.18-0313', 'PDFs and documents open in a viewer tab instead of downloading a copy'],
   ['v2026.07.18-0250', 'Swipe left/right in the photo viewer to move between pictures'],
   ['v2026.07.18-0247', 'Back button closes the photo viewer, then the file grid, step by step'],
   ['v2026.07.18-0204', 'Files card opens a full-screen photo grid with a 2/3-column switch'],
@@ -2399,10 +2400,15 @@ async function renderFileGallery(customerId) {
       if ((rec.type || '').startsWith('image/')) {
         openFileLightbox(url, rec.id);
       } else {
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = rec.name;
-        a.click();
+        // View in a new tab (phone's built-in viewer); no copy saved to Downloads.
+        const win = window.open(url, '_blank');
+        if (!win) {
+          // Popup blocked — fall back to downloading.
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = rec.name;
+          a.click();
+        }
       }
     });
   });
