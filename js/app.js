@@ -13,6 +13,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 10, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.07.18-0247', 'Back button closes the photo viewer, then the file grid, step by step'],
   ['v2026.07.18-0204', 'Files card opens a full-screen photo grid with a 2/3-column switch'],
   ['v2026.07.14-1950', 'Files card sits below the customer default note, collapsed until tapped'],
   ['v2026.07.14-1943', 'Per-customer files: photos/documents stored on this device, shareable via share sheet'],
@@ -1703,6 +1704,17 @@ window.addEventListener('popstate', (e) => {
   const screen = e.state && e.state.screen;
   currentPopstateTarget = screen;
 
+  // Lightbox and file gallery sit above everything — back closes them first.
+  if (fileLightbox && !fileLightbox.hidden) {
+    fileLightbox.hidden = true;
+    fileLightboxImg.src = '';
+    handlingPopstate = false; return;
+  }
+  if (galleryView && !galleryView.hidden) {
+    closeFileGallery();
+    handlingPopstate = false; return;
+  }
+
   if (!screen) {
     // Bottom of the history stack (stateless entry). If we're not on the home
     // screen, show it (showNotes re-stamps this entry as home) instead of doing
@@ -2313,9 +2325,16 @@ function closeFileGallery() {
 
 async function openFileGallery(customerId) {
   if (!galleryView) return;
+  if (!handlingPopstate) history.pushState({ screen: 'file-gallery', customerId }, '');
   galleryView.hidden = false;
   applyGalleryCols();
   await renderFileGallery(customerId);
+}
+
+function openFileLightbox(url) {
+  history.pushState({ screen: 'file-lightbox' }, '');
+  fileLightboxImg.src = url;
+  fileLightbox.hidden = false;
 }
 
 async function renderFileGallery(customerId) {
@@ -2360,8 +2379,7 @@ async function renderFileGallery(customerId) {
       const url = URL.createObjectURL(rec.blob);
       fileObjectUrls.push(url);
       if ((rec.type || '').startsWith('image/')) {
-        fileLightboxImg.src = url;
-        fileLightbox.hidden = false;
+        openFileLightbox(url);
       } else {
         const a = document.createElement('a');
         a.href = url;
@@ -2404,7 +2422,7 @@ function setGalleryCols(n) {
 }
 if (galleryCols2Btn) galleryCols2Btn.addEventListener('click', () => setGalleryCols(2));
 if (galleryCols3Btn) galleryCols3Btn.addEventListener('click', () => setGalleryCols(3));
-if (galleryBackBtn) galleryBackBtn.addEventListener('click', closeFileGallery);
+if (galleryBackBtn) galleryBackBtn.addEventListener('click', () => history.back());
 
 if (filesToggle) filesToggle.addEventListener('click', () => {
   if (activeCustomerId) openFileGallery(activeCustomerId);
@@ -2422,10 +2440,7 @@ async function addFilesFromInput(input) {
 if (fileInput) fileInput.addEventListener('change', () => addFilesFromInput(fileInput));
 if (galleryFileInput) galleryFileInput.addEventListener('change', () => addFilesFromInput(galleryFileInput));
 
-if (fileLightbox) fileLightbox.addEventListener('click', () => {
-  fileLightbox.hidden = true;
-  fileLightboxImg.src = '';
-});
+if (fileLightbox) fileLightbox.addEventListener('click', () => history.back());
 
 // "What's new" list in Settings — shows at most the 10 latest changelog entries.
 const changelogList = document.getElementById('changelog-list');
