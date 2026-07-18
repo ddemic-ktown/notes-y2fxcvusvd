@@ -13,6 +13,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 10, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.07.18-0250', 'Swipe left/right in the photo viewer to move between pictures'],
   ['v2026.07.18-0247', 'Back button closes the photo viewer, then the file grid, step by step'],
   ['v2026.07.18-0204', 'Files card opens a full-screen photo grid with a 2/3-column switch'],
   ['v2026.07.14-1950', 'Files card sits below the customer default note, collapsed until tapped'],
@@ -2296,6 +2297,8 @@ const fileLightbox = document.getElementById('file-lightbox');
 const fileLightboxImg = document.getElementById('file-lightbox-img');
 let fileObjectUrls = [];
 let galleryCols = localStorage.getItem('jp-gallery-cols') === '2' ? 2 : 3;
+let galleryImageIds = []; // ordered ids of image files in the current grid
+let lightboxIndex = -1;   // position in galleryImageIds of the shown image
 
 function fmtFileSize(bytes) {
   if (bytes < 1024) return `${bytes} B`;
@@ -2331,10 +2334,24 @@ async function openFileGallery(customerId) {
   await renderFileGallery(customerId);
 }
 
-function openFileLightbox(url) {
+function openFileLightbox(url, recId) {
   history.pushState({ screen: 'file-lightbox' }, '');
+  lightboxIndex = galleryImageIds.indexOf(recId);
   fileLightboxImg.src = url;
   fileLightbox.hidden = false;
+}
+
+// Swipe left/right in the lightbox steps through the grid's images (no wrap).
+async function lightboxStep(dir) {
+  if (lightboxIndex < 0) return;
+  const nextIndex = lightboxIndex + dir;
+  if (nextIndex < 0 || nextIndex >= galleryImageIds.length) return;
+  const rec = await LocalFiles.get(galleryImageIds[nextIndex]);
+  if (!rec) return;
+  const url = URL.createObjectURL(rec.blob);
+  fileObjectUrls.push(url);
+  lightboxIndex = nextIndex;
+  fileLightboxImg.src = url;
 }
 
 async function renderFileGallery(customerId) {
@@ -2345,6 +2362,7 @@ async function renderFileGallery(customerId) {
   try { recs = await LocalFiles.list(customerId); } catch (e) { console.warn('files list', e); }
   if (galleryTitle) galleryTitle.textContent = `Files (${recs.length})`;
   renderCustomerFiles(customerId);
+  galleryImageIds = recs.filter(r => (r.type || '').startsWith('image/')).map(r => r.id);
   if (recs.length === 0) {
     galleryGrid.innerHTML = '<li class="gallery-tile gallery-tile-empty">No files yet. Use + Add to attach photos or documents.</li>';
     return;
@@ -2379,7 +2397,7 @@ async function renderFileGallery(customerId) {
       const url = URL.createObjectURL(rec.blob);
       fileObjectUrls.push(url);
       if ((rec.type || '').startsWith('image/')) {
-        openFileLightbox(url);
+        openFileLightbox(url, rec.id);
       } else {
         const a = document.createElement('a');
         a.href = url;
@@ -2440,7 +2458,21 @@ async function addFilesFromInput(input) {
 if (fileInput) fileInput.addEventListener('change', () => addFilesFromInput(fileInput));
 if (galleryFileInput) galleryFileInput.addEventListener('change', () => addFilesFromInput(galleryFileInput));
 
-if (fileLightbox) fileLightbox.addEventListener('click', () => history.back());
+if (fileLightbox) {
+  fileLightbox.addEventListener('click', () => history.back());
+  let touchX = 0, touchY = 0;
+  fileLightbox.addEventListener('touchstart', (e) => {
+    touchX = e.touches[0].clientX;
+    touchY = e.touches[0].clientY;
+  }, { passive: true });
+  fileLightbox.addEventListener('touchend', (e) => {
+    const dx = e.changedTouches[0].clientX - touchX;
+    const dy = e.changedTouches[0].clientY - touchY;
+    // Horizontal swipe only: needs 50px+ of travel, mostly sideways.
+    if (Math.abs(dx) < 50 || Math.abs(dx) < Math.abs(dy) * 1.5) return;
+    lightboxStep(dx < 0 ? 1 : -1); // swipe left → next, right → previous
+  }, { passive: true });
+}
 
 // "What's new" list in Settings — shows at most the 10 latest changelog entries.
 const changelogList = document.getElementById('changelog-list');
