@@ -13,6 +13,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 10, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.07.18-0327', 'Shared pill only counts employees/customers; bookkeepers removed from share list'],
   ['v2026.07.18-0313', 'PDFs and documents open in a viewer tab instead of downloading a copy'],
   ['v2026.07.18-0250', 'Swipe left/right in the photo viewer to move between pictures'],
   ['v2026.07.18-0247', 'Back button closes the photo viewer, then the file grid, step by step'],
@@ -716,7 +717,7 @@ function showEditor(record, type, cursorHint) {
   // Shared badge in the editor header
   const editorSharedBadge = document.getElementById('editor-shared-badge');
   if (editorSharedBadge) {
-    const isShared = type === 'note' && Array.isArray(record.assignedTo) && record.assignedTo.length > 0;
+    const isShared = type === 'note' && isSharedWithLimitedUsers(record);
     editorSharedBadge.hidden = !(isAdminRole() && isShared);
   }
 
@@ -953,7 +954,7 @@ function renderNotesList() {
       : '<span style="color:var(--ink-soft);font-style:italic">Untitled</span>';
     const firstBodyLine = (body.split('\n').find(l => l.trim() !== '') || '').trim();
     const safePreview = firstBodyLine ? escapeHtml(firstBodyLine) : '';
-    const sharedBadge = (Array.isArray(n.assignedTo) && n.assignedTo.length > 0)
+    const sharedBadge = isSharedWithLimitedUsers(n)
       ? '<span class="shared-badge" title="Shared with assigned users">Shared</span>'
       : '';
     return `
@@ -1050,7 +1051,7 @@ function renderNoteCard(n) {
     customerTag = `<span class="customer-tag">${escapeHtml(name || 'Unnamed customer')}</span>`;
   }
   // Shared badge for admin/bookkeeper: this note is visible to assigned users
-  const sharedBadge = (canViewAllRole() && Array.isArray(n.assignedTo) && n.assignedTo.length > 0)
+  const sharedBadge = (canViewAllRole() && isSharedWithLimitedUsers(n))
     ? '<span class="shared-badge" title="Shared with assigned users">Shared</span>'
     : '';
   return `
@@ -1806,10 +1807,11 @@ function openAssignModal() {
   const note = Storage.getNote(currentId);
   if (!note) return;
   const assigned = note.assignedTo || [];
-  const members = Storage.listMembers().filter(m => m.role !== 'admin');
+  // Only limited roles can be picked — admins/bookkeepers see everything anyway.
+  const members = Storage.listMembers().filter(m => m.role === 'employee' || m.role === 'customer');
 
   if (members.length === 0) {
-    assignMembersList.innerHTML = '<li style="font-size:14px;color:var(--ink-soft)">No non-admin members yet.</li>';
+    assignMembersList.innerHTML = '<li style="font-size:14px;color:var(--ink-soft)">No employee or customer members yet.</li>';
   } else {
     assignMembersList.innerHTML = members.map(m => `
       <li class="assign-member-item">
@@ -2069,6 +2071,17 @@ function isReadOnlyRole() { return isCustomerRole() || isBookkeeperRole(); }
 // Admin and bookkeeper see all notes and customers
 function canViewAllRole() { return isAdminRole() || isBookkeeperRole(); }
 
+// A note counts as "shared" only when someone with a limited role
+// (employee/customer) is on its assigned list — admin/bookkeeper accounts
+// see every note anyway, so sharing with them means nothing for the badge.
+function isSharedWithLimitedUsers(note) {
+  if (!note || !Array.isArray(note.assignedTo)) return false;
+  return note.assignedTo.some(uid => {
+    const m = Storage.getMember(uid);
+    return !!m && (m.role === 'employee' || m.role === 'customer');
+  });
+}
+
 // ---------- Users tab ----------
 function renderMembersList() {
   const membersList = document.getElementById('members-list');
@@ -2241,6 +2254,8 @@ onAuthStateChanged(auth, async (user) => {
   Storage.backfillAssignedCustomerNames();
   // Drop stale assignments left behind by removed members (field edit only)
   Storage.cleanupOrphanedAssignments();
+  // Strip admin/bookkeeper uids from assignedTo — they see everything anyway
+  Storage.cleanupElevatedAssignments();
   // First magic-link sign-in (or forgot-password): prompt to set a password.
   if (pendingPasswordPrompt) {
     pendingPasswordPrompt = false;

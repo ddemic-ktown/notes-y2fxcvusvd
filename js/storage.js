@@ -485,6 +485,25 @@ export const Storage = {
     emit();
   },
 
+  // Sweep: admins/bookkeepers see every note, so their uids don't belong in
+  // assignedTo lists. Strips them from all notes (field edit only; no deletions).
+  cleanupElevatedAssignments() {
+    if (_role !== 'admin') return;
+    const elevated = new Set(
+      _cache.members.filter(m => m.role === 'admin' || m.role === 'bookkeeper').map(m => m.uid)
+    );
+    if (elevated.size === 0) return;
+    _cache.notes.forEach((n, idx) => {
+      if (!Array.isArray(n.assignedTo) || n.assignedTo.length === 0) return;
+      const kept = n.assignedTo.filter(u => !elevated.has(u));
+      if (kept.length === n.assignedTo.length) return;
+      const updated = { ...n, assignedTo: kept };
+      _cache.notes[idx] = updated;
+      setDoc(doc(notesCol(), n.id), stripId(updated)).catch(err => console.warn("cleanup elevated assignments", err));
+    });
+    emit();
+  },
+
   // ---------- Invites ----------
   listInvites() { return _cache.invites.slice(); },
 
