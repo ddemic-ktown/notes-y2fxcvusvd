@@ -1,6 +1,6 @@
 {
-  "name": "Note Aggregator",
-  "short_name": "NoteAgg",
+  "name": "JobPilot",
+  "short_name": "JobPilot",
   "description": "Notes, customers, and keyword-aggregated paragraphs across customer notes.",
   "start_url": "./",
   "scope": "./",

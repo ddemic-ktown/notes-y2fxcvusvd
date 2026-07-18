@@ -13,6 +13,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 10, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.07.18-0204', 'Files card opens a full-screen photo grid with a 2/3-column switch'],
   ['v2026.07.14-1950', 'Files card sits below the customer default note, collapsed until tapped'],
   ['v2026.07.14-1943', 'Per-customer files: photos/documents stored on this device, shareable via share sheet'],
   ['v2026.07.14-1230', 'Tap an IIF table row to see the note line it came from'],
@@ -635,7 +636,7 @@ function showCustomerNotes(customerId, returnTo) {
   }
   const def = Storage.ensureDefaultNoteForCustomer(customerId);
   const { title } = splitTitleAndBody(def.body);
-  if (activeCustomerId !== customerId) filesExpanded = false;
+  if (activeCustomerId !== customerId) closeFileGallery();
   activeCustomerId = customerId;
   returnScreen = 'customer-notes';
   customerNotesReturnTo = returnTo || { screen: 'customers' };
@@ -2271,13 +2272,18 @@ if (appVersionEl) appVersionEl.textContent = APP_VERSION;
 LocalFiles.requestPersistence();
 
 const filesToggle = document.getElementById('customer-files-toggle');
-const filesListEl = document.getElementById('customer-files-list');
-const filesNoteEl = document.getElementById('customer-files-note');
 const fileInput = document.getElementById('customer-file-input');
+const galleryView = document.getElementById('file-gallery-view');
+const galleryGrid = document.getElementById('file-gallery-grid');
+const galleryTitle = document.getElementById('file-gallery-title');
+const galleryBackBtn = document.getElementById('file-gallery-back');
+const galleryFileInput = document.getElementById('gallery-file-input');
+const galleryCols2Btn = document.getElementById('gallery-cols-2');
+const galleryCols3Btn = document.getElementById('gallery-cols-3');
 const fileLightbox = document.getElementById('file-lightbox');
 const fileLightboxImg = document.getElementById('file-lightbox-img');
-let filesExpanded = false;
 let fileObjectUrls = [];
+let galleryCols = localStorage.getItem('jp-gallery-cols') === '2' ? 2 : 3;
 
 function fmtFileSize(bytes) {
   if (bytes < 1024) return `${bytes} B`;
@@ -2285,42 +2291,69 @@ function fmtFileSize(bytes) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+// Updates the "Files (n)" count on the customer card.
 async function renderCustomerFiles(customerId) {
-  if (!filesListEl) return;
+  if (!filesToggle) return;
+  let recs = [];
+  try { recs = await LocalFiles.list(customerId); } catch (e) { console.warn('files list', e); }
+  filesToggle.textContent = `Files (${recs.length}) ▸`;
+}
+
+function applyGalleryCols() {
+  if (!galleryGrid) return;
+  galleryGrid.classList.toggle('cols-2', galleryCols === 2);
+  galleryGrid.classList.toggle('cols-3', galleryCols === 3);
+  if (galleryCols2Btn) galleryCols2Btn.classList.toggle('active', galleryCols === 2);
+  if (galleryCols3Btn) galleryCols3Btn.classList.toggle('active', galleryCols === 3);
+}
+
+function closeFileGallery() {
+  if (galleryView) galleryView.hidden = true;
+}
+
+async function openFileGallery(customerId) {
+  if (!galleryView) return;
+  galleryView.hidden = false;
+  applyGalleryCols();
+  await renderFileGallery(customerId);
+}
+
+async function renderFileGallery(customerId) {
+  if (!galleryGrid) return;
   fileObjectUrls.forEach(u => URL.revokeObjectURL(u));
   fileObjectUrls = [];
   let recs = [];
   try { recs = await LocalFiles.list(customerId); } catch (e) { console.warn('files list', e); }
-  if (filesToggle) filesToggle.textContent = `Files (${recs.length}) ${filesExpanded ? '▾' : '▸'}`;
-  filesListEl.hidden = !filesExpanded;
-  if (filesNoteEl) filesNoteEl.hidden = !filesExpanded;
-  if (!filesExpanded) return;
+  if (galleryTitle) galleryTitle.textContent = `Files (${recs.length})`;
+  renderCustomerFiles(customerId);
   if (recs.length === 0) {
-    filesListEl.innerHTML = '<li class="file-row file-row-empty">No files yet. Use + Add to attach photos or documents.</li>';
+    galleryGrid.innerHTML = '<li class="gallery-tile gallery-tile-empty">No files yet. Use + Add to attach photos or documents.</li>';
     return;
   }
-  filesListEl.innerHTML = recs.map(r => {
+  galleryGrid.innerHTML = recs.map(r => {
     const isImage = (r.type || '').startsWith('image/');
-    let thumb = '<span class="file-icon">📄</span>';
+    let preview;
     if (isImage) {
       const url = URL.createObjectURL(r.blob);
       fileObjectUrls.push(url);
-      thumb = `<img class="file-thumb" src="${url}" alt="" data-open="${r.id}" />`;
+      preview = `<img src="${url}" alt="${escapeHtml(r.name)}" />`;
+    } else {
+      preview = `
+        <div class="gallery-tile-doc">
+          <span class="file-icon">📄</span>
+          <span class="file-name">${escapeHtml(r.name)}</span>
+        </div>`;
     }
     return `
-      <li class="file-row" data-id="${r.id}">
-        ${thumb}
-        <div class="file-meta" data-open="${r.id}">
-          <span class="file-name">${escapeHtml(r.name)}</span>
-          <span class="file-info">${fmtFileSize(r.size)} · ${formatDateTime(r.addedAt)}</span>
-        </div>
-        <button class="file-share-btn" data-share="${r.id}" aria-label="Share file">Share</button>
-        <button class="file-delete-btn" data-del="${r.id}" aria-label="Delete file">✕</button>
+      <li class="gallery-tile" data-open="${r.id}" title="${escapeHtml(r.name)} · ${fmtFileSize(r.size)} · ${formatDateTime(r.addedAt)}">
+        ${preview}
+        <button class="gallery-tile-btn gallery-share-btn" data-share="${r.id}" aria-label="Share file">⇪</button>
+        <button class="gallery-tile-btn gallery-delete-btn" data-del="${r.id}" aria-label="Delete file">✕</button>
       </li>
     `;
   }).join('');
 
-  filesListEl.querySelectorAll('[data-open]').forEach(el => {
+  galleryGrid.querySelectorAll('[data-open]').forEach(el => {
     el.addEventListener('click', async () => {
       const rec = await LocalFiles.get(el.dataset.open);
       if (!rec) return;
@@ -2337,7 +2370,7 @@ async function renderCustomerFiles(customerId) {
       }
     });
   });
-  filesListEl.querySelectorAll('[data-share]').forEach(btn => {
+  galleryGrid.querySelectorAll('[data-share]').forEach(btn => {
     btn.addEventListener('click', async (ev) => {
       ev.stopPropagation();
       const rec = await LocalFiles.get(btn.dataset.share);
@@ -2354,29 +2387,41 @@ async function renderCustomerFiles(customerId) {
       }
     });
   });
-  filesListEl.querySelectorAll('[data-del]').forEach(btn => {
+  galleryGrid.querySelectorAll('[data-del]').forEach(btn => {
     btn.addEventListener('click', async (ev) => {
       ev.stopPropagation();
       if (!confirm('Delete this file from this device?')) return;
       await LocalFiles.remove(btn.dataset.del);
-      renderCustomerFiles(customerId);
+      renderFileGallery(customerId);
     });
   });
 }
 
+function setGalleryCols(n) {
+  galleryCols = n;
+  localStorage.setItem('jp-gallery-cols', String(n));
+  applyGalleryCols();
+}
+if (galleryCols2Btn) galleryCols2Btn.addEventListener('click', () => setGalleryCols(2));
+if (galleryCols3Btn) galleryCols3Btn.addEventListener('click', () => setGalleryCols(3));
+if (galleryBackBtn) galleryBackBtn.addEventListener('click', closeFileGallery);
+
 if (filesToggle) filesToggle.addEventListener('click', () => {
-  filesExpanded = !filesExpanded;
-  if (activeCustomerId) renderCustomerFiles(activeCustomerId);
+  if (activeCustomerId) openFileGallery(activeCustomerId);
 });
-if (fileInput) fileInput.addEventListener('change', async () => {
-  if (!activeCustomerId || !fileInput.files || fileInput.files.length === 0) return;
-  for (const f of fileInput.files) {
+
+async function addFilesFromInput(input) {
+  if (!activeCustomerId || !input.files || input.files.length === 0) return;
+  for (const f of input.files) {
     try { await LocalFiles.add(activeCustomerId, f); } catch (e) { console.warn('file add', e); }
   }
-  fileInput.value = '';
-  filesExpanded = true;
+  input.value = '';
   renderCustomerFiles(activeCustomerId);
-});
+  if (galleryView && !galleryView.hidden) renderFileGallery(activeCustomerId);
+}
+if (fileInput) fileInput.addEventListener('change', () => addFilesFromInput(fileInput));
+if (galleryFileInput) galleryFileInput.addEventListener('change', () => addFilesFromInput(galleryFileInput));
+
 if (fileLightbox) fileLightbox.addEventListener('click', () => {
   fileLightbox.hidden = true;
   fileLightboxImg.src = '';

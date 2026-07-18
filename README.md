@@ -1,4 +1,6 @@
-# Note Aggregator
+# JobPilot
+
+*(originally named Note Aggregator)*
 
 A mobile-first PWA for notes, customer records, and keyword-aggregated paragraphs across customer notes. Data is synced via Firebase Firestore with Google sign-in.
 

@@ -110,12 +110,31 @@
             <input id="customer-file-input" type="file" multiple hidden />
           </label>
         </div>
-        <p class="files-local-note" hidden id="customer-files-note">Stored only on this device — not backed up, not visible to others.</p>
-        <ul id="customer-files-list" class="customer-files-list" hidden></ul>
       </div>
       <div id="customer-notes-list"></div>
     </main>
     <button id="customer-notes-fab" class="fab" aria-label="New note for this customer">+</button>
+  </section>
+
+  <!-- FULL-SCREEN FILE GALLERY (local customer files) -->
+  <section id="file-gallery-view" class="file-gallery-view" hidden>
+    <header class="app-header customers-header">
+      <div class="customers-header-top">
+        <button id="file-gallery-back" class="icon-btn date-btn" type="button" aria-label="Back">‹ Back</button>
+        <h1 id="file-gallery-title" style="font-size:17px;margin:0;flex:1;">Files</h1>
+        <div class="gallery-col-toggle" role="group" aria-label="Grid columns">
+          <button id="gallery-cols-2" class="gallery-col-btn" type="button" aria-label="2 columns">▦ 2</button>
+          <button id="gallery-cols-3" class="gallery-col-btn" type="button" aria-label="3 columns">▩ 3</button>
+        </div>
+        <label class="files-add-btn">+ Add
+          <input id="gallery-file-input" type="file" multiple hidden />
+        </label>
+      </div>
+    </header>
+    <main class="file-gallery-main">
+      <p class="files-local-note">Stored only on this device — not backed up, not visible to others.</p>
+      <ul id="file-gallery-grid" class="file-gallery-grid cols-3"></ul>
+    </main>
   </section>
 
   <!-- IMAGE LIGHTBOX (local customer files) -->
