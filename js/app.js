@@ -13,6 +13,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 10, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.07.25-1422', 'Checkbox taps really keep the keyboard down now'],
   ['v2026.07.25-1407', 'Search arrows show only with 2+ hits; optional 🔍-collapsed search bars'],
   ['v2026.07.25-1251', 'Redo button joins undo in the editor'],
   ['v2026.07.25-1231', 'Undo button in the editor — one word or action per tap'],
@@ -22,7 +23,6 @@ const CHANGELOG = [
   ['v2026.07.25-1136', 'Opening a note from home search highlights the search term inside the note'],
   ['v2026.07.25-1128', 'Show/Hide password button on the sign-in screen and the set-password prompt'],
   ['v2026.07.25-1127', 'Checking a box keeps the cursor in place while the line sinks to the paragraph bottom'],
-  ['v2026.07.25-1050', 'Notes can be reassigned to a different customer from the three-dot menu'],
 ];
 const APP_VERSION = CHANGELOG[0][0];
 
@@ -1851,34 +1851,71 @@ customerLinkBtn.addEventListener('click', () => {
 });
 
 // Whether the textarea was already focused BEFORE this tap (pointerdown fires
-// before focus) — used to dismiss the keyboard on checkbox taps that would
-// otherwise summon it.
+// before focus) — used to decide whether the keyboard should come up.
 let bodyWasFocusedBeforeTap = false;
 bodyInput.addEventListener('pointerdown', () => {
   bodyWasFocusedBeforeTap = document.activeElement === bodyInput;
 });
 
+// The readonly trick: a readonly textarea can still be tapped (caret moves)
+// but never raises the mobile keyboard. On touch devices we flip it readonly
+// for the duration of the tap; the click handler then either keeps it that way
+// (checkbox tap → no keyboard) or restores + refocuses (normal tap → keyboard).
+let bodyTempReadonly = false;
+let bodyReadonlyTimer = null;
+function restoreBodyEditable() {
+  if (!bodyTempReadonly) return;
+  bodyTempReadonly = false;
+  if (!isReadOnlyRole() && currentType !== null) bodyInput.readOnly = false;
+  if (bodyReadonlyTimer) { clearTimeout(bodyReadonlyTimer); bodyReadonlyTimer = null; }
+}
+bodyInput.addEventListener('touchstart', () => {
+  if (isReadOnlyRole() || bodyInput.readOnly) return;
+  if (document.activeElement === bodyInput) return; // already typing
+  bodyTempReadonly = true;
+  bodyInput.readOnly = true;
+  // Safety net: a tap that never becomes a click (scroll/drag) must not leave
+  // the note stuck readonly.
+  if (bodyReadonlyTimer) clearTimeout(bodyReadonlyTimer);
+  bodyReadonlyTimer = setTimeout(restoreBodyEditable, 700);
+}, { passive: true });
+
 bodyInput.addEventListener('click', () => {
-  if (isReadOnlyRole()) return; // view-only: no checkbox toggling
+  if (isReadOnlyRole()) { restoreBodyEditable(); return; } // view-only
   const value = bodyInput.value;
   const pos = bodyInput.selectionStart;
-  if (pos == null) return;
-  const lineStart = value.lastIndexOf('\n', pos - 1) + 1;
-  const col = pos - lineStart;
-  if (col > 2) return;
-  const head = value.substring(lineStart, lineStart + 2);
+  const lineStart = pos == null ? -1 : value.lastIndexOf('\n', pos - 1) + 1;
+  const col = pos == null ? -1 : pos - lineStart;
+  const head = lineStart < 0 ? '' : value.substring(lineStart, lineStart + 2);
   let replacement = null;
-  if (head === '☐ ') replacement = '☑ ';
-  else if (head === '☑ ') replacement = '☐ ';
-  if (!replacement) return;
+  if (col >= 0 && col <= 2) {
+    if (head === '☐ ') replacement = '☑ ';
+    else if (head === '☑ ') replacement = '☐ ';
+  }
+
+  if (!replacement) {
+    // Normal tap to edit — restore editability and refocus within the same
+    // gesture so the keyboard opens with the caret where the user tapped.
+    if (bodyTempReadonly) {
+      const caret = pos;
+      restoreBodyEditable();
+      bodyInput.blur();
+      bodyInput.focus();
+      if (caret != null) bodyInput.setSelectionRange(caret, caret);
+    }
+    return;
+  }
+
   pushUndo(); // one undo step covers the toggle AND its sink-to-bottom
   undoLastRunType = null;
   bodyInput.value = value.substring(0, lineStart) + replacement + value.substring(lineStart + 2);
   bodyInput.selectionStart = bodyInput.selectionEnd = pos;
   sinkCheckedLines(pos);
-  // Toggling a checkbox is a tap, not typing — if the keyboard wasn't already
-  // up, dismiss it immediately instead of letting it open.
-  if (!bodyWasFocusedBeforeTap) bodyInput.blur();
+  // Checkbox tap: keep the keyboard away. The textarea stays readonly for this
+  // gesture (restored right after), and we blur as a second line of defense.
+  const wasTemp = bodyTempReadonly;
+  restoreBodyEditable();
+  if (!bodyWasFocusedBeforeTap || wasTemp) bodyInput.blur();
   scheduleSave();
 });
 
