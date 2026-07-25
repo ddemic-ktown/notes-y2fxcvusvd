@@ -1,6 +1,6 @@
 // Service worker — offline cache for JobPilot
 // Version format: na-YYYY.MM.DD-HHMM (Pacific time) — must match APP_VERSION in app.js.
-const VERSION = 'na-2026.07.24-2310';
+const VERSION = 'na-2026.07.25-0945';
 const CORE = [
   './',
   './index.html',

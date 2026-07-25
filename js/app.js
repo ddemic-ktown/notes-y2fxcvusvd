@@ -13,6 +13,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 10, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.07.25-0945', 'New setting: move checked items to the bottom of their paragraph (per device)'],
   ['v2026.07.24-2310', 'Aggregator keywords open one editable note; edits save back to each customer note'],
   ['v2026.07.18-0352', 'Tap a Shared pill to see who the note is shared with'],
   ['v2026.07.18-0327', 'Shared pill only counts employees/customers; bookkeepers removed from share list'],
@@ -22,7 +23,6 @@ const CHANGELOG = [
   ['v2026.07.18-0204', 'Files card opens a full-screen photo grid with a 2/3-column switch'],
   ['v2026.07.14-1950', 'Files card sits below the customer default note, collapsed until tapped'],
   ['v2026.07.14-1943', 'Per-customer files: photos/documents stored on this device, shareable via share sheet'],
-  ['v2026.07.14-1230', 'Tap an IIF table row to see the note line it came from'],
 ];
 const APP_VERSION = CHANGELOG[0][0];
 
@@ -812,6 +812,8 @@ function showSettings() {
   renderKeywordList();
   renderEmployeeList();
   if (accountEmailEl && auth.currentUser) accountEmailEl.textContent = auth.currentUser.email || '';
+  const moveCheckedInput = document.getElementById('setting-move-checked');
+  if (moveCheckedInput) moveCheckedInput.checked = getMoveCheckedToBottom();
   settingsView.classList.add('active');
   if (!handlingPopstate) history.pushState({ screen: 'settings' }, '');
   applyTheme(localStorage.getItem('na-theme') || 'dark');
@@ -1815,8 +1817,46 @@ bodyInput.addEventListener('click', () => {
   if (!replacement) return;
   bodyInput.value = value.substring(0, lineStart) + replacement + value.substring(lineStart + 2);
   bodyInput.selectionStart = bodyInput.selectionEnd = pos;
+  sinkCheckedLines(pos);
   scheduleSave();
 });
+
+// ---------- move checked items to paragraph bottom (per-device setting) ----------
+function getMoveCheckedToBottom() { return localStorage.getItem('na-move-checked') === '1'; }
+
+// If the setting is on, sink ☑ lines to the bottom of the paragraph containing
+// `pos` (stable order otherwise). Paragraph bounds are blank lines and — in the
+// compiled aggregator editor — ━━ section headers, so lines never cross into a
+// neighboring section. The cursor follows the line it was on.
+function sinkCheckedLines(pos) {
+  if (!getMoveCheckedToBottom()) return;
+  const lines = bodyInput.value.split('\n');
+  // Locate the line containing pos, and the offset within it
+  let idx = 0, off = 0, run = 0;
+  for (let i = 0; i < lines.length; i++) {
+    if (pos <= run + lines[i].length) { idx = i; off = pos - run; break; }
+    run += lines[i].length + 1;
+    idx = i;
+    off = lines[i].length;
+  }
+  const isBoundary = l => l.trim() === '' || compiledHeaderRe.test(l);
+  if (isBoundary(lines[idx])) return;
+  let start = idx;
+  while (start > 0 && !isBoundary(lines[start - 1])) start--;
+  let end = idx;
+  while (end + 1 < lines.length && !isBoundary(lines[end + 1])) end++;
+  const para = lines.slice(start, end + 1).map((text, i) => ({ text, orig: start + i }));
+  const checkedRe = /^☑ /;
+  const sorted = para.filter(p => !checkedRe.test(p.text)).concat(para.filter(p => checkedRe.test(p.text)));
+  if (sorted.every((p, i) => p.orig === start + i)) return; // already in order
+  const newLines = lines.slice(0, start).concat(sorted.map(p => p.text), lines.slice(end + 1));
+  const newIdx = start + sorted.findIndex(p => p.orig === idx);
+  let newPos = 0;
+  for (let i = 0; i < newIdx; i++) newPos += newLines[i].length + 1;
+  newPos += Math.min(off, newLines[newIdx].length);
+  bodyInput.value = newLines.join('\n');
+  bodyInput.selectionStart = bodyInput.selectionEnd = newPos;
+}
 
 function toggleCheckboxOnSelection() {
   const value = bodyInput.value;
@@ -1843,6 +1883,7 @@ function toggleCheckboxOnSelection() {
     bodyInput.selectionStart = lineStart;
     bodyInput.selectionEnd = lineStart + newBlock.length;
   }
+  sinkCheckedLines(bodyInput.selectionStart);
   bodyInput.focus();
   scheduleSave();
 }
@@ -2277,6 +2318,10 @@ function applyRoleUI(role) {
   document.querySelectorAll('[data-staff-only]').forEach(el => {
     el.style.display = isAdminRole ? '' : 'none';
   });
+  // Personal editing prefs: hidden for read-only roles (they can't edit notes)
+  document.querySelectorAll('[data-editor-pref]').forEach(el => {
+    el.style.display = (isCustomer || role === 'bookkeeper') ? 'none' : '';
+  });
   // QuickBooks/IIF tools: admin and bookkeeper (read-only export)
   document.querySelectorAll('[data-role-iif]').forEach(el => {
     el.style.display = (isAdminRole || role === 'bookkeeper') ? '' : 'none';
@@ -2454,6 +2499,13 @@ function applyTheme(theme) {
 
 const savedTheme = localStorage.getItem('na-theme') || 'dark';
 applyTheme(savedTheme);
+
+const moveCheckedToggle = document.getElementById('setting-move-checked');
+if (moveCheckedToggle) {
+  moveCheckedToggle.addEventListener('change', () => {
+    localStorage.setItem('na-move-checked', moveCheckedToggle.checked ? '1' : '0');
+  });
+}
 
 const themeLightBtn = document.getElementById('theme-light-btn');
 const themeDarkBtn = document.getElementById('theme-dark-btn');
