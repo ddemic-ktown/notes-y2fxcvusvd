@@ -13,6 +13,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 10, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.07.25-1211', 'Tutorial split into three short parts, covering the newest features'],
   ['v2026.07.25-1206', 'Search fields show an always-visible ✕ clear button'],
   ['v2026.07.25-1201', 'Tapping a checkbox no longer brings up the keyboard'],
   ['v2026.07.25-1136', 'Opening a note from home search highlights the search term inside the note'],
@@ -22,7 +23,6 @@ const CHANGELOG = [
   ['v2026.07.25-1042', 'Fixed: hidden menu items and controls can no longer leak into view'],
   ['v2026.07.25-1037', 'Fixed: Shared pill no longer shows in the editor on notes that are not shared'],
   ['v2026.07.25-1024', 'Users list can set the Bookkeeper role; Shared pill tap always shows who has access'],
-  ['v2026.07.25-0945', 'New setting: move checked items to the bottom of their paragraph (per device)'],
 ];
 const APP_VERSION = CHANGELOG[0][0];
 
@@ -3236,12 +3236,15 @@ const tutorialNext = document.getElementById('tutorial-next');
 const tutorialBack = document.getElementById('tutorial-back');
 const tutorialProgress = document.getElementById('tutorial-progress');
 const tutorialClose = document.getElementById('tutorial-close');
-const tutorialBtn = document.getElementById('tutorial-btn');
 
 let tutorialStepIndex = 0;
+let tutorialPart = 1;
+const TUTORIAL_PARTS = 3;
 
-function tutorialSteps() {
-  return [
+// The tutorial is split into three short parts, each startable from Settings.
+// The last bubble of parts 1 and 2 offers to continue into the next part.
+function tutorialSteps(part) {
+  if (part === 1) return [
     {
       screen: 'home',
       target: () => document.getElementById('settings-btn'),
@@ -3279,56 +3282,103 @@ function tutorialSteps() {
       target: () => document.querySelector('#customer-notes-view .home-btn'),
       text: 'You can click the home button any time to go back to the home screen.',
     },
+  ];
+
+  if (part === 2) {
     // Home section steps — ordered to match the current settings pinned order
-    ...(() => {
-      const sectionSteps = {
-        notes: [
-          {
-            screen: 'home',
-            target: () => document.querySelector('[data-section="notes"]'),
-            text: 'The home screen, in addition to the customers card, also has general notes that are not assigned to any customer.',
-          },
-          {
-            screen: 'home',
-            target: () => document.getElementById('fab'),
-            text: 'Tapping the blue + on the home screen will add a new general note.',
-          },
-        ],
-        aggregator: [
-          {
-            screen: 'home',
-            target: () => document.querySelector('[data-section="aggregator"]'),
-            text: 'There are also aggregator cards that show paragraphs marked with keywords, such as todo, to buy, materials, etc.',
-          },
-        ],
-        recent: [
-          {
-            screen: 'home',
-            target: () => document.querySelector('[data-section="recent"]'),
-            text: 'And finally, the home screen shows the customer notes that have been edited last.',
-          },
-          {
-            screen: 'home',
-            target: () => document.querySelector('#notes-list .home-pinned'),
-            text: 'Clicking on a note brings up the note to view and edit.',
-          },
-        ],
-      };
-      const ordered = getPinnedOrder().flatMap(key => sectionSteps[key] || []);
-      // First step navigates home; rest rely on screen === 'home' auto-navigation
-      if (ordered.length) ordered[0] = { ...ordered[0], setup: () => goHome() };
-      return ordered;
-    })(),
+    const sectionSteps = {
+      notes: [
+        {
+          screen: 'home',
+          target: () => document.querySelector('[data-section="notes"]'),
+          text: 'The home screen, in addition to the customers card, also has general notes that are not assigned to any customer.',
+        },
+        {
+          screen: 'home',
+          target: () => document.getElementById('fab'),
+          text: 'Tapping the blue + on the home screen will add a new general note.',
+        },
+      ],
+      aggregator: [
+        {
+          screen: 'home',
+          target: () => document.querySelector('[data-section="aggregator"]'),
+          text: 'Aggregator cards collect paragraphs that start with your keywords (todo, to buy, materials…). Tap a keyword to open them all as ONE note — edits there save straight back into each customer\'s note.',
+        },
+      ],
+      recent: [
+        {
+          screen: 'home',
+          target: () => document.querySelector('[data-section="recent"]'),
+          text: 'The home screen also shows the customer notes that have been edited last.',
+        },
+        {
+          screen: 'home',
+          target: () => document.querySelector('#notes-list .home-pinned'),
+          text: 'Clicking on a note brings up the note to view and edit.',
+        },
+      ],
+    };
+    const ordered = getPinnedOrder().flatMap(key => sectionSteps[key] || []);
+    if (ordered.length) ordered[0] = { ...ordered[0], setup: () => goHome() };
+    ordered.push({
+      screen: 'home',
+      target: () => document.getElementById('home-search-input'),
+      text: 'Search every note by words here. Open a result and your search is carried into the note with the first match highlighted. The ✕ clears a search any time.',
+    });
+    return ordered;
+  }
+
+  return [
     {
       screen: 'editor',
       setup: () => {
         const recent = Storage.listRecentCustomerNotes(1);
         if (!recent.length) return false;
+        // Ensure the "Go to: customer" link is shown (it hides when the
+        // editor was entered from that same customer's note list)
+        returnScreen = 'notes';
+        activeCustomerId = null;
         showEditor(recent[0], 'note');
         return true;
       },
       target: () => document.getElementById('customer-link-btn'),
       text: 'You can see which customer this note is assigned to at the top.',
+    },
+    {
+      screen: 'editor',
+      target: () => document.getElementById('editor-more-btn'),
+      text: 'The ⋯ menu holds the note tools: insert a date, share with users, assign the note to a customer — or move it to a different one — and Generate IIF on the hours note.',
+    },
+    {
+      screen: 'editor',
+      target: () => document.getElementById('checkbox-btn'),
+      text: 'This button adds or removes checkboxes on the current line or selection. Tap a checkbox in the text to check it off — the keyboard stays out of the way.',
+    },
+    {
+      screen: 'editor',
+      target: () => document.getElementById('note-search-input'),
+      text: 'Find text inside the note here — every match is highlighted and the arrows jump between them.',
+    },
+    {
+      screen: 'customer-notes',
+      setup: () => {
+        const customers = Storage.listCustomers();
+        if (!customers.length) return false;
+        showCustomerNotes(customers[0].id);
+        return true;
+      },
+      target: () => document.getElementById('customer-files-section'),
+      text: 'Each customer also has a Files section for photos and documents. Files stay on this device only — they are not synced.',
+    },
+    {
+      screen: 'settings',
+      setup: () => { showSettings(); return true; },
+      target: () => {
+        const el = document.getElementById('setting-move-checked');
+        return el ? el.closest('.setting-row') : null;
+      },
+      text: 'Optional: turn this on and checked-off items sink to the bottom of their paragraph. It\'s a per-device setting.',
     },
   ];
 }
@@ -3388,7 +3438,7 @@ function positionBubble(targetEl) {
 }
 
 async function runTutorialStep(index) {
-  const steps = tutorialSteps();
+  const steps = tutorialSteps(tutorialPart);
   if (index >= steps.length) { endTutorial(); return; }
   const step = steps[index];
 
@@ -3414,8 +3464,14 @@ async function runTutorialStep(index) {
   await new Promise(r => setTimeout(r, 30));
 
   tutorialText.textContent = step.text;
-  if (tutorialProgress) tutorialProgress.textContent = `${index + 1} of ${steps.length}`;
+  if (tutorialProgress) tutorialProgress.textContent = `Part ${tutorialPart} · ${index + 1} of ${steps.length}`;
   if (tutorialBack) tutorialBack.hidden = (index === 0);
+  // Last bubble of parts 1 and 2 chains into the next part
+  if (tutorialNext) {
+    const last = index === steps.length - 1;
+    tutorialNext.textContent = !last ? 'Got it →'
+      : (tutorialPart < TUTORIAL_PARTS ? `Continue to Part ${tutorialPart + 1} →` : 'Done ✓');
+  }
   tutorialOverlay.hidden = false;
   // Render bubble off-screen first to measure height
   tutorialBubble.style.top = '-9999px';
@@ -3441,10 +3497,22 @@ function endTutorial() {
   clearHighlights();
   if (tutorialOverlay) tutorialOverlay.hidden = true;
   tutorialStepIndex = 0;
+  tutorialPart = 1;
 }
 
 if (tutorialNext) tutorialNext.addEventListener('click', () => {
   clearHighlights();
+  const steps = tutorialSteps(tutorialPart);
+  if (tutorialStepIndex + 1 >= steps.length) {
+    if (tutorialPart < TUTORIAL_PARTS) {
+      tutorialPart++;
+      tutorialStepIndex = 0;
+      runTutorialStep(0);
+    } else {
+      endTutorial();
+    }
+    return;
+  }
   tutorialStepIndex++;
   runTutorialStep(tutorialStepIndex);
 });
@@ -3458,9 +3526,12 @@ if (tutorialBack) tutorialBack.addEventListener('click', () => {
 
 if (tutorialClose) tutorialClose.addEventListener('click', endTutorial);
 
-if (tutorialBtn) tutorialBtn.addEventListener('click', () => {
-  tutorialStepIndex = 0;
-  runTutorialStep(0);
+document.querySelectorAll('[data-tutorial-part]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    tutorialPart = parseInt(btn.dataset.tutorialPart, 10) || 1;
+    tutorialStepIndex = 0;
+    runTutorialStep(0);
+  });
 });
 
 // Activate a newly-downloaded service worker as soon as it's ready —
