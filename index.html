@@ -68,7 +68,10 @@
         <span id="app-version" class="app-version"></span>
         <button id="settings-btn" class="icon-btn" aria-label="Settings">⚙</button>
       </div>
-      <input id="home-search-input" class="search-input home-search-input" type="search" placeholder="Search all notes…" autocomplete="off" />
+      <div class="search-wrap">
+        <input id="home-search-input" class="search-input home-search-input" type="search" placeholder="Search all notes…" autocomplete="off" />
+        <button class="search-clear" type="button" aria-label="Clear search" hidden>✕</button>
+      </div>
     </header>
     <main id="notes-list" class="notes-list">
       <p class="empty-state" style="font-style:normal"><span class="nav-spinner" style="width:20px;height:20px;border-width:3px;"></span></p>
@@ -88,7 +91,10 @@
         </div>
       </div>
       <div class="customers-header-bottom">
-        <input id="customer-search" class="search-input" type="search" placeholder="Search customers" autocomplete="off" style="flex:1;" />
+        <div class="search-wrap" style="flex:1;">
+          <input id="customer-search" class="search-input" type="search" placeholder="Search customers" autocomplete="off" />
+          <button class="search-clear" type="button" aria-label="Clear search" hidden>✕</button>
+        </div>
       </div>
     </header>
     <main id="customers-list" class="notes-list">
@@ -105,7 +111,10 @@
         <h1 id="customer-notes-title" style="font-size:17px;margin:0;flex:1;">Customer</h1>
       </div>
       <div class="customers-header-bottom">
-        <input id="customer-notes-search" class="search-input" type="search" placeholder="Search notes…" autocomplete="off" style="flex:1;" />
+        <div class="search-wrap" style="flex:1;">
+          <input id="customer-notes-search" class="search-input" type="search" placeholder="Search notes…" autocomplete="off" />
+          <button class="search-clear" type="button" aria-label="Clear search" hidden>✕</button>
+        </div>
       </div>
     </header>
     <main class="notes-list">
@@ -345,7 +354,10 @@
         </div>
       </div>
       <div class="editor-row editor-row-tools">
-        <input id="note-search-input" class="search-input note-search-input" type="search" placeholder="Find in note" autocomplete="off" />
+        <div class="search-wrap">
+          <input id="note-search-input" class="search-input note-search-input" type="search" placeholder="Find in note" autocomplete="off" />
+          <button class="search-clear" type="button" aria-label="Clear search" hidden>✕</button>
+        </div>
         <span id="note-search-count" class="search-count"></span>
         <button id="search-prev-btn" class="icon-btn" aria-label="Previous match">↑</button>
         <button id="search-next-btn" class="icon-btn" aria-label="Next match">↓</button>
@@ -436,7 +448,10 @@
         <h2 class="modal-title">Assign to customer</h2>
         <button id="assign-customer-modal-close" class="icon-btn" aria-label="Close">✕</button>
       </div>
-      <input id="assign-customer-search" class="search-input" type="search" placeholder="Search customers…" autocomplete="off" style="margin-bottom:10px;" />
+      <div class="search-wrap" style="margin-bottom:10px;">
+        <input id="assign-customer-search" class="search-input" type="search" placeholder="Search customers…" autocomplete="off" />
+        <button class="search-clear" type="button" aria-label="Clear search" hidden>✕</button>
+      </div>
       <ul id="assign-customer-list" class="members-list"></ul>
     </div>
   </div>

@@ -806,9 +806,31 @@ body.dark-mode .iif-table tbody tr.iif-needs-review { background: #2d1a00; }
   -webkit-appearance: none;
 }
 .search-input:focus { border-color: var(--accent); background: var(--surface); }
+/* Native cancel ✕ only shows while focused — suppressed in favor of our
+   always-visible .search-clear button */
 input[type="search"]::-webkit-search-cancel-button {
-  -webkit-appearance: searchfield-cancel-button;
+  -webkit-appearance: none;
+  appearance: none;
+}
+.search-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+.search-wrap .search-input { width: 100%; padding-right: 32px; }
+.search-clear {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  border: none;
+  background: none;
+  color: var(--ink-soft);
+  font-size: 15px;
+  line-height: 1;
   cursor: pointer;
+  padding: 6px 8px;
 }
 
 /* Segmented sort buttons */

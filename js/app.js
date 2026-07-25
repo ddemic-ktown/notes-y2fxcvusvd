@@ -13,6 +13,8 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 10, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.07.25-1206', 'Search fields show an always-visible ✕ clear button'],
+  ['v2026.07.25-1201', 'Tapping a checkbox no longer brings up the keyboard'],
   ['v2026.07.25-1136', 'Opening a note from home search highlights the search term inside the note'],
   ['v2026.07.25-1128', 'Show/Hide password button on the sign-in screen and the set-password prompt'],
   ['v2026.07.25-1127', 'Checking a box keeps the cursor in place while the line sinks to the paragraph bottom'],
@@ -21,8 +23,6 @@ const CHANGELOG = [
   ['v2026.07.25-1037', 'Fixed: Shared pill no longer shows in the editor on notes that are not shared'],
   ['v2026.07.25-1024', 'Users list can set the Bookkeeper role; Shared pill tap always shows who has access'],
   ['v2026.07.25-0945', 'New setting: move checked items to the bottom of their paragraph (per device)'],
-  ['v2026.07.24-2310', 'Aggregator keywords open one editable note; edits save back to each customer note'],
-  ['v2026.07.18-0352', 'Tap a Shared pill to see who the note is shared with'],
 ];
 const APP_VERSION = CHANGELOG[0][0];
 
@@ -395,6 +395,9 @@ function hideAllScreens() {
   if (signinView) signinView.classList.remove('active');
   // Body class controls page-level scroll lock for editor screen
   document.body.classList.remove('editor-open');
+  // Screens reset search inputs programmatically (no input event) — keep the
+  // ✕ clear buttons in sync on every navigation
+  refreshSearchClears();
 }
 
 // ---------- compiled aggregator editor ----------
@@ -1786,6 +1789,7 @@ function resetNoteSearch() {
   searchIndex = 0;
   updateSearchCount();
   renderHighlights();
+  refreshSearchClears();
 }
 noteSearchInput.addEventListener('input', () => {
   findMatches(noteSearchInput.value);
@@ -1823,6 +1827,14 @@ customerLinkBtn.addEventListener('click', () => {
   showCustomerNotes(cid, returnTo);
 });
 
+// Whether the textarea was already focused BEFORE this tap (pointerdown fires
+// before focus) — used to dismiss the keyboard on checkbox taps that would
+// otherwise summon it.
+let bodyWasFocusedBeforeTap = false;
+bodyInput.addEventListener('pointerdown', () => {
+  bodyWasFocusedBeforeTap = document.activeElement === bodyInput;
+});
+
 bodyInput.addEventListener('click', () => {
   if (isReadOnlyRole()) return; // view-only: no checkbox toggling
   const value = bodyInput.value;
@@ -1839,6 +1851,9 @@ bodyInput.addEventListener('click', () => {
   bodyInput.value = value.substring(0, lineStart) + replacement + value.substring(lineStart + 2);
   bodyInput.selectionStart = bodyInput.selectionEnd = pos;
   sinkCheckedLines(pos);
+  // Toggling a checkbox is a tap, not typing — if the keyboard wasn't already
+  // up, dismiss it immediately instead of letting it open.
+  if (!bodyWasFocusedBeforeTap) bodyInput.blur();
   scheduleSave();
 });
 
@@ -2165,6 +2180,7 @@ function renderAssignCustomerList(filter) {
 if (assignCustomerBtn) assignCustomerBtn.addEventListener('click', () => {
   if (!assignCustomerModal) return;
   if (assignCustomerSearch) assignCustomerSearch.value = '';
+  refreshSearchClears();
   renderAssignCustomerList('');
   assignCustomerModal.hidden = false;
   setTimeout(() => { if (assignCustomerSearch) assignCustomerSearch.focus(); }, 50);
@@ -2316,6 +2332,32 @@ async function completeEmailLinkSignin() {
     window.history.replaceState({ screen: 'home' }, document.title, window.location.origin + window.location.pathname);
   }
 }
+// ---------- always-visible ✕ clear buttons on search fields ----------
+const SEARCH_CLEAR_IDS = ['home-search-input', 'customer-search', 'customer-notes-search', 'note-search-input', 'assign-customer-search'];
+
+function refreshSearchClears() {
+  SEARCH_CLEAR_IDS.forEach(id => {
+    const input = document.getElementById(id);
+    const wrap = input ? input.closest('.search-wrap') : null;
+    const btn = wrap ? wrap.querySelector('.search-clear') : null;
+    if (btn) btn.hidden = !input.value;
+  });
+}
+
+SEARCH_CLEAR_IDS.forEach(id => {
+  const input = document.getElementById(id);
+  const wrap = input ? input.closest('.search-wrap') : null;
+  const btn = wrap ? wrap.querySelector('.search-clear') : null;
+  if (!btn) return;
+  input.addEventListener('input', () => { btn.hidden = !input.value; });
+  btn.addEventListener('click', () => {
+    input.value = '';
+    // Fire the normal input event so lists/highlights reset as if cleared by hand
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    btn.hidden = true;
+  });
+});
+
 // Show/Hide password toggles — the set-password one flips both fields at once
 function wirePasswordToggle(toggleId, inputIds) {
   const btn = document.getElementById(toggleId);
