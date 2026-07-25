@@ -13,6 +13,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 10, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.07.24-2310', 'Aggregator keywords open one editable note; edits save back to each customer note'],
   ['v2026.07.18-0352', 'Tap a Shared pill to see who the note is shared with'],
   ['v2026.07.18-0327', 'Shared pill only counts employees/customers; bookkeepers removed from share list'],
   ['v2026.07.18-0313', 'PDFs and documents open in a viewer tab instead of downloading a copy'],
@@ -22,7 +23,6 @@ const CHANGELOG = [
   ['v2026.07.14-1950', 'Files card sits below the customer default note, collapsed until tapped'],
   ['v2026.07.14-1943', 'Per-customer files: photos/documents stored on this device, shareable via share sheet'],
   ['v2026.07.14-1230', 'Tap an IIF table row to see the note line it came from'],
-  ['v2026.07.14-1222', 'IIF date range defaults to the last two weeks'],
 ];
 const APP_VERSION = CHANGELOG[0][0];
 
@@ -34,13 +34,10 @@ const listView = document.getElementById('list-view');
 const customersView = document.getElementById('customers-view');
 const customerNotesView = document.getElementById('customer-notes-view');
 const settingsView = document.getElementById('settings-view');
-const aggregatorView = document.getElementById('aggregator-view');
 const sectionView = document.getElementById('section-view');
 const sectionViewTitle = document.getElementById('section-view-title');
 const sectionViewList = document.getElementById('section-view-list');
 const sectionViewControls = document.getElementById('section-view-controls');
-const aggregatorList = document.getElementById('aggregator-list');
-const aggregatorTitle = document.getElementById('aggregator-title');
 const editorView = document.getElementById('editor-view');
 const signinView = document.getElementById('signin-view');
 const signinBtn = document.getElementById('signin-btn');
@@ -392,7 +389,6 @@ function hideAllScreens() {
   customersView.classList.remove('active');
   customerNotesView.classList.remove('active');
   settingsView.classList.remove('active');
-  aggregatorView.classList.remove('active');
   if (sectionView) sectionView.classList.remove('active');
   if (orphanView) orphanView.classList.remove('active');
   editorView.classList.remove('active');
@@ -401,15 +397,282 @@ function hideAllScreens() {
   document.body.classList.remove('editor-open');
 }
 
+// ---------- compiled aggregator editor ----------
+// Clicking a keyword opens ONE editable note compiled from every matching
+// paragraph, with a ━━ Client Name ━━ header above each. Sections map back to
+// their source notes BY POSITION (order of ━━ lines); the header name is only
+// a sanity check. Name mismatches hold that section from saving; a changed
+// header COUNT pauses all write-back. Both surface a tappable warning banner
+// with a resolve dialog.
+const COMPILED_ID = '__compiled__';
+const compiledHeaderRe = /^━━ (.*) ━━\s*$/;
+let compiledSections = null; // [{ noteId, expectedName, originalParagraph }]
+let compiledKeyword = null;
+let compiledIssues = { count: null, names: [], notFound: [] };
+
+const compiledWarning = document.getElementById('compiled-warning');
+const compiledModal = document.getElementById('compiled-modal');
+const compiledModalBody = document.getElementById('compiled-modal-body');
+const compiledModalClose = document.getElementById('compiled-modal-close');
+if (compiledWarning) compiledWarning.addEventListener('click', () => openCompiledModal());
+if (compiledModalClose) compiledModalClose.addEventListener('click', () => closeCompiledModal());
+
+function compiledHeaderLine(name) { return `━━ ${name} ━━`; }
+
+function buildCompiledSections(keyword) {
+  const matches = Storage.aggregateParagraphsByKeyword(keyword);
+  compiledSections = matches.map(m => {
+    const def = Storage.getDefaultNoteForCustomer(m.customerId);
+    const name = (def ? (splitTitleAndBody(def.body).title || '').trim() : '') || 'Unnamed customer';
+    return { noteId: m.noteId, expectedName: name, originalParagraph: m.paragraph };
+  });
+  return compiledSections.map(s => compiledHeaderLine(s.expectedName) + '\n' + s.originalParagraph).join('\n\n');
+}
+
 function showAggregator(keyword) {
+  const fromSection = sectionView && sectionView.classList.contains('active');
   activeKeyword = keyword;
-  returnScreen = 'aggregator';
+  compiledKeyword = keyword;
+  currentId = COMPILED_ID;
+  currentType = 'compiled';
+  currentIsDefault = false;
+  returnScreen = fromSection ? 'aggregator-section' : 'notes';
+
+  const body = buildCompiledSections(keyword);
+  titleInput.value = keyword;
+  titleInput.readOnly = true;
+  titleInput.placeholder = 'Keyword';
+  bodyInput.value = body;
+  const empty = compiledSections.length === 0;
+  bodyInput.readOnly = isReadOnlyRole() || empty;
+  bodyInput.placeholder = empty ? `No paragraphs starting with “${keyword}” yet.` : '';
+
+  if (backBtn) {
+    backBtn.textContent = fromSection ? 'Back to Aggregators' : 'Back to Home';
+    backBtn.style.display = '';
+  }
+  resetNoteSearch();
+  noteSearchInput.style.display = '';
+  noteSearchCount.style.display = '';
+  searchPrevBtn.style.display = '';
+  searchNextBtn.style.display = '';
+  if (editorMoreBtn) editorMoreBtn.closest('.editor-more-wrap').style.display = 'none';
+  closeMoreDropdown();
+  if (checkboxBtn) checkboxBtn.style.display = bodyInput.readOnly ? 'none' : '';
+  deleteBtn.style.display = 'none';
+  customerLinkBtn.hidden = true;
+  delete customerLinkBtn.dataset.customerId;
+  const editorSharedBadge = document.getElementById('editor-shared-badge');
+  if (editorSharedBadge) editorSharedBadge.hidden = true;
+
+  compiledIssues = { count: null, names: [], notFound: [] };
+  renderCompiledWarning();
+
   hideAllScreens();
   window.scrollTo(0, 0);
-  aggregatorTitle.textContent = keyword;
-  renderAggregatorList(keyword);
-  aggregatorView.classList.add('active');
+  editorView.classList.add('active');
+  document.body.classList.add('editor-open');
   if (!handlingPopstate) history.pushState({ screen: 'aggregator', keyword }, '');
+}
+
+// Split the textarea into header/content segments. Content is trimmed of
+// leading/trailing blank lines; internal blank lines are kept.
+function parseCompiledBody() {
+  const lines = bodyInput.value.split('\n');
+  const headers = [];
+  lines.forEach((ln, i) => {
+    const m = ln.match(compiledHeaderRe);
+    if (m) headers.push({ name: m[1].trim(), line: i });
+  });
+  const segments = headers.map((h, i) => {
+    let a = h.line + 1;
+    let b = i + 1 < headers.length ? headers[i + 1].line : lines.length;
+    while (a < b && lines[a].trim() === '') a++;
+    while (b > a && lines[b - 1].trim() === '') b--;
+    return { name: h.name, headerLine: h.line, contentEnd: b, content: lines.slice(a, b).join('\n') };
+  });
+  return { lines, segments };
+}
+
+function saveCompiledEdits() {
+  if (currentType !== 'compiled' || !compiledSections || compiledSections.length === 0) return;
+  if (isReadOnlyRole()) return;
+  const { segments } = parseCompiledBody();
+  if (segments.length !== compiledSections.length) {
+    compiledIssues = { count: { found: segments.length, expected: compiledSections.length }, names: [], notFound: [] };
+    renderCompiledWarning();
+    return; // nothing saves until the ━━ markers line up again
+  }
+  const names = [];
+  const notFound = [];
+  // Group sections by source note and walk each note's body once, in section
+  // order, so duplicate paragraphs map to the right occurrence.
+  const byNote = new Map();
+  segments.forEach((seg, i) => {
+    const sec = compiledSections[i];
+    if (!byNote.has(sec.noteId)) byNote.set(sec.noteId, []);
+    byNote.get(sec.noteId).push({ seg, sec, index: i });
+  });
+  for (const [noteId, entries] of byNote) {
+    const note = Storage.getNote(noteId);
+    let body = note ? (note.body || '') : null;
+    let searchFrom = 0;
+    let changed = false;
+    for (const { seg, sec, index } of entries) {
+      const nameMismatch = seg.name !== sec.expectedName;
+      const contentChanged = seg.content !== sec.originalParagraph;
+      if (nameMismatch) names.push({ index, found: seg.name, expected: sec.expectedName });
+      if (body === null) {
+        if (contentChanged && !nameMismatch) notFound.push({ index, name: sec.expectedName });
+        continue;
+      }
+      const at = body.indexOf(sec.originalParagraph, searchFrom);
+      if (at === -1) {
+        if (contentChanged && !nameMismatch) notFound.push({ index, name: sec.expectedName });
+        continue;
+      }
+      if (nameMismatch || !contentChanged) {
+        searchFrom = at + sec.originalParagraph.length;
+        continue;
+      }
+      body = body.substring(0, at) + seg.content + body.substring(at + sec.originalParagraph.length);
+      searchFrom = at + seg.content.length;
+      sec.originalParagraph = seg.content;
+      changed = true;
+    }
+    if (changed) {
+      // A deleted section leaves stacked blank lines behind — collapse them.
+      Storage.updateNote(noteId, body.replace(/\n{3,}/g, '\n\n').replace(/^\n+/, ''));
+    }
+  }
+  compiledIssues = { count: null, names, notFound };
+  renderCompiledWarning();
+}
+
+function compiledIssueCount() {
+  if (compiledIssues.count) return 1;
+  return compiledIssues.names.length + compiledIssues.notFound.length;
+}
+
+function renderCompiledWarning() {
+  if (!compiledWarning) return;
+  const show = currentType === 'compiled' && compiledIssueCount() > 0;
+  compiledWarning.hidden = !show;
+  if (!show) { closeCompiledModal(); return; }
+  const n = compiledIssueCount();
+  compiledWarning.textContent = compiledIssues.count
+    ? "⚠ Section markers changed — edits aren't saving. Tap to resolve."
+    : `⚠ ${n} section${n === 1 ? '' : 's'} need${n === 1 ? 's' : ''} attention — tap to resolve.`;
+}
+
+// Rebuild the whole compiled view from the source notes (unsaved edits lost).
+function compiledRebuild() {
+  bodyInput.value = buildCompiledSections(compiledKeyword);
+  bodyInput.readOnly = isReadOnlyRole() || compiledSections.length === 0;
+  compiledIssues = { count: null, names: [], notFound: [] };
+  renderCompiledWarning();
+  closeCompiledModal();
+}
+
+function compiledResolveName(index, action) {
+  const { lines, segments } = parseCompiledBody();
+  if (segments.length !== compiledSections.length || !segments[index]) { saveCompiledEdits(); openCompiledModal(); return; }
+  const seg = segments[index];
+  const sec = compiledSections[index];
+  if (action === 'trust') {
+    // Position wins — accept the renamed header from here on.
+    sec.expectedName = seg.name;
+  } else if (action === 'restore') {
+    lines[seg.headerLine] = compiledHeaderLine(sec.expectedName);
+    bodyInput.value = lines.join('\n');
+  } else if (action === 'discard') {
+    // Put the header AND content back to the last saved version.
+    const replaced = [compiledHeaderLine(sec.expectedName)]
+      .concat(sec.originalParagraph ? sec.originalParagraph.split('\n') : []);
+    bodyInput.value = lines.slice(0, seg.headerLine).concat(replaced, lines.slice(seg.contentEnd)).join('\n');
+  }
+  saveCompiledEdits();
+  openCompiledModal();
+}
+
+function compiledResolveNotFound(index, action) {
+  if (action === 'reload') { compiledRebuild(); return; }
+  // 'append' — the original paragraph is gone from the source note; add this
+  // version to the end of that note instead.
+  const { segments } = parseCompiledBody();
+  if (segments.length !== compiledSections.length || !segments[index]) { saveCompiledEdits(); openCompiledModal(); return; }
+  const seg = segments[index];
+  const sec = compiledSections[index];
+  const note = Storage.getNote(sec.noteId);
+  if (note && seg.content) {
+    const base = (note.body || '').replace(/\n+$/, '');
+    Storage.updateNote(sec.noteId, base + (base ? '\n\n' : '') + seg.content);
+    sec.originalParagraph = seg.content;
+  }
+  saveCompiledEdits();
+  openCompiledModal();
+}
+
+function openCompiledModal() {
+  if (!compiledModal || !compiledModalBody) return;
+  if (compiledIssueCount() === 0) { closeCompiledModal(); return; }
+  let html = '';
+  if (compiledIssues.count) {
+    const { found, expected } = compiledIssues.count;
+    html += `
+      <p class="modal-hint">This view had ${expected} ━━ section marker${expected === 1 ? '' : 's'} but now has ${found}. Nothing is saving, so edits can't land in the wrong customer's note.</p>
+      <div class="compiled-resolve-actions">
+        <button class="compiled-action" data-act="close">Keep editing — I'll restore the ━━ lines</button>
+        <button class="compiled-action danger-soft" data-act="rebuild">Rebuild view (discard unsaved edits)</button>
+      </div>`;
+  } else {
+    compiledIssues.names.forEach(n => {
+      html += `
+        <div class="compiled-resolve-item">
+          <p>Section ${n.index + 1}: expected header <strong>${escapeHtml(n.expected)}</strong> but found <strong>${escapeHtml(n.found || '(blank)')}</strong>. This section is not saving.</p>
+          <div class="compiled-resolve-actions">
+            <button class="compiled-action" data-act="name-trust" data-index="${n.index}">Save anyway</button>
+            <button class="compiled-action" data-act="name-restore" data-index="${n.index}">Restore header name</button>
+            <button class="compiled-action danger-soft" data-act="name-discard" data-index="${n.index}">Discard my edits here</button>
+          </div>
+        </div>`;
+    });
+    compiledIssues.notFound.forEach(n => {
+      html += `
+        <div class="compiled-resolve-item">
+          <p><strong>${escapeHtml(n.name)}</strong>: the original paragraph changed elsewhere (maybe another device), so this edit couldn't be saved.</p>
+          <div class="compiled-resolve-actions">
+            <button class="compiled-action" data-act="nf-append" data-index="${n.index}">Save mine (add to their note)</button>
+            <button class="compiled-action danger-soft" data-act="nf-reload" data-index="${n.index}">Discard mine and reload</button>
+          </div>
+        </div>`;
+    });
+  }
+  compiledModalBody.innerHTML = html;
+  compiledModalBody.querySelectorAll('button[data-act]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const act = btn.dataset.act;
+      const index = parseInt(btn.dataset.index || '-1', 10);
+      if (act === 'rebuild') compiledRebuild();
+      else if (act === 'close') closeCompiledModal();
+      else if (act === 'name-trust') compiledResolveName(index, 'trust');
+      else if (act === 'name-restore') compiledResolveName(index, 'restore');
+      else if (act === 'name-discard') compiledResolveName(index, 'discard');
+      else if (act === 'nf-append') compiledResolveNotFound(index, 'append');
+      else if (act === 'nf-reload') compiledResolveNotFound(index, 'reload');
+    });
+  });
+  compiledModal.hidden = false;
+}
+function closeCompiledModal() { if (compiledModal) compiledModal.hidden = true; }
+
+function clearCompiledState() {
+  compiledSections = null;
+  compiledKeyword = null;
+  compiledIssues = { count: null, names: [], notFound: [] };
+  if (compiledWarning) compiledWarning.hidden = true;
+  closeCompiledModal();
+  titleInput.readOnly = false;
 }
 
 function showSection(key) {
@@ -539,35 +802,6 @@ function renderSectionView(key) {
   }
 }
 
-function renderAggregatorList(keyword) {
-  const matches = Storage.aggregateParagraphsByKeyword(keyword);
-  if (matches.length === 0) {
-    aggregatorList.innerHTML = `<p class="empty-state">No paragraphs starting with “${escapeHtml(keyword)}” yet.</p>`;
-    return;
-  }
-  aggregatorList.innerHTML = matches.map((m, idx) => {
-    const def = Storage.getDefaultNoteForCustomer(m.customerId);
-    const customerName = def ? (splitTitleAndBody(def.body).title || '').trim() : '';
-    const tag = customerName ? escapeHtml(customerName) : 'Unnamed customer';
-    return `
-      <article class="note-card aggregator-match" data-note-id="${m.noteId}" data-match-idx="${idx}">
-        <span class="customer-tag">${tag}</span>
-        <p class="match-body">${escapeHtml(m.paragraph)}</p>
-        <p class="note-date" style="margin-top:6px">${formatDateTime(m.updated)}</p>
-      </article>
-    `;
-  }).join('');
-  aggregatorList.querySelectorAll('.note-card').forEach(card => {
-    card.addEventListener('click', () => {
-      const note = Storage.getNote(card.dataset.noteId);
-      if (!note) return;
-      const match = matches[parseInt(card.dataset.matchIdx, 10)];
-      returnScreen = 'aggregator';
-      showEditor(note, 'note', match ? { paragraph: match.paragraph } : undefined);
-    });
-  });
-}
-
 function showSettings() {
   hideAllScreens();
   window.scrollTo(0, 0);
@@ -640,6 +874,7 @@ function showCustomerNotes(customerId, returnTo) {
 }
 
 function showEditor(record, type, cursorHint) {
+  clearCompiledState();
   currentId = record.id;
   currentType = type;
   currentIsDefault = !!record.isDefault;
@@ -665,8 +900,6 @@ function showEditor(record, type, cursorHint) {
     backLabel = name || 'Customer notes';
   } else if (returnScreen === 'customers') {
     backLabel = 'Customers';
-  } else if (returnScreen === 'aggregator' && activeKeyword) {
-    backLabel = activeKeyword;
   } else if (returnScreen === 'orphans') {
     backLabel = 'Orphaned Notes';
   }
@@ -761,11 +994,12 @@ function showEditor(record, type, cursorHint) {
 }
 
 function returnFromEditor() {
-  if (returnScreen === 'aggregator' && activeKeyword) {
-    showAggregator(activeKeyword);
-    // Rebuild history if we didn't pop to the aggregator entry
-    if (handlingPopstate && currentPopstateTarget !== 'aggregator') {
-      history.pushState({ screen: 'aggregator', keyword: activeKeyword }, '');
+  if (returnScreen === 'aggregator-section') {
+    // Leaving the compiled aggregator editor that was opened from the
+    // "Aggregators" section screen.
+    showSection('aggregator');
+    if (handlingPopstate && currentPopstateTarget !== 'section') {
+      history.pushState({ screen: 'section', key: 'aggregator' }, '');
     }
   } else if (returnScreen === 'customer-notes' && activeCustomerId) {
     showCustomerNotes(activeCustomerId);
@@ -1177,6 +1411,10 @@ function scheduleSave() {
 }
 function commitSave() {
   if (!currentId) return;
+  if (currentType === 'compiled') {
+    saveCompiledEdits();
+    return;
+  }
   if (currentType === 'note') {
     Storage.updateNote(currentId, composeBody(titleInput.value, bodyInput.value));
   } else if (currentType === 'customer') {
@@ -1555,10 +1793,7 @@ customerLinkBtn.addEventListener('click', () => {
   if (!cid) return;
   if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
   commitSave();
-  let returnTo = { screen: 'customers' };
-  if (returnScreen === 'aggregator' && activeKeyword) {
-    returnTo = { screen: 'aggregator', keyword: activeKeyword };
-  }
+  const returnTo = { screen: 'customers' };
   currentId = null;
   currentType = null;
   currentIsDefault = false;
@@ -1643,6 +1878,16 @@ bodyInput.addEventListener('keydown', (e) => {
 
 function commitAndCleanupEditor() {
   let cancelledCustomer = false;
+  if (currentType === 'compiled') {
+    // Compiled aggregator note: flush the last save; never delete anything.
+    if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
+    saveCompiledEdits();
+    currentId = null;
+    currentType = null;
+    currentIsDefault = false;
+    clearCompiledState();
+    return false;
+  }
   if (currentId) {
     if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
     commitSave();
@@ -2232,8 +2477,6 @@ function rerenderCurrent() {
   else if (customersView.classList.contains('active')) renderCustomersList();
   else if (customerNotesView.classList.contains('active') && activeCustomerId) {
     showCustomerNotes(activeCustomerId, customerNotesReturnTo);
-  } else if (aggregatorView.classList.contains('active') && activeKeyword) {
-    renderAggregatorList(activeKeyword);
   } else if (orphanView && orphanView.classList.contains('active')) {
     renderOrphanList();
   } else if (settingsView.classList.contains('active')) {

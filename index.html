@@ -145,15 +145,6 @@
   <!-- SHARED PILL TOOLTIP (who a note is shared with) -->
   <div id="shared-tooltip" class="shared-tooltip" hidden></div>
 
-  <!-- AGGREGATOR VIEW (one per keyword) -->
-  <section id="aggregator-view" class="screen">
-    <header class="app-header">
-      <button class="icon-btn date-btn home-btn" aria-label="Home">Home</button>
-      <h1 id="aggregator-title">Keyword</h1>
-    </header>
-    <main id="aggregator-list" class="notes-list"></main>
-  </section>
-
   <!-- SECTION DETAIL VIEW -->
   <section id="section-view" class="screen">
     <header class="app-header customers-header">
@@ -346,6 +337,7 @@
         <button id="search-next-btn" class="icon-btn" aria-label="Next match">↓</button>
         <button id="checkbox-btn" class="icon-btn" aria-label="Toggle checkbox on line(s)">☐</button>
       </div>
+      <button id="compiled-warning" class="compiled-warning" hidden></button>
     </header>
     <main class="editor-main">
       <input id="editor-title" class="editor-title" type="text" placeholder="Title" autocomplete="off" autocorrect="on" spellcheck="true" enterkeyhint="enter" />
@@ -355,6 +347,17 @@
       </div>
     </main>
   </section>
+
+  <!-- Compiled Aggregator Resolve Modal -->
+  <div id="compiled-modal" class="modal-overlay" hidden>
+    <div class="modal-panel">
+      <div class="modal-header">
+        <h2 class="modal-title">Resolve sections</h2>
+        <button id="compiled-modal-close" class="icon-btn" aria-label="Close">✕</button>
+      </div>
+      <div id="compiled-modal-body"></div>
+    </div>
+  </div>
 
   <!-- Assign Users Modal -->
   <div id="assign-modal" class="modal-overlay" hidden>

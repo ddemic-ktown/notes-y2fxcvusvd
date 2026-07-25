@@ -682,6 +682,38 @@ body.dark-mode .customer-link-btn { background: #2d2a1e; border-color: #78600a; 
 }
 .modal-overlay[hidden] { display: none; }
 
+/* Compiled aggregator editor (keyword → one editable note) */
+.compiled-warning {
+  display: block;
+  width: 100%;
+  text-align: left;
+  margin-top: 8px;
+  padding: 8px 12px;
+  border: 1px solid #b45309;
+  border-radius: var(--radius);
+  background: rgba(245, 166, 35, 0.15);
+  color: var(--ink);
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+}
+.compiled-warning[hidden] { display: none; }
+.compiled-resolve-item { margin: 0 0 16px; }
+.compiled-resolve-item p { margin: 0 0 8px; font-size: 14px; }
+.compiled-resolve-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.compiled-action {
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+}
+.compiled-action.danger-soft { border-color: var(--danger); color: var(--danger); }
+body.dark-mode .compiled-action.danger-soft { color: #f87171; border-color: #b91c1c; }
+
 /* IIF modal */
 .iif-modal-panel { max-width: 620px; width: 95vw; max-height: 88vh; display: flex; flex-direction: column; }
 .iif-status { font-size: 13px; color: var(--ink-soft); margin-bottom: 10px; flex-shrink: 0; }
