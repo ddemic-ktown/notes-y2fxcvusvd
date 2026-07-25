@@ -13,6 +13,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 10, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.07.25-1231', 'Undo button in the editor — one word or action per tap'],
   ['v2026.07.25-1211', 'Tutorial split into three short parts, covering the newest features'],
   ['v2026.07.25-1206', 'Search fields show an always-visible ✕ clear button'],
   ['v2026.07.25-1201', 'Tapping a checkbox no longer brings up the keyboard'],
@@ -22,7 +23,6 @@ const CHANGELOG = [
   ['v2026.07.25-1050', 'Notes can be reassigned to a different customer from the three-dot menu'],
   ['v2026.07.25-1042', 'Fixed: hidden menu items and controls can no longer leak into view'],
   ['v2026.07.25-1037', 'Fixed: Shared pill no longer shows in the editor on notes that are not shared'],
-  ['v2026.07.25-1024', 'Users list can set the Bookkeeper role; Shared pill tap always shows who has access'],
 ];
 const APP_VERSION = CHANGELOG[0][0];
 
@@ -462,6 +462,9 @@ function showAggregator(keyword) {
   if (editorMoreBtn) editorMoreBtn.closest('.editor-more-wrap').style.display = 'none';
   closeMoreDropdown();
   if (checkboxBtn) checkboxBtn.style.display = bodyInput.readOnly ? 'none' : '';
+  resetUndo();
+  lastKnownRemoteBody = null; // compiled editor has its own conflict handling
+  if (undoBtn) undoBtn.style.display = bodyInput.readOnly ? 'none' : '';
   deleteBtn.style.display = 'none';
   customerLinkBtn.hidden = true;
   delete customerLinkBtn.dataset.customerId;
@@ -883,6 +886,8 @@ function showEditor(record, type, cursorHint) {
   currentId = record.id;
   currentType = type;
   currentIsDefault = !!record.isDefault;
+  resetUndo();
+  lastKnownRemoteBody = type === 'note' ? (record.body || '') : null;
 
   if (type === 'note') {
     const { title, body } = splitTitleAndBody(record.body);
@@ -932,6 +937,7 @@ function showEditor(record, type, cursorHint) {
   bodyInput.readOnly = readOnly;
   // Checkbox toolbar button mutates the note — hide it for read-only roles
   if (checkboxBtn) checkboxBtn.style.display = readOnly ? 'none' : '';
+  if (undoBtn) undoBtn.style.display = (showNoteOnly && !readOnly) ? '' : 'none';
   // Shared badge in the editor header
   const editorSharedBadge = document.getElementById('editor-shared-badge');
   if (editorSharedBadge) {
@@ -1442,7 +1448,10 @@ function commitSave() {
     return;
   }
   if (currentType === 'note') {
-    Storage.updateNote(currentId, composeBody(titleInput.value, bodyInput.value));
+    const composed = composeBody(titleInput.value, bodyInput.value);
+    // Track our own save so the remote-change detector doesn't fire on it
+    lastKnownRemoteBody = composed;
+    Storage.updateNote(currentId, composed);
   } else if (currentType === 'customer') {
     Storage.updateCustomer(currentId, {
       name: titleInput.value, address: bodyInput.value,
@@ -1665,6 +1674,8 @@ function formatDateForInsert(d) {
 }
 function insertDateAtCursor(dateStr) {
   if (!currentId) return;
+  pushUndo();
+  undoLastRunType = null;
   const pos = bodyInput.selectionStart ?? bodyInput.value.length;
   const value = bodyInput.value;
   bodyInput.value = value.substring(0, pos) + dateStr + value.substring(pos);
@@ -1848,6 +1859,8 @@ bodyInput.addEventListener('click', () => {
   if (head === '☐ ') replacement = '☑ ';
   else if (head === '☑ ') replacement = '☐ ';
   if (!replacement) return;
+  pushUndo(); // one undo step covers the toggle AND its sink-to-bottom
+  undoLastRunType = null;
   bodyInput.value = value.substring(0, lineStart) + replacement + value.substring(lineStart + 2);
   bodyInput.selectionStart = bodyInput.selectionEnd = pos;
   sinkCheckedLines(pos);
@@ -1855,6 +1868,73 @@ bodyInput.addEventListener('click', () => {
   // up, dismiss it immediately instead of letting it open.
   if (!bodyWasFocusedBeforeTap) bodyInput.blur();
   scheduleSave();
+});
+
+// ---------- undo (note body only) ----------
+// Custom stack — programmatic edits (checkboxes, sink, date insert) wipe the
+// browser's native undo, so the app keeps its own. One snapshot per word typed
+// or per action; capped at 100; cleared per note and on remote changes.
+const undoBtn = document.getElementById('undo-btn');
+const editorToast = document.getElementById('editor-toast');
+let undoStack = [];
+let undoLastRunType = null;
+let lastKnownRemoteBody = null; // body as last loaded/saved — detects remote edits
+let editorToastTimer = null;
+
+function updateUndoBtn() { if (undoBtn) undoBtn.disabled = undoStack.length === 0; }
+function resetUndo() { undoStack = []; undoLastRunType = null; updateUndoBtn(); }
+function pushUndo() {
+  if (!currentId) return;
+  undoStack.push({ text: bodyInput.value, selStart: bodyInput.selectionStart, selEnd: bodyInput.selectionEnd });
+  if (undoStack.length > 100) undoStack.shift();
+  updateUndoBtn();
+}
+function showEditorToast(msg) {
+  if (!editorToast) return;
+  editorToast.textContent = msg;
+  editorToast.hidden = false;
+  if (editorToastTimer) clearTimeout(editorToastTimer);
+  editorToastTimer = setTimeout(() => { editorToast.hidden = true; }, 3000);
+}
+function doUndo() {
+  if (!undoStack.length || !currentId) return;
+  const snap = undoStack.pop();
+  bodyInput.value = snap.text;
+  const s = snap.selStart == null ? snap.text.length : snap.selStart;
+  const e = snap.selEnd == null ? snap.text.length : snap.selEnd;
+  bodyInput.setSelectionRange(s, e);
+  undoLastRunType = null;
+  updateUndoBtn();
+  // The input event refreshes search highlights and schedules the save
+  bodyInput.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
+// Typing granularity: snapshot at word boundaries, on insert/delete direction
+// changes, and before chunk operations (paste, newline, autocorrect).
+bodyInput.addEventListener('beforeinput', (e) => {
+  if (!currentId) return;
+  const t = e.inputType || '';
+  const isDelete = t.startsWith('delete');
+  const isChunk = t === 'insertFromPaste' || t === 'insertFromDrop'
+    || t === 'insertReplacementText' || t === 'insertParagraph' || t === 'insertLineBreak';
+  const wordBoundary = t === 'insertText' && e.data != null && /\s/.test(e.data);
+  const runType = isDelete ? 'del' : 'ins';
+  if (undoStack.length === 0 || isChunk || wordBoundary || runType !== undoLastRunType) pushUndo();
+  undoLastRunType = runType;
+});
+
+if (undoBtn) {
+  // pointerdown preventDefault: don't steal focus (keyboard stays as-is)
+  undoBtn.addEventListener('pointerdown', (e) => e.preventDefault());
+  undoBtn.addEventListener('click', doUndo);
+}
+
+// Desktop Ctrl/Cmd+Z routes to our stack (the native one is unreliable here)
+bodyInput.addEventListener('keydown', (e) => {
+  if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'z') {
+    e.preventDefault();
+    doUndo();
+  }
 });
 
 // ---------- move checked items to paragraph bottom (per-device setting) ----------
@@ -1896,6 +1976,8 @@ function sinkCheckedLines(pos) {
 }
 
 function toggleCheckboxOnSelection() {
+  pushUndo();
+  undoLastRunType = null;
   const value = bodyInput.value;
   const selStart = bodyInput.selectionStart;
   const selEnd = bodyInput.selectionEnd;
@@ -1937,6 +2019,8 @@ bodyInput.addEventListener('keydown', (e) => {
   const currentLine = val.substring(lineStart, pos);
   const prefixMatch = currentLine.match(/^([-–]\s|☐\s|☑\s)/);
   if (!prefixMatch) return;
+  pushUndo(); // list auto-continue is one undo step
+  undoLastRunType = null;
   // If the line is only the prefix (empty item), remove it and stop
   if (currentLine === prefixMatch[0]) {
     e.preventDefault();
@@ -1991,6 +2075,8 @@ function commitAndCleanupEditor() {
   currentId = null;
   currentType = null;
   currentIsDefault = false;
+  resetUndo();
+  lastKnownRemoteBody = null;
   return cancelledCustomer;
 }
 
@@ -2616,7 +2702,22 @@ if (themeDarkBtn) {
 
 function rerenderCurrent() {
   if (signinView && signinView.classList.contains('active')) return;
-  if (editorView.classList.contains('active')) return;
+  if (editorView.classList.contains('active')) {
+    // A remote edit to the OPEN note makes undo snapshots stale — clear them
+    // and tell the user. Our own saves keep lastKnownRemoteBody current, so
+    // they never trigger this.
+    if (currentType === 'note' && currentId && lastKnownRemoteBody !== null) {
+      const fresh = Storage.getNote(currentId);
+      if (fresh && fresh.body !== lastKnownRemoteBody) {
+        lastKnownRemoteBody = fresh.body;
+        if (undoStack.length) {
+          resetUndo();
+          showEditorToast('Note changed on another device — undo history reset');
+        }
+      }
+    }
+    return;
+  }
   if (listView.classList.contains('active')) renderNotesList();
   else if (customersView.classList.contains('active')) renderCustomersList();
   else if (customerNotesView.classList.contains('active') && activeCustomerId) {

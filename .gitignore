@@ -4,5 +4,6 @@ node_modules/
 *.log
 *.tmp
 HANDOFF.md
+FEATURES.md
 app-store-plan.md
 quickbooks_iif_project_brief.md

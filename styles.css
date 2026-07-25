@@ -350,6 +350,24 @@ body.editor-open {
   padding: 4px 6px;
 }
 
+/* Transient editor toast (e.g. "undo history reset") */
+.editor-toast {
+  position: fixed;
+  top: 74px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1300;
+  background: rgba(20, 20, 24, 0.92);
+  color: #fff;
+  font-size: 13px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  box-shadow: 0 4px 14px rgba(0,0,0,0.3);
+  max-width: 90vw;
+  text-align: center;
+}
+.icon-btn:disabled { opacity: 0.35; cursor: default; }
+
 /* Tap a Shared pill → bubble listing who the note is shared with */
 .shared-tooltip {
   position: fixed;
