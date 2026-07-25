@@ -333,6 +333,23 @@ body.editor-open {
   cursor: pointer;
 }
 
+/* Show/Hide password toggle inside sign-in and set-password fields */
+.password-wrap { position: relative; }
+.password-wrap .signin-input { width: 100%; padding-right: 58px; }
+.password-toggle {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  border: none;
+  background: none;
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 4px 6px;
+}
+
 /* Tap a Shared pill → bubble listing who the note is shared with */
 .shared-tooltip {
   position: fixed;

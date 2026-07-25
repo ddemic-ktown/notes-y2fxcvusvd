@@ -26,7 +26,10 @@
       <h1>JobPilot</h1>
       <p>Sign in to access your notes from any device.</p>
       <input id="signin-email" class="signin-input" type="email" placeholder="Email" autocomplete="email" />
-      <input id="signin-password" class="signin-input" type="password" placeholder="Password" autocomplete="current-password" />
+      <div class="password-wrap">
+        <input id="signin-password" class="signin-input" type="password" placeholder="Password" autocomplete="current-password" />
+        <button id="signin-password-toggle" class="password-toggle" type="button" aria-label="Show password">Show</button>
+      </div>
       <button id="email-signin-btn" class="primary">Sign in</button>
       <button id="forgot-password-btn" class="signin-link-btn" type="button">Forgot password? Email me a sign-in link</button>
       <div class="signin-divider"><span>or</span></div>
@@ -44,7 +47,10 @@
         <h2 class="modal-title">Set a password</h2>
       </div>
       <p class="modal-hint">Set a password so you can sign in without an email link next time.</p>
-      <input id="set-password-input" class="signin-input" type="password" placeholder="New password (min 6 characters)" autocomplete="new-password" />
+      <div class="password-wrap">
+        <input id="set-password-input" class="signin-input" type="password" placeholder="New password (min 6 characters)" autocomplete="new-password" />
+        <button id="set-password-toggle" class="password-toggle" type="button" aria-label="Show passwords">Show</button>
+      </div>
       <input id="set-password-confirm" class="signin-input" type="password" placeholder="Confirm password" autocomplete="new-password" />
       <p id="set-password-error" class="signin-error" role="alert"></p>
       <div class="modal-actions">

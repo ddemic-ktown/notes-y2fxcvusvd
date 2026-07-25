@@ -13,6 +13,9 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 10, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.07.25-1136', 'Opening a note from home search highlights the search term inside the note'],
+  ['v2026.07.25-1128', 'Show/Hide password button on the sign-in screen and the set-password prompt'],
+  ['v2026.07.25-1127', 'Checking a box keeps the cursor in place while the line sinks to the paragraph bottom'],
   ['v2026.07.25-1050', 'Notes can be reassigned to a different customer from the three-dot menu'],
   ['v2026.07.25-1042', 'Fixed: hidden menu items and controls can no longer leak into view'],
   ['v2026.07.25-1037', 'Fixed: Shared pill no longer shows in the editor on notes that are not shared'],
@@ -20,9 +23,6 @@ const CHANGELOG = [
   ['v2026.07.25-0945', 'New setting: move checked items to the bottom of their paragraph (per device)'],
   ['v2026.07.24-2310', 'Aggregator keywords open one editable note; edits save back to each customer note'],
   ['v2026.07.18-0352', 'Tap a Shared pill to see who the note is shared with'],
-  ['v2026.07.18-0327', 'Shared pill only counts employees/customers; bookkeepers removed from share list'],
-  ['v2026.07.18-0313', 'PDFs and documents open in a viewer tab instead of downloading a copy'],
-  ['v2026.07.18-0250', 'Swipe left/right in the photo viewer to move between pictures'],
 ];
 const APP_VERSION = CHANGELOG[0][0];
 
@@ -1088,6 +1088,19 @@ function renderHomeSearchResults(term) {
         returnScreen = note.customerId ? 'customer-notes' : 'notes';
         if (note.customerId) activeCustomerId = note.customerId;
         showEditor(note, 'note');
+        // Carry the home search into the note: pre-fill the in-note search and
+        // highlight the first instance. Home search matches words scattered
+        // anywhere, in-note search is a phrase — if the full phrase isn't in
+        // this note, fall back to the first word.
+        const phrase = term.trim();
+        const haystack = (note.body || '').toLowerCase();
+        const query = haystack.includes(phrase.toLowerCase()) ? phrase : words[0];
+        noteSearchInput.value = query;
+        findMatches(query);
+        // gotoMatch scrolls via the highlight overlay — wait for layout
+        // (showEditor's own cursor-hint timer is skipped: no hint passed).
+        if (searchMatches.length > 0) setTimeout(() => gotoMatch(0), 80);
+        else { updateSearchCount(); renderHighlights(); }
       }
     });
   });
@@ -1858,10 +1871,11 @@ function sinkCheckedLines(pos) {
   const sorted = para.filter(p => !checkedRe.test(p.text)).concat(para.filter(p => checkedRe.test(p.text)));
   if (sorted.every((p, i) => p.orig === start + i)) return; // already in order
   const newLines = lines.slice(0, start).concat(sorted.map(p => p.text), lines.slice(end + 1));
-  const newIdx = start + sorted.findIndex(p => p.orig === idx);
+  // The cursor stays put: same line NUMBER and column as before the sink (the
+  // line that slid up now sits under the cursor) — no focus/scroll jump.
   let newPos = 0;
-  for (let i = 0; i < newIdx; i++) newPos += newLines[i].length + 1;
-  newPos += Math.min(off, newLines[newIdx].length);
+  for (let i = 0; i < idx; i++) newPos += newLines[i].length + 1;
+  newPos += Math.min(off, newLines[idx].length);
   bodyInput.value = newLines.join('\n');
   bodyInput.selectionStart = bodyInput.selectionEnd = newPos;
 }
@@ -2302,6 +2316,23 @@ async function completeEmailLinkSignin() {
     window.history.replaceState({ screen: 'home' }, document.title, window.location.origin + window.location.pathname);
   }
 }
+// Show/Hide password toggles — the set-password one flips both fields at once
+function wirePasswordToggle(toggleId, inputIds) {
+  const btn = document.getElementById(toggleId);
+  if (!btn) return;
+  btn.addEventListener('click', () => {
+    const show = btn.textContent === 'Show';
+    inputIds.forEach(id => {
+      const inp = document.getElementById(id);
+      if (inp) inp.type = show ? 'text' : 'password';
+    });
+    btn.textContent = show ? 'Hide' : 'Show';
+    btn.setAttribute('aria-label', (show ? 'Hide' : 'Show') + ' password');
+  });
+}
+wirePasswordToggle('signin-password-toggle', ['signin-password']);
+wirePasswordToggle('set-password-toggle', ['set-password-input', 'set-password-confirm']);
+
 const emailLinkSigninReady = completeEmailLinkSignin();
 if (signoutBtn) {
   signoutBtn.addEventListener('click', async () => { await signOut(auth); });
