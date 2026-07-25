@@ -13,6 +13,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 10, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.07.25-1251', 'Redo button joins undo in the editor'],
   ['v2026.07.25-1231', 'Undo button in the editor — one word or action per tap'],
   ['v2026.07.25-1211', 'Tutorial split into three short parts, covering the newest features'],
   ['v2026.07.25-1206', 'Search fields show an always-visible ✕ clear button'],
@@ -22,7 +23,6 @@ const CHANGELOG = [
   ['v2026.07.25-1127', 'Checking a box keeps the cursor in place while the line sinks to the paragraph bottom'],
   ['v2026.07.25-1050', 'Notes can be reassigned to a different customer from the three-dot menu'],
   ['v2026.07.25-1042', 'Fixed: hidden menu items and controls can no longer leak into view'],
-  ['v2026.07.25-1037', 'Fixed: Shared pill no longer shows in the editor on notes that are not shared'],
 ];
 const APP_VERSION = CHANGELOG[0][0];
 
@@ -465,6 +465,7 @@ function showAggregator(keyword) {
   resetUndo();
   lastKnownRemoteBody = null; // compiled editor has its own conflict handling
   if (undoBtn) undoBtn.style.display = bodyInput.readOnly ? 'none' : '';
+  if (redoBtn) redoBtn.style.display = bodyInput.readOnly ? 'none' : '';
   deleteBtn.style.display = 'none';
   customerLinkBtn.hidden = true;
   delete customerLinkBtn.dataset.customerId;
@@ -938,6 +939,7 @@ function showEditor(record, type, cursorHint) {
   // Checkbox toolbar button mutates the note — hide it for read-only roles
   if (checkboxBtn) checkboxBtn.style.display = readOnly ? 'none' : '';
   if (undoBtn) undoBtn.style.display = (showNoteOnly && !readOnly) ? '' : 'none';
+  if (redoBtn) redoBtn.style.display = (showNoteOnly && !readOnly) ? '' : 'none';
   // Shared badge in the editor header
   const editorSharedBadge = document.getElementById('editor-shared-badge');
   if (editorSharedBadge) {
@@ -1875,18 +1877,27 @@ bodyInput.addEventListener('click', () => {
 // browser's native undo, so the app keeps its own. One snapshot per word typed
 // or per action; capped at 100; cleared per note and on remote changes.
 const undoBtn = document.getElementById('undo-btn');
+const redoBtn = document.getElementById('redo-btn');
 const editorToast = document.getElementById('editor-toast');
 let undoStack = [];
+let redoStack = [];
 let undoLastRunType = null;
 let lastKnownRemoteBody = null; // body as last loaded/saved — detects remote edits
 let editorToastTimer = null;
 
-function updateUndoBtn() { if (undoBtn) undoBtn.disabled = undoStack.length === 0; }
-function resetUndo() { undoStack = []; undoLastRunType = null; updateUndoBtn(); }
+function updateUndoBtn() {
+  if (undoBtn) undoBtn.disabled = undoStack.length === 0;
+  if (redoBtn) redoBtn.disabled = redoStack.length === 0;
+}
+function resetUndo() { undoStack = []; redoStack = []; undoLastRunType = null; updateUndoBtn(); }
+function snapshotState() {
+  return { text: bodyInput.value, selStart: bodyInput.selectionStart, selEnd: bodyInput.selectionEnd };
+}
 function pushUndo() {
   if (!currentId) return;
-  undoStack.push({ text: bodyInput.value, selStart: bodyInput.selectionStart, selEnd: bodyInput.selectionEnd });
+  undoStack.push(snapshotState());
   if (undoStack.length > 100) undoStack.shift();
+  redoStack = []; // a new edit discards the redo branch
   updateUndoBtn();
 }
 function showEditorToast(msg) {
@@ -1896,9 +1907,7 @@ function showEditorToast(msg) {
   if (editorToastTimer) clearTimeout(editorToastTimer);
   editorToastTimer = setTimeout(() => { editorToast.hidden = true; }, 3000);
 }
-function doUndo() {
-  if (!undoStack.length || !currentId) return;
-  const snap = undoStack.pop();
+function restoreSnapshot(snap) {
   bodyInput.value = snap.text;
   const s = snap.selStart == null ? snap.text.length : snap.selStart;
   const e = snap.selEnd == null ? snap.text.length : snap.selEnd;
@@ -1907,6 +1916,19 @@ function doUndo() {
   updateUndoBtn();
   // The input event refreshes search highlights and schedules the save
   bodyInput.dispatchEvent(new Event('input', { bubbles: true }));
+}
+function doUndo() {
+  if (!undoStack.length || !currentId) return;
+  const snap = undoStack.pop();
+  redoStack.push(snapshotState());
+  restoreSnapshot(snap);
+}
+function doRedo() {
+  if (!redoStack.length || !currentId) return;
+  const snap = redoStack.pop();
+  undoStack.push(snapshotState());
+  if (undoStack.length > 100) undoStack.shift();
+  restoreSnapshot(snap);
 }
 
 // Typing granularity: snapshot at word boundaries, on insert/delete direction
@@ -1928,13 +1950,18 @@ if (undoBtn) {
   undoBtn.addEventListener('pointerdown', (e) => e.preventDefault());
   undoBtn.addEventListener('click', doUndo);
 }
+if (redoBtn) {
+  redoBtn.addEventListener('pointerdown', (e) => e.preventDefault());
+  redoBtn.addEventListener('click', doRedo);
+}
 
-// Desktop Ctrl/Cmd+Z routes to our stack (the native one is unreliable here)
+// Desktop shortcuts route to our stacks (the native ones are unreliable here):
+// Ctrl/Cmd+Z = undo, Ctrl/Cmd+Shift+Z or Ctrl+Y = redo
 bodyInput.addEventListener('keydown', (e) => {
-  if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'z') {
-    e.preventDefault();
-    doUndo();
-  }
+  if (!(e.ctrlKey || e.metaKey)) return;
+  const k = e.key.toLowerCase();
+  if (k === 'z' && !e.shiftKey) { e.preventDefault(); doUndo(); }
+  else if ((k === 'z' && e.shiftKey) || k === 'y') { e.preventDefault(); doRedo(); }
 });
 
 // ---------- move checked items to paragraph bottom (per-device setting) ----------
