@@ -13,6 +13,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 10, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.07.25-1037', 'Fixed: Shared pill no longer shows in the editor on notes that are not shared'],
   ['v2026.07.25-1024', 'Users list can set the Bookkeeper role; Shared pill tap always shows who has access'],
   ['v2026.07.25-0945', 'New setting: move checked items to the bottom of their paragraph (per device)'],
   ['v2026.07.24-2310', 'Aggregator keywords open one editable note; edits save back to each customer note'],
@@ -22,7 +23,6 @@ const CHANGELOG = [
   ['v2026.07.18-0250', 'Swipe left/right in the photo viewer to move between pictures'],
   ['v2026.07.18-0247', 'Back button closes the photo viewer, then the file grid, step by step'],
   ['v2026.07.18-0204', 'Files card opens a full-screen photo grid with a 2/3-column switch'],
-  ['v2026.07.14-1950', 'Files card sits below the customer default note, collapsed until tapped'],
 ];
 const APP_VERSION = CHANGELOG[0][0];
 

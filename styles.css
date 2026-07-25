@@ -315,6 +315,7 @@ body.editor-open {
   transition: outline-color 0.3s;
 }
 
+.shared-badge[hidden] { display: none; }
 .shared-badge {
   display: inline-block;
   background: var(--accent);
