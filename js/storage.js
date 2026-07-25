@@ -274,7 +274,12 @@ export const Storage = {
   assignNoteToCustomer(noteId, customerId) {
     const i = _cache.notes.findIndex(n => n.id === noteId);
     if (i === -1) return null;
-    const next = { ..._cache.notes[i], customerId, updated: nowIso() };
+    // Stamp the denormalized customer name so non-admin viewers see the
+    // NEW customer, not a stale snapshot from before the move.
+    const next = {
+      ..._cache.notes[i], customerId, updated: nowIso(),
+      customerName: this.getCustomerNameSnapshot(customerId),
+    };
     _cache.notes[i] = next;
     emit();
     setDoc(doc(notesCol(), noteId), stripId(next)).catch(err => console.warn("assignNoteToCustomer", err));
