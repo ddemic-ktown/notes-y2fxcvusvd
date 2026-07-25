@@ -13,6 +13,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 10, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.07.25-1024', 'Users list can set the Bookkeeper role; Shared pill tap always shows who has access'],
   ['v2026.07.25-0945', 'New setting: move checked items to the bottom of their paragraph (per device)'],
   ['v2026.07.24-2310', 'Aggregator keywords open one editable note; edits save back to each customer note'],
   ['v2026.07.18-0352', 'Tap a Shared pill to see who the note is shared with'],
@@ -22,7 +23,6 @@ const CHANGELOG = [
   ['v2026.07.18-0247', 'Back button closes the photo viewer, then the file grid, step by step'],
   ['v2026.07.18-0204', 'Files card opens a full-screen photo grid with a 2/3-column switch'],
   ['v2026.07.14-1950', 'Files card sits below the customer default note, collapsed until tapped'],
-  ['v2026.07.14-1943', 'Per-customer files: photos/documents stored on this device, shareable via share sheet'],
 ];
 const APP_VERSION = CHANGELOG[0][0];
 
@@ -2363,14 +2363,24 @@ function hideSharedTooltip() {
 }
 
 function showSharedTooltip(pillEl, note) {
-  if (!sharedTooltip || !note) return;
-  const people = (note.assignedTo || [])
-    .map(uid => Storage.getMember(uid))
-    .filter(m => m && (m.role === 'employee' || m.role === 'customer'));
-  if (people.length === 0) return;
-  sharedTooltip.innerHTML = 'Shared with:<br>' + people.map(m =>
-    `${escapeHtml(m.name || m.email || m.uid)}<span class="tooltip-role">${m.role}</span>`
-  ).join('<br>');
+  if (!sharedTooltip) return;
+  // Always show SOMETHING on tap — silent no-shows made the pill impossible
+  // to diagnose. List every assigned entry, including admins/bookkeepers and
+  // uids that no longer resolve to a member ("removed user").
+  let html;
+  if (!note) {
+    html = "Couldn't load this note.";
+  } else {
+    const entries = (note.assignedTo || []).map(uid => {
+      const m = Storage.getMember(uid);
+      if (!m) return `<em>removed user</em><span class="tooltip-role">${escapeHtml(uid.slice(0, 8))}…</span>`;
+      return `${escapeHtml(m.name || m.email || m.uid)}<span class="tooltip-role">${escapeHtml(m.role)}</span>`;
+    });
+    html = entries.length === 0
+      ? 'Not shared with anyone.'
+      : 'Shared with:<br>' + entries.join('<br>');
+  }
+  sharedTooltip.innerHTML = html;
   sharedTooltip.hidden = false;
   // Position above the pill, clamped to the viewport; below it if no room
   const r = pillEl.getBoundingClientRect();
@@ -2416,6 +2426,7 @@ function renderMembersList() {
       <select class="member-role-select" data-uid="${m.uid}" ${m.uid === currentUid ? 'disabled' : ''}>
         <option value="admin" ${m.role === 'admin' ? 'selected' : ''}>Admin</option>
         <option value="employee" ${m.role === 'employee' ? 'selected' : ''}>Employee</option>
+        <option value="bookkeeper" ${m.role === 'bookkeeper' ? 'selected' : ''}>Bookkeeper</option>
         <option value="customer" ${m.role === 'customer' ? 'selected' : ''}>Customer</option>
       </select>
       ${m.uid !== currentUid ? `<button class="member-remove-btn" data-uid="${m.uid}" title="Remove">✕</button>` : ''}
