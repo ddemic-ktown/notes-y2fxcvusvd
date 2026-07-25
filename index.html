@@ -71,6 +71,7 @@
       <div class="search-wrap">
         <input id="home-search-input" class="search-input home-search-input" type="search" placeholder="Search all notes…" autocomplete="off" />
         <button class="search-clear" type="button" aria-label="Clear search" hidden>✕</button>
+        <button class="search-open icon-btn" type="button" aria-label="Open search">🔍</button>
       </div>
     </header>
     <main id="notes-list" class="notes-list">
@@ -94,6 +95,7 @@
         <div class="search-wrap" style="flex:1;">
           <input id="customer-search" class="search-input" type="search" placeholder="Search customers" autocomplete="off" />
           <button class="search-clear" type="button" aria-label="Clear search" hidden>✕</button>
+          <button class="search-open icon-btn" type="button" aria-label="Open search">🔍</button>
         </div>
       </div>
     </header>
@@ -114,6 +116,7 @@
         <div class="search-wrap" style="flex:1;">
           <input id="customer-notes-search" class="search-input" type="search" placeholder="Search notes…" autocomplete="off" />
           <button class="search-clear" type="button" aria-label="Clear search" hidden>✕</button>
+          <button class="search-open icon-btn" type="button" aria-label="Open search">🔍</button>
         </div>
       </div>
     </header>
@@ -290,6 +293,14 @@
         <p class="muted" style="font-size:13px; margin:4px 0 0;">Applies when you tap a checkbox. Saved on this device only.</p>
       </div>
 
+      <div class="setting-row">
+        <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+          <input id="setting-collapse-search" type="checkbox" />
+          Show search bars as a magnifying glass
+        </label>
+        <p class="muted" style="font-size:13px; margin:4px 0 0;">Empty search bars collapse to a 🔍 icon; tap to open. Saved on this device only.</p>
+      </div>
+
       <div class="setting-row setting-list-row" data-staff-only>
         <h3 class="setting-list-title">Users</h3>
         <ul id="members-list" class="members-list"></ul>
@@ -364,6 +375,7 @@
         <div class="search-wrap">
           <input id="note-search-input" class="search-input note-search-input" type="search" placeholder="Find in note" autocomplete="off" />
           <button class="search-clear" type="button" aria-label="Clear search" hidden>✕</button>
+          <button class="search-open icon-btn" type="button" aria-label="Open search">🔍</button>
         </div>
         <span id="note-search-count" class="search-count"></span>
         <button id="search-prev-btn" class="icon-btn" aria-label="Previous match">↑</button>

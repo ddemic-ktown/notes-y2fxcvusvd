@@ -13,6 +13,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 10, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.07.25-1407', 'Search arrows show only with 2+ hits; optional 🔍-collapsed search bars'],
   ['v2026.07.25-1251', 'Redo button joins undo in the editor'],
   ['v2026.07.25-1231', 'Undo button in the editor — one word or action per tap'],
   ['v2026.07.25-1211', 'Tutorial split into three short parts, covering the newest features'],
@@ -22,7 +23,6 @@ const CHANGELOG = [
   ['v2026.07.25-1128', 'Show/Hide password button on the sign-in screen and the set-password prompt'],
   ['v2026.07.25-1127', 'Checking a box keeps the cursor in place while the line sinks to the paragraph bottom'],
   ['v2026.07.25-1050', 'Notes can be reassigned to a different customer from the three-dot menu'],
-  ['v2026.07.25-1042', 'Fixed: hidden menu items and controls can no longer leak into view'],
 ];
 const APP_VERSION = CHANGELOG[0][0];
 
@@ -455,10 +455,11 @@ function showAggregator(keyword) {
     backBtn.style.display = '';
   }
   resetNoteSearch();
-  noteSearchInput.style.display = '';
+  const aggSearchWrap = noteSearchInput.closest('.search-wrap');
+  if (aggSearchWrap) aggSearchWrap.style.display = '';
   noteSearchCount.style.display = '';
-  searchPrevBtn.style.display = '';
-  searchNextBtn.style.display = '';
+  searchPrevBtn.style.display = 'none';
+  searchNextBtn.style.display = 'none';
   if (editorMoreBtn) editorMoreBtn.closest('.editor-more-wrap').style.display = 'none';
   closeMoreDropdown();
   if (checkboxBtn) checkboxBtn.style.display = bodyInput.readOnly ? 'none' : '';
@@ -821,6 +822,8 @@ function showSettings() {
   if (accountEmailEl && auth.currentUser) accountEmailEl.textContent = auth.currentUser.email || '';
   const moveCheckedInput = document.getElementById('setting-move-checked');
   if (moveCheckedInput) moveCheckedInput.checked = getMoveCheckedToBottom();
+  const collapseSearchInput = document.getElementById('setting-collapse-search');
+  if (collapseSearchInput) collapseSearchInput.checked = getCollapseSearch();
   settingsView.classList.add('active');
   if (!handlingPopstate) history.pushState({ screen: 'settings' }, '');
   applyTheme(localStorage.getItem('na-theme') || 'dark');
@@ -925,10 +928,13 @@ function showEditor(record, type, cursorHint) {
 
   resetNoteSearch();
   const showNoteOnly = (type === 'note');
-  noteSearchInput.style.display = showNoteOnly ? '' : 'none';
+  // Hide the whole search wrap (incl. the collapsed 🔍) for customer records
+  const noteSearchWrap = noteSearchInput.closest('.search-wrap');
+  if (noteSearchWrap) noteSearchWrap.style.display = showNoteOnly ? '' : 'none';
   noteSearchCount.style.display = showNoteOnly ? '' : 'none';
-  searchPrevBtn.style.display = showNoteOnly ? '' : 'none';
-  searchNextBtn.style.display = showNoteOnly ? '' : 'none';
+  // Arrows appear only with an active search and 2+ hits (updateSearchCount)
+  searchPrevBtn.style.display = 'none';
+  searchNextBtn.style.display = 'none';
   if (editorMoreBtn) editorMoreBtn.closest('.editor-more-wrap').style.display = (showNoteOnly && !isReadOnlyRole()) ? '' : 'none';
   closeMoreDropdown();
 
@@ -1770,6 +1776,10 @@ function updateSearchCount() {
   if (!noteSearchInput.value) noteSearchCount.textContent = '';
   else if (searchMatches.length === 0) noteSearchCount.textContent = '0';
   else noteSearchCount.textContent = `${searchIndex + 1}/${searchMatches.length}`;
+  // Prev/next arrows only make sense with an active search and 2+ hits
+  const showNav = !!noteSearchInput.value && searchMatches.length > 1;
+  searchPrevBtn.style.display = showNav ? '' : 'none';
+  searchNextBtn.style.display = showNav ? '' : 'none';
 }
 function gotoMatch(index) {
   if (searchMatches.length === 0) { updateSearchCount(); renderHighlights(); return; }
@@ -2455,6 +2465,7 @@ function refreshSearchClears() {
     const btn = wrap ? wrap.querySelector('.search-clear') : null;
     if (btn) btn.hidden = !input.value;
   });
+  refreshSearchCollapse();
 }
 
 SEARCH_CLEAR_IDS.forEach(id => {
@@ -2470,6 +2481,42 @@ SEARCH_CLEAR_IDS.forEach(id => {
     btn.hidden = true;
   });
 });
+
+// ---------- collapsible search bars (per-device setting) ----------
+// When enabled, an EMPTY, unfocused search bar collapses to a 🔍 icon;
+// tapping the icon expands and focuses it. Bars with text stay expanded.
+const COLLAPSIBLE_SEARCH_IDS = ['home-search-input', 'customer-search', 'customer-notes-search', 'note-search-input'];
+
+function getCollapseSearch() { return localStorage.getItem('na-collapse-search') === '1'; }
+
+function syncSearchCollapse(input) {
+  const wrap = input.closest('.search-wrap');
+  if (!wrap || !wrap.querySelector('.search-open')) return;
+  const collapsed = getCollapseSearch() && !input.value && document.activeElement !== input;
+  wrap.classList.toggle('collapsed', collapsed);
+}
+
+function refreshSearchCollapse() {
+  COLLAPSIBLE_SEARCH_IDS.forEach(id => {
+    const input = document.getElementById(id);
+    if (input) syncSearchCollapse(input);
+  });
+}
+
+COLLAPSIBLE_SEARCH_IDS.forEach(id => {
+  const input = document.getElementById(id);
+  const wrap = input ? input.closest('.search-wrap') : null;
+  const openBtn = wrap ? wrap.querySelector('.search-open') : null;
+  if (!openBtn) return;
+  openBtn.addEventListener('click', () => {
+    wrap.classList.remove('collapsed');
+    input.focus();
+  });
+  input.addEventListener('input', () => syncSearchCollapse(input));
+  input.addEventListener('focus', () => syncSearchCollapse(input));
+  input.addEventListener('blur', () => syncSearchCollapse(input));
+});
+refreshSearchCollapse();
 
 // Show/Hide password toggles — the set-password one flips both fields at once
 function wirePasswordToggle(toggleId, inputIds) {
@@ -2709,6 +2756,14 @@ const moveCheckedToggle = document.getElementById('setting-move-checked');
 if (moveCheckedToggle) {
   moveCheckedToggle.addEventListener('change', () => {
     localStorage.setItem('na-move-checked', moveCheckedToggle.checked ? '1' : '0');
+  });
+}
+
+const collapseSearchToggle = document.getElementById('setting-collapse-search');
+if (collapseSearchToggle) {
+  collapseSearchToggle.addEventListener('change', () => {
+    localStorage.setItem('na-collapse-search', collapseSearchToggle.checked ? '1' : '0');
+    refreshSearchCollapse();
   });
 }
 

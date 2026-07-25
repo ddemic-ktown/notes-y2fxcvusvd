@@ -850,6 +850,19 @@ input[type="search"]::-webkit-search-cancel-button {
   cursor: pointer;
   padding: 6px 8px;
 }
+/* Collapsed search (optional setting): empty bars shrink to a 🔍 icon */
+.search-wrap .search-open { display: none; }
+.search-wrap.collapsed { flex: 0 0 auto; }
+.search-wrap.collapsed .search-input,
+.search-wrap.collapsed .search-clear { display: none; }
+.search-wrap.collapsed .search-open {
+  display: block;
+  border: none;
+  background: none;
+  font-size: 17px;
+  cursor: pointer;
+  padding: 6px 8px;
+}
 
 /* Segmented sort buttons */
 .sort-group {
