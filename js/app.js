@@ -13,6 +13,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 10, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.07.28-2322', 'Every screen shows a Home › Customers › … trail so you always know where you are'],
   ['v2026.07.28-2308', 'Tutorial now describes the + menu on the home screen'],
   ['v2026.07.28-2253', 'Clearer wording: only the first note’s title is used as the customer’s name'],
   ['v2026.07.28-2250', 'Fixed: the + button disappeared while the tutorial highlighted it'],
@@ -22,7 +23,6 @@ const CHANGELOG = [
   ['v2026.07.28-2203', 'Sample data you can add or remove, a welcome offer on an empty app, smoother tutorial'],
   ['v2026.07.28-2153', 'A customer note can be turned back into a general note from the assign picker'],
   ['v2026.07.28-2152', 'Employees no longer see a customer link that led to an error'],
-  ['v2026.07.28-2151', 'Tutorial wording tightened; undo/redo, orphaned notes and replay steps added'],
 ];
 const APP_VERSION = CHANGELOG[0][0];
 
@@ -35,7 +35,6 @@ const customersView = document.getElementById('customers-view');
 const customerNotesView = document.getElementById('customer-notes-view');
 const settingsView = document.getElementById('settings-view');
 const sectionView = document.getElementById('section-view');
-const sectionViewTitle = document.getElementById('section-view-title');
 const sectionViewList = document.getElementById('section-view-list');
 const sectionViewControls = document.getElementById('section-view-controls');
 const editorView = document.getElementById('editor-view');
@@ -60,7 +59,6 @@ const accountEmailEl = document.getElementById('account-email');
 const notesList = document.getElementById('notes-list');
 const customersList = document.getElementById('customers-list');
 const customerNotesList = document.getElementById('customer-notes-list');
-const customerNotesTitle = document.getElementById('customer-notes-title');
 
 const titleInput = document.getElementById('editor-title');
 const bodyInput = document.getElementById('editor-body');
@@ -86,7 +84,6 @@ const importCsvBtn = document.getElementById('import-csv-btn');
 const importHasHeader = document.getElementById('import-has-header');
 const importStatus = document.getElementById('import-status');
 const checkboxBtn = document.getElementById('checkbox-btn');
-const customerLinkBtn = document.getElementById('customer-link-btn');
 const dateTodayBtn = document.getElementById('date-today-btn');
 const datePickerBtn = document.getElementById('date-picker-btn');
 const editorMoreBtn = document.getElementById('editor-more-btn');
@@ -418,6 +415,38 @@ document.querySelectorAll('.app-back-btn').forEach(btn => {
 });
 updateAppBackButtons();
 
+// ---------- breadcrumbs ----------
+// Every screen's sticky header carries a trail: Home › Customers › John Canuck.
+// Earlier crumbs are tappable shortcuts; the last one is the current screen
+// (bold, not tappable) so you still know where you are after scrolling.
+// These replace the per-screen Home buttons and the editor's "Go to:" button.
+function renderCrumbs(containerId, crumbs) {
+  const el = document.getElementById(containerId);
+  if (!el) return;
+  el.innerHTML = crumbs.map((c, i) => {
+    const last = i === crumbs.length - 1;
+    const sep = i > 0 ? '<span class="crumb-sep" aria-hidden="true">›</span>' : '';
+    if (last) return `${sep}<span class="crumb crumb-current" aria-current="page">${escapeHtml(c.label)}</span>`;
+    return `${sep}<button type="button" class="crumb crumb-link" data-go="${c.go}"${c.id ? ` data-id="${c.id}"` : ''}>${escapeHtml(c.label)}</button>`;
+  }).join('');
+  el.querySelectorAll('.crumb-link').forEach(btn => {
+    btn.addEventListener('click', () => {
+      // Leaving the editor must flush saves, exactly like the old Home button
+      if (editorView.classList.contains('active')) commitAndCleanupEditor();
+      const go = btn.dataset.go;
+      if (go === 'home') goHome();
+      else if (go === 'customers') showCustomers();
+      else if (go === 'customer' && btn.dataset.id) showCustomerNotes(btn.dataset.id);
+      else if (go === 'section' && btn.dataset.id) showSection(btn.dataset.id);
+    });
+  });
+}
+function customerCrumbLabel(customerId) {
+  const def = customerId ? Storage.getDefaultNoteForCustomer(customerId) : null;
+  const name = def ? (splitTitleAndBody(def.body).title || '').trim() : '';
+  return name || 'Unnamed customer';
+}
+
 // ---------- scroll memory ----------
 // Leaving a list screen remembers where you were; coming back restores it, so
 // the back button doesn't dump you at the top. Home buttons clear the memory
@@ -552,11 +581,13 @@ function showAggregator(keyword) {
   if (undoBtn) undoBtn.style.display = bodyInput.readOnly ? 'none' : '';
   if (redoBtn) redoBtn.style.display = bodyInput.readOnly ? 'none' : '';
   deleteBtn.style.display = 'none';
-  customerLinkBtn.hidden = true;
-  delete customerLinkBtn.dataset.customerId;
   const editorSharedBadge = document.getElementById('editor-shared-badge');
   if (editorSharedBadge) editorSharedBadge.hidden = true;
 
+  renderCrumbs('crumbs-editor', [
+    { label: 'Home', go: 'home' },
+    { label: keyword },
+  ]);
   compiledIssues = { count: null, names: [], notFound: [] };
   renderCompiledWarning();
 
@@ -771,7 +802,7 @@ function showSection(key) {
   hideAllScreens();
   activeSectionKey = key;
   const titles = { aggregator: 'Aggregators', recent: "Recent Customer's Notes", notes: 'General Notes' };
-  sectionViewTitle.textContent = titles[key] || key;
+  renderCrumbs('crumbs-section', [{ label: 'Home', go: 'home' }, { label: titles[key] || key }]);
   renderSectionView(key);
   sectionView.classList.add('active');
   restoreScroll('section:' + key);
@@ -898,6 +929,7 @@ function renderSectionView(key) {
 
 function showSettings() {
   hideAllScreens();
+  renderCrumbs('crumbs-settings', [{ label: 'Home', go: 'home' }, { label: 'Settings' }]);
   window.scrollTo(0, 0);
   renderKeywordList();
   renderEmployeeList();
@@ -931,6 +963,7 @@ function showCustomers() {
   activeCustomerId = null;
   hideAllScreens();
   customersView.classList.add('active');
+  renderCrumbs('crumbs-customers', [{ label: 'Home', go: 'home' }, { label: 'Customers' }]);
   renderCustomersList();
   restoreScroll('customers');
   if (isDesktop) setTimeout(() => customerSearchInput.focus(), 50);
@@ -953,7 +986,11 @@ function showCustomerNotes(customerId, returnTo) {
   returnScreen = 'customer-notes';
   customerNotesReturnTo = returnTo || { screen: 'customers' };
   renderCustomerFiles(customerId);
-  customerNotesTitle.textContent = title.trim() ? title.trim() : 'Unnamed customer';
+  renderCrumbs('crumbs-customer-notes', [
+    { label: 'Home', go: 'home' },
+    { label: 'Customers', go: 'customers' },
+    { label: title.trim() || 'Unnamed customer' },
+  ]);
   hideAllScreens();
   customerNotesView.classList.add('active');
   renderCustomerNotesList(customerId);
@@ -1016,21 +1053,15 @@ function showEditor(record, type, cursorHint) {
     editorSharedBadge.hidden = !(isAdminRole() && isShared);
   }
 
-  const sameAsBack = returnScreen === 'customer-notes'
-    && record.customerId && record.customerId === activeCustomerId;
-  // Only roles that can READ the customers collection get the link — employees
-  // and customers can't, so for them it showed "Go to: Customer" and led to a
-  // bogus "this customer no longer exists" alert.
-  if (type === 'note' && record.customerId && !sameAsBack && canViewAllRole()) {
-    const def = Storage.getDefaultNoteForCustomer(record.customerId);
-    const name = def ? splitTitleAndBody(def.body).title.trim() : '';
-    customerLinkBtn.textContent = 'Go to: ' + ((name && name.length > 0) ? name : 'Customer');
-    customerLinkBtn.dataset.customerId = record.customerId;
-    customerLinkBtn.hidden = false;
-  } else {
-    customerLinkBtn.hidden = true;
-    delete customerLinkBtn.dataset.customerId;
+  // Breadcrumb: Home › Customers › <name> › Note. Only roles that can READ the
+  // customers collection get the customer crumbs (employees/customers can't).
+  const editorCrumbs = [{ label: 'Home', go: 'home' }];
+  if (type === 'note' && record.customerId && canViewAllRole()) {
+    editorCrumbs.push({ label: 'Customers', go: 'customers' });
+    editorCrumbs.push({ label: customerCrumbLabel(record.customerId), go: 'customer', id: record.customerId });
   }
+  editorCrumbs.push({ label: type === 'note' ? (currentIsDefault ? 'Customer details' : 'Note') : 'Customer' });
+  renderCrumbs('crumbs-editor', editorCrumbs);
 
   // Delete is admin-only (and never on default notes)
   deleteBtn.style.display = (isAdminRole() && !(type === 'note' && currentIsDefault)) ? '' : 'none';
@@ -1624,11 +1655,6 @@ function goHome() {
   // no button or prompt needed.
   if (swReg) swReg.update().catch(() => {});
 }
-document.querySelectorAll('.home-btn').forEach(btn => {
-  btn.addEventListener('click', goHome);
-});
-const editorHomeBtnEl = document.getElementById('editor-home-btn');
-if (editorHomeBtnEl) editorHomeBtnEl.addEventListener('click', () => { commitAndCleanupEditor(); goHome(); });
 
 keywordAddBtn.addEventListener('click', async () => {
   if (await addKeyword(keywordInput.value)) {
@@ -1904,18 +1930,6 @@ bodyInput.addEventListener('input', () => {
     if (searchIndex >= searchMatches.length) searchIndex = Math.max(0, searchMatches.length - 1);
     updateSearchCount();
   }
-});
-
-customerLinkBtn.addEventListener('click', () => {
-  const cid = customerLinkBtn.dataset.customerId;
-  if (!cid) return;
-  if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
-  commitSave();
-  const returnTo = { screen: 'customers' };
-  currentId = null;
-  currentType = null;
-  currentIsDefault = false;
-  showCustomerNotes(cid, returnTo);
 });
 
 // Whether the textarea was already focused BEFORE this tap (pointerdown fires
@@ -3685,6 +3699,7 @@ function updateOrphanDeleteBtn() {
 function showOrphanNotes() {
   hideAllScreens();
   orphanView.classList.add('active');
+  renderCrumbs('crumbs-orphans', [{ label: 'Home', go: 'home' }, { label: 'Orphaned Notes' }]);
   restoreScroll('orphans');
   if (!handlingPopstate) history.pushState({ screen: 'orphans' }, '');
   renderOrphanList();
@@ -3787,8 +3802,8 @@ function tutorialSteps(part) {
       screen: 'customer-notes',
       group: 'customer',
       requires: () => Storage.listCustomers().length > 0,
-      target: () => document.querySelector('#customer-notes-view .home-btn'),
-      text: 'Tap Home on any screen to come back to the home screen.',
+      target: () => document.querySelector('#crumbs-customer-notes'),
+      text: 'The trail at the top always shows where you are. Tap an earlier step — Home, Customers — to go back there.',
     },
   ];
 
@@ -3866,8 +3881,8 @@ function tutorialSteps(part) {
         showEditor(recent[0], 'note');
         return true;
       },
-      target: () => document.getElementById('customer-link-btn'),
-      text: 'Shows which customer this note belongs to — tap to go to their file.',
+      target: () => document.getElementById('crumbs-editor'),
+      text: 'The trail shows which customer this note belongs to — tap their name to go to their file.',
     },
     {
       screen: 'editor',

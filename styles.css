@@ -527,6 +527,48 @@ body.show-app-back .app-back-btn[hidden] { display: none !important; }
   padding-top: max(14px, env(safe-area-inset-top));
 }
 .app-header h1 { margin: 0; font-size: 18px; font-weight: 600; }
+
+/* Breadcrumbs — replace the per-screen Home button and screen title.
+   Headers are sticky, so the trail stays visible while scrolling. */
+.crumbs {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+.crumb {
+  font-family: inherit;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.crumb-link {
+  background: none;
+  border: none;
+  color: var(--accent);
+  font-size: 13px;
+  padding: 6px 2px;   /* thumb-sized target without visual bulk */
+  cursor: pointer;
+  flex-shrink: 1;
+  min-width: 0;
+}
+.crumb-link:active { opacity: 0.6; }
+.crumb-sep { color: var(--ink-soft); font-size: 12px; flex-shrink: 0; }
+.crumb-current {
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--ink);
+  flex-shrink: 1;
+  min-width: 0;
+}
+/* Narrow screens: keep Home and the current screen, shrink the middle */
+@media (max-width: 430px) {
+  .crumb-link { font-size: 12px; max-width: 38%; }
+}
+.editor-header .crumbs { flex: 1; }
+.editor-header .crumb-current { font-size: 15px; }
 .app-version { font-size: 12px; color: var(--ink-soft); }
 .update-btn { font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--accent); background: var(--accent); color: #fff; cursor: pointer; flex-shrink: 0; }
 .update-btn:active { opacity: 0.8; }

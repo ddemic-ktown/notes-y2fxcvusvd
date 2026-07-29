@@ -102,8 +102,7 @@
     <header class="app-header customers-header">
       <div class="customers-header-top">
         <button class="icon-btn date-btn app-back-btn" aria-label="Back">‹ Back</button>
-        <button class="icon-btn date-btn home-btn" aria-label="Home">Home</button>
-        <h1 style="font-size:17px;margin:0;flex:1;">List of Customers</h1>
+        <nav class="crumbs" id="crumbs-customers" aria-label="Breadcrumb"></nav>
         <div class="sort-group" role="group" aria-label="Sort customers">
           <button id="sort-alpha" class="sort-btn" aria-pressed="true">A–Z</button>
           <button id="sort-recent" class="sort-btn" aria-pressed="false">Recent</button>
@@ -128,8 +127,7 @@
     <header class="app-header customers-header">
       <div class="customers-header-top">
         <button class="icon-btn date-btn app-back-btn" aria-label="Back">‹ Back</button>
-        <button class="icon-btn date-btn home-btn" aria-label="Home">Home</button>
-        <h1 id="customer-notes-title" style="font-size:17px;margin:0;flex:1;">Customer</h1>
+        <nav class="crumbs" id="crumbs-customer-notes" aria-label="Breadcrumb"></nav>
       </div>
       <div class="customers-header-bottom">
         <div class="search-wrap" style="flex:1;">
@@ -196,8 +194,7 @@
     <header class="app-header customers-header">
       <div class="customers-header-top">
         <button class="icon-btn date-btn app-back-btn" aria-label="Back">‹ Back</button>
-        <button class="icon-btn date-btn home-btn" aria-label="Home">Home</button>
-        <h1 id="section-view-title" style="font-size:17px;margin:0;flex:1;"></h1>
+        <nav class="crumbs" id="crumbs-section" aria-label="Breadcrumb"></nav>
       </div>
       <div id="section-view-controls" class="customers-header-bottom" hidden></div>
     </header>
@@ -209,8 +206,7 @@
     <header class="app-header customers-header">
       <div class="customers-header-top">
         <button class="icon-btn date-btn app-back-btn" aria-label="Back">‹ Back</button>
-        <button class="icon-btn date-btn home-btn" aria-label="Home">Home</button>
-        <h1 style="font-size:17px;margin:0;flex:1;">Orphaned Notes</h1>
+        <nav class="crumbs" id="crumbs-orphans" aria-label="Breadcrumb"></nav>
         <div class="sort-group" role="group" aria-label="Sort orphaned notes">
           <button id="orphan-sort-alpha" class="sort-btn" aria-pressed="false">A–Z</button>
           <button id="orphan-sort-recent" class="sort-btn" aria-pressed="true">Recent</button>
@@ -228,8 +224,7 @@
   <section id="settings-view" class="screen">
     <header class="app-header">
       <button class="icon-btn date-btn app-back-btn" aria-label="Back">‹ Back</button>
-        <button class="icon-btn date-btn home-btn" aria-label="Home">Home</button>
-      <h1>Settings</h1>
+        <nav class="crumbs" id="crumbs-settings" aria-label="Breadcrumb"></nav>
     </header>
     <main class="settings-main">
       <div class="setting-row setting-list-row">
@@ -364,9 +359,8 @@
     <header class="app-header editor-header">
       <div class="editor-row editor-row-nav">
         <button class="icon-btn date-btn app-back-btn" aria-label="Back">‹ Back</button>
-        <button id="editor-home-btn" class="icon-btn date-btn" aria-label="Home">Home</button>
+        <nav class="crumbs" id="crumbs-editor" aria-label="Breadcrumb"></nav>
         <span id="editor-shared-badge" class="shared-badge" title="Shared with assigned users" hidden>Shared</span>
-        <button id="customer-link-btn" class="customer-link-btn" aria-label="Go to customer notes" hidden></button>
         <button id="delete-btn" class="icon-btn danger" aria-label="Delete note">🗑</button>
         <div class="editor-more-wrap">
           <button id="editor-more-btn" class="icon-btn date-btn editor-more-btn" aria-label="More options">⋯</button>
