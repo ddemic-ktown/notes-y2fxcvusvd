@@ -13,6 +13,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 10, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.07.28-1820', 'Home screen headings get − + ↑ ↓ controls; the matching settings options are gone'],
   ['v2026.07.28-1803', 'Aggregators now include general notes, labelled by note title and owner'],
   ['v2026.07.25-1422', 'Checkbox taps really keep the keyboard down now'],
   ['v2026.07.25-1407', 'Search arrows show only with 2+ hits; optional 🔍-collapsed search bars'],
@@ -22,7 +23,6 @@ const CHANGELOG = [
   ['v2026.07.25-1206', 'Search fields show an always-visible ✕ clear button'],
   ['v2026.07.25-1201', 'Tapping a checkbox no longer brings up the keyboard'],
   ['v2026.07.25-1136', 'Opening a note from home search highlights the search term inside the note'],
-  ['v2026.07.25-1128', 'Show/Hide password button on the sign-in screen and the set-password prompt'],
 ];
 const APP_VERSION = CHANGELOG[0][0];
 
@@ -77,10 +77,6 @@ const customerSearchInput = document.getElementById('customer-search');
 const customerNotesSearchInput = document.getElementById('customer-notes-search');
 const homeSearchInput = document.getElementById('home-search-input');
 const settingsBtn = document.getElementById('settings-btn');
-const recentCountInput = document.getElementById('setting-recent-count');
-const aggregatorCountInput = document.getElementById('setting-aggregator-count');
-const generalNotesCountInput = document.getElementById('setting-general-notes-count');
-const pinnedOrderListEl = document.getElementById('pinned-order-list');
 const keywordInput = document.getElementById('keyword-input');
 const keywordAddBtn = document.getElementById('keyword-add-btn');
 const keywordListEl = document.getElementById('keyword-list');
@@ -259,36 +255,6 @@ async function movePinnedSection(key, direction) {
   [order[i], order[j]] = [order[j], order[i]];
   await setPinnedOrder(order);
 }
-function renderPinnedOrderList() {
-  const order = getPinnedOrder();
-  pinnedOrderListEl.innerHTML = order.map((key, idx) => {
-    const label = PINNED_SECTIONS[key] || key;
-    const upDis = idx === 0 ? 'disabled' : '';
-    const downDis = idx === order.length - 1 ? 'disabled' : '';
-    return `
-      <li class="reorder-item" data-key="${key}">
-        <span class="reorder-label">${escapeHtml(label)}</span>
-        <button class="reorder-up" ${upDis} aria-label="Move up">↑</button>
-        <button class="reorder-down" ${downDis} aria-label="Move down">↓</button>
-      </li>
-    `;
-  }).join('');
-  pinnedOrderListEl.querySelectorAll('.reorder-up').forEach(btn => {
-    btn.addEventListener('click', async () => {
-      const key = btn.closest('.reorder-item').dataset.key;
-      await movePinnedSection(key, -1);
-      renderPinnedOrderList();
-    });
-  });
-  pinnedOrderListEl.querySelectorAll('.reorder-down').forEach(btn => {
-    btn.addEventListener('click', async () => {
-      const key = btn.closest('.reorder-item').dataset.key;
-      await movePinnedSection(key, 1);
-      renderPinnedOrderList();
-    });
-  });
-}
-
 function getCustomerSort() {
   const v = Storage.getSettings().customerSort;
   return v === 'recent' ? 'recent' : 'alpha';
@@ -837,10 +803,6 @@ function renderSectionView(key) {
 function showSettings() {
   hideAllScreens();
   window.scrollTo(0, 0);
-  recentCountInput.value = getRecentCount();
-  aggregatorCountInput.value = getAggregatorCount();
-  if (generalNotesCountInput) generalNotesCountInput.value = getGeneralNotesCount();
-  renderPinnedOrderList();
   renderKeywordList();
   renderEmployeeList();
   if (accountEmailEl && auth.currentUser) accountEmailEl.textContent = auth.currentUser.email || '';
@@ -1264,11 +1226,24 @@ function renderNotesList() {
     ? `<p class="section-label">Older general notes:</p>` + olderNotes.map(n => renderNoteCard(n)).join('')
     : '';
 
-  const sectionLabel = (text, key) => `
+  // Section heading with inline controls: − + move up/down, See all
+  const order = getPinnedOrder();
+  const sectionLabel = (text, key) => {
+    const i = order.indexOf(key);
+    const upDisabled = i <= 0 ? 'disabled' : '';
+    const downDisabled = (i === -1 || i >= order.length - 1) ? 'disabled' : '';
+    return `
     <p class="section-label">
       <button class="section-label-btn" data-section="${key}">${text}</button>
+      <span class="section-ctrls">
+        <button class="section-ctrl" data-count="${key}" data-delta="-1" aria-label="Show fewer">−</button>
+        <button class="section-ctrl" data-count="${key}" data-delta="1" aria-label="Show more">+</button>
+        <button class="section-ctrl" data-move="${key}" data-dir="-1" aria-label="Move section up" ${upDisabled}>↑</button>
+        <button class="section-ctrl" data-move="${key}" data-dir="1" aria-label="Move section down" ${downDisabled}>↓</button>
+      </span>
       <button class="section-label-all" data-section="${key}">See all ›</button>
     </p>`;
+  };
   const pinnedBlock = getPinnedOrder().map(key => {
     if (key === 'aggregator') return sectionLabel('Aggregators:', 'aggregator') + keywordHtml;
     if (key === 'recent') return sectionLabel("Recent Customer's Notes:", 'recent') + recentHtml;
@@ -1290,6 +1265,29 @@ function renderNotesList() {
     btn.addEventListener('click', () => {
       btn.innerHTML = '<span class="nav-spinner" style="width:14px;height:14px;border-width:2px;vertical-align:middle;"></span>';
       setTimeout(() => showSection(btn.dataset.section), 0);
+    });
+  });
+
+  // Inline section controls: how many to show, and section order
+  notesList.querySelectorAll('[data-count]').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const key = btn.dataset.count;
+      const delta = parseInt(btn.dataset.delta, 10);
+      const getters = { aggregator: getAggregatorCount, recent: getRecentCount, notes: getGeneralNotesCount };
+      const setters = { aggregator: setAggregatorCount, recent: setRecentCount, notes: setGeneralNotesCount };
+      if (!getters[key]) return;
+      const next = Math.max(0, getters[key]() + delta);
+      await setters[key](next);
+      renderNotesList();
+    });
+  });
+  notesList.querySelectorAll('[data-move]').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      if (btn.disabled) return;
+      await movePinnedSection(btn.dataset.move, parseInt(btn.dataset.dir, 10));
+      renderNotesList();
     });
   });
 
@@ -1532,59 +1530,6 @@ document.querySelectorAll('.home-btn').forEach(btn => {
 });
 const editorHomeBtnEl = document.getElementById('editor-home-btn');
 if (editorHomeBtnEl) editorHomeBtnEl.addEventListener('click', () => { commitAndCleanupEditor(); goHome(); });
-
-recentCountInput.addEventListener('input', () => {
-  let n = parseInt(recentCountInput.value, 10);
-  if (Number.isNaN(n)) return;
-  if (n < 0) n = 0;
-  if (n > 20) n = 20;
-  setRecentCount(n);
-});
-recentCountInput.addEventListener('blur', () => { recentCountInput.value = getRecentCount(); });
-
-document.getElementById('recent-count-down').addEventListener('click', () => {
-  const n = Math.max(0, getRecentCount() - 1);
-  setRecentCount(n); recentCountInput.value = n;
-});
-document.getElementById('recent-count-up').addEventListener('click', () => {
-  const n = Math.min(20, getRecentCount() + 1);
-  setRecentCount(n); recentCountInput.value = n;
-});
-
-aggregatorCountInput.addEventListener('input', () => {
-  let n = parseInt(aggregatorCountInput.value, 10);
-  if (Number.isNaN(n)) return;
-  if (n < 0) n = 0;
-  setAggregatorCount(n);
-});
-aggregatorCountInput.addEventListener('blur', () => { aggregatorCountInput.value = getAggregatorCount(); });
-
-document.getElementById('aggregator-count-down').addEventListener('click', () => {
-  const n = Math.max(0, getAggregatorCount() - 1);
-  setAggregatorCount(n); aggregatorCountInput.value = n;
-});
-document.getElementById('aggregator-count-up').addEventListener('click', () => {
-  const n = getAggregatorCount() + 1;
-  setAggregatorCount(n); aggregatorCountInput.value = n;
-});
-
-if (generalNotesCountInput) {
-  generalNotesCountInput.addEventListener('input', () => {
-    let n = parseInt(generalNotesCountInput.value, 10);
-    if (Number.isNaN(n)) return;
-    if (n < 0) n = 0;
-    setGeneralNotesCount(n);
-  });
-  generalNotesCountInput.addEventListener('blur', () => { generalNotesCountInput.value = getGeneralNotesCount(); });
-}
-document.getElementById('general-notes-count-down').addEventListener('click', () => {
-  const n = Math.max(0, getGeneralNotesCount() - 1);
-  setGeneralNotesCount(n); if (generalNotesCountInput) generalNotesCountInput.value = n;
-});
-document.getElementById('general-notes-count-up').addEventListener('click', () => {
-  const n = getGeneralNotesCount() + 1;
-  setGeneralNotesCount(n); if (generalNotesCountInput) generalNotesCountInput.value = n;
-});
 
 keywordAddBtn.addEventListener('click', async () => {
   if (await addKeyword(keywordInput.value)) {
@@ -2868,10 +2813,6 @@ function rerenderCurrent() {
   } else if (orphanView && orphanView.classList.contains('active')) {
     renderOrphanList();
   } else if (settingsView.classList.contains('active')) {
-    recentCountInput.value = getRecentCount();
-    aggregatorCountInput.value = getAggregatorCount();
-    if (generalNotesCountInput) generalNotesCountInput.value = getGeneralNotesCount();
-    renderPinnedOrderList();
     renderKeywordList();
     renderEmployeeList();
     renderMembersList();
@@ -3569,6 +3510,11 @@ function tutorialSteps(part) {
       screen: 'home',
       target: () => document.getElementById('home-search-input'),
       text: 'Search every note by words here. Open a result and your search is carried into the note with the first match highlighted. The ✕ clears a search any time.',
+    });
+    ordered.push({
+      screen: 'home',
+      target: () => document.querySelector('#notes-list .section-ctrls'),
+      text: 'Each heading has its own controls: − and + change how many items that section shows, ↑ and ↓ move the whole section up or down the home screen.',
     });
     return ordered;
   }

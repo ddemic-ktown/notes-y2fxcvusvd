@@ -350,6 +350,20 @@ body.editor-open {
   padding: 4px 6px;
 }
 
+/* Inline home-screen section controls: − + ↑ ↓ beside each heading */
+.section-ctrls { display: inline-flex; align-items: center; gap: 2px; margin-left: 6px; flex-shrink: 0; }
+.section-ctrl {
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink);
+  border-radius: 6px;
+  font-size: 13px;
+  line-height: 1;
+  padding: 3px 6px;
+  cursor: pointer;
+}
+.section-ctrl:disabled { opacity: 0.3; cursor: default; }
+
 /* Transient editor toast (e.g. "undo history reset") */
 .editor-toast {
   position: fixed;
@@ -918,7 +932,7 @@ input[type="search"]::-webkit-search-cancel-button {
   cursor: pointer;
   padding: 0;
   text-align: left;
-  flex: 1;
+  flex: 0 1 auto;
 }
 .section-label-btn:active { opacity: 0.6; }
 .section-label-all {
@@ -928,6 +942,7 @@ input[type="search"]::-webkit-search-cancel-button {
   letter-spacing: 0;
   text-transform: none;
   flex-shrink: 0;
+  margin-left: auto; /* controls sit next to the heading; See all stays right */
 }
 
 .empty-state {
