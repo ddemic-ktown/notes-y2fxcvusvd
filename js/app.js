@@ -13,16 +13,16 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 10, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.07.28-2150', 'Tutorials clear search filters and skip steps with nothing to show'],
+  ['v2026.07.28-2145', 'Signing in from an emailed link is clearer and retryable, with an install tip'],
+  ['v2026.07.28-2130', 'Customer sort is now per device (bookkeepers can sort too) and steppers write less'],
+  ['v2026.07.28-2115', 'Back button inside installed iPhone/desktop apps, which have no system back'],
+  ['v2026.07.28-2058', 'Role changes apply live — no need to restart the app'],
+  ['v2026.07.28-2041', 'Going back to a list returns you to where you were; Home still goes to the top'],
+  ['v2026.07.28-2025', 'Internal cleanup: removed leftover code for buttons deleted back in v64'],
+  ['v2026.07.28-2012', 'Settings regrouped — Time Logger and IIF export together — and tidier on small screens'],
+  ['v2026.07.28-1955', 'Tutorial: back arrow always shown (greyed at the start), shorter button labels'],
   ['v2026.07.28-1820', 'Home screen headings get − + ↑ ↓ controls; the matching settings options are gone'],
-  ['v2026.07.28-1803', 'Aggregators now include general notes, labelled by note title and owner'],
-  ['v2026.07.25-1422', 'Checkbox taps really keep the keyboard down now'],
-  ['v2026.07.25-1407', 'Search arrows show only with 2+ hits; optional 🔍-collapsed search bars'],
-  ['v2026.07.25-1251', 'Redo button joins undo in the editor'],
-  ['v2026.07.25-1231', 'Undo button in the editor — one word or action per tap'],
-  ['v2026.07.25-1211', 'Tutorial split into three short parts, covering the newest features'],
-  ['v2026.07.25-1206', 'Search fields show an always-visible ✕ clear button'],
-  ['v2026.07.25-1201', 'Tapping a checkbox no longer brings up the keyboard'],
-  ['v2026.07.25-1136', 'Opening a note from home search highlights the search term inside the note'],
 ];
 const APP_VERSION = CHANGELOG[0][0];
 
@@ -69,8 +69,6 @@ const fab = document.getElementById('fab');
 const customersFab = document.getElementById('customers-fab');
 const customerNotesFab = document.getElementById('customer-notes-fab');
 
-const backBtn = document.getElementById('back-btn');
-const customerNotesBackBtn = document.getElementById('customer-notes-back-btn');
 const sortAlphaBtn = document.getElementById('sort-alpha');
 const sortRecentBtn = document.getElementById('sort-recent');
 const customerSearchInput = document.getElementById('customer-search');
@@ -220,7 +218,26 @@ function getRecentCount() {
   if (Number.isNaN(n) || n < 0) return 4;
   return Math.min(n, 20);
 }
-async function setRecentCount(n) { await Storage.setSetting('recentCount', n); }
+// Home-screen stepper writes are debounced: tapping + five times should cost
+// one Firestore write, not five. The UI updates immediately either way.
+let _settingsFlushTimer = null;
+let _settingsDirty = false;
+function queueSetting(key, value) {
+  Storage.setSettingLocal(key, value); // instant UI
+  _settingsDirty = true;
+  if (_settingsFlushTimer) clearTimeout(_settingsFlushTimer);
+  _settingsFlushTimer = setTimeout(flushSettings, 400);
+}
+function flushSettings() {
+  if (_settingsFlushTimer) { clearTimeout(_settingsFlushTimer); _settingsFlushTimer = null; }
+  if (!_settingsDirty) return;
+  _settingsDirty = false;
+  Storage.writeSettings();
+}
+// Never lose a queued setting when the app is closed or backgrounded
+window.addEventListener('pagehide', flushSettings);
+document.addEventListener('visibilitychange', () => { if (document.hidden) flushSettings(); });
+
 
 function getAggregatorCount() {
   const n = parseInt(Storage.getSettings().aggregatorCount, 10);
@@ -233,8 +250,6 @@ function getGeneralNotesCount() {
   if (Number.isNaN(n) || n < 0) return 5;
   return n;
 }
-async function setGeneralNotesCount(n) { await Storage.setSetting('generalNotesCount', n); }
-async function setAggregatorCount(n) { await Storage.setSetting('aggregatorCount', n); }
 
 function getPinnedOrder() {
   const raw = Storage.getSettings().pinnedOrder;
@@ -245,22 +260,31 @@ function getPinnedOrder() {
   }
   return filtered;
 }
-async function setPinnedOrder(arr) { await Storage.setSetting('pinnedOrder', arr); }
-async function movePinnedSection(key, direction) {
+function movePinnedSection(key, direction) {
   const order = getPinnedOrder();
   const i = order.indexOf(key);
   if (i === -1) return;
   const j = i + direction;
   if (j < 0 || j >= order.length) return;
   [order[i], order[j]] = [order[j], order[i]];
-  await setPinnedOrder(order);
+  queueSetting('pinnedOrder', order); // debounced write, instant UI
 }
+// Customer sort is a per-device viewing preference (localStorage), NOT an org
+// setting: org settings are admin-writable only, so a bookkeeper's tap on A–Z
+// was rejected by the rules and snapped back. Local also means no Firestore
+// write per tap.
 function getCustomerSort() {
-  const v = Storage.getSettings().customerSort;
+  let v = localStorage.getItem('na-customer-sort');
+  if (v === null) {
+    // One-time carry-over from the old org setting
+    const orgVal = Storage.getSettings().customerSort;
+    v = orgVal === 'recent' ? 'recent' : 'alpha';
+    localStorage.setItem('na-customer-sort', v);
+  }
   return v === 'recent' ? 'recent' : 'alpha';
 }
 async function setCustomerSort(v) {
-  await Storage.setSetting('customerSort', v === 'recent' ? 'recent' : 'alpha');
+  localStorage.setItem('na-customer-sort', v === 'recent' ? 'recent' : 'alpha');
 }
 
 let customerSearchTerm = '';
@@ -350,7 +374,80 @@ function formatDateTime(iso) {
 }
 
 // ---------- screen navigation ----------
+// ---------- in-app Back button (installed apps without a system back) ----------
+// iOS home-screen apps have no browser chrome AND no edge-swipe back, so the
+// app must provide one. Android always has system back, so it's excluded.
+// Desktop PWAs also hide chrome, so they get it too.
+const isStandaloneApp = window.navigator.standalone === true
+  || window.matchMedia('(display-mode: standalone)').matches
+  || window.matchMedia('(display-mode: fullscreen)').matches;
+const isAndroid = /android/i.test(navigator.userAgent);
+if (isStandaloneApp && !isAndroid) document.body.classList.add('show-app-back');
+
+// How many history entries this app has pushed. At 0 we're at the bottom of
+// the stack (home), so the Back button hides — it can never exit the app.
+let appHistoryDepth = 0;
+function updateAppBackButtons() {
+  document.querySelectorAll('.app-back-btn').forEach(btn => { btn.hidden = appHistoryDepth <= 0; });
+}
+// Every screen change routes through pushState/replaceState; wrap them so the
+// depth count stays honest without touching each call site.
+const _pushState = history.pushState.bind(history);
+history.pushState = (...args) => {
+  const state = args[0];
+  if (state && state.screen === 'home') appHistoryDepth = 0;
+  else appHistoryDepth++;
+  _pushState(...args);
+  updateAppBackButtons();
+};
+const _replaceState = history.replaceState.bind(history);
+history.replaceState = (...args) => {
+  const state = args[0];
+  if (state && state.screen === 'home') appHistoryDepth = 0;
+  _replaceState(...args);
+  updateAppBackButtons();
+};
+window.addEventListener('popstate', () => {
+  appHistoryDepth = Math.max(0, appHistoryDepth - 1);
+  updateAppBackButtons();
+});
+document.querySelectorAll('.app-back-btn').forEach(btn => {
+  // history.back() fires the same popstate path Android's system back uses,
+  // so editor cleanup / save flushing / return-screen logic is shared.
+  btn.addEventListener('click', () => { if (appHistoryDepth > 0) history.back(); });
+});
+updateAppBackButtons();
+
+// ---------- scroll memory ----------
+// Leaving a list screen remembers where you were; coming back restores it, so
+// the back button doesn't dump you at the top. Home buttons clear the memory
+// (goHome), so tapping Home always lands at the top.
+const screenScroll = {};
+let activeSectionKey = null;
+function activeScreenKey() {
+  if (listView.classList.contains('active')) return 'home';
+  if (customersView.classList.contains('active')) return 'customers';
+  // Per customer / per section, so a different one starts at the top
+  if (customerNotesView.classList.contains('active')) return 'customer-notes:' + activeCustomerId;
+  if (sectionView && sectionView.classList.contains('active')) return 'section:' + activeSectionKey;
+  if (orphanView && orphanView.classList.contains('active')) return 'orphans';
+  return null;
+}
+function rememberScroll() {
+  const key = activeScreenKey();
+  if (key) screenScroll[key] = window.scrollY || 0;
+}
+function resetScrollMemory() { Object.keys(screenScroll).forEach(k => delete screenScroll[k]); }
+// Restore after the list has rendered, so the page is tall enough to scroll to
+function restoreScroll(key) {
+  const y = screenScroll[key] || 0;
+  if (!y) { window.scrollTo(0, 0); return; }
+  requestAnimationFrame(() => window.scrollTo(0, y));
+}
+
 function hideAllScreens() {
+  rememberScroll();
+  flushSettings(); // don't leave a debounced setting unwritten on navigation
   listView.classList.remove('active');
   customersView.classList.remove('active');
   customerNotesView.classList.remove('active');
@@ -439,10 +536,6 @@ function showAggregator(keyword) {
   bodyInput.readOnly = isReadOnlyRole() || empty;
   bodyInput.placeholder = empty ? `No paragraphs starting with “${keyword}” yet.` : '';
 
-  if (backBtn) {
-    backBtn.textContent = fromSection ? 'Back to Aggregators' : 'Back to Home';
-    backBtn.style.display = '';
-  }
   resetNoteSearch();
   const aggSearchWrap = noteSearchInput.closest('.search-wrap');
   if (aggSearchWrap) aggSearchWrap.style.display = '';
@@ -674,11 +767,12 @@ function clearCompiledState() {
 
 function showSection(key) {
   hideAllScreens();
-  window.scrollTo(0, 0);
+  activeSectionKey = key;
   const titles = { aggregator: 'Aggregators', recent: "Recent Customer's Notes", notes: 'General Notes' };
   sectionViewTitle.textContent = titles[key] || key;
   renderSectionView(key);
   sectionView.classList.add('active');
+  restoreScroll('section:' + key);
   if (!handlingPopstate) history.pushState({ screen: 'section', key }, '');
 }
 
@@ -823,7 +917,7 @@ function showNotes() {
   listView.classList.add('active');
   renderNotesList();
   history.replaceState({ screen: 'home' }, '');
-  window.scrollTo(0, 0);
+  restoreScroll('home');
   if (swReg) swReg.update().catch(() => {});
 }
 
@@ -833,9 +927,9 @@ function showCustomers() {
   returnScreen = 'customers';
   activeCustomerId = null;
   hideAllScreens();
-  window.scrollTo(0, 0);
   customersView.classList.add('active');
   renderCustomersList();
+  restoreScroll('customers');
   if (isDesktop) setTimeout(() => customerSearchInput.focus(), 50);
   if (!handlingPopstate) history.pushState({ screen: 'customers' }, '');
 }
@@ -843,7 +937,6 @@ function showCustomers() {
 function showCustomerNotes(customerId, returnTo) {
   customerNotesSearchTerm = '';
   if (customerNotesSearchInput) customerNotesSearchInput.value = '';
-  window.scrollTo(0, 0);
   const customer = Storage.getCustomer(customerId);
   if (!customer) {
     alert('This customer no longer exists — it may have been deleted.');
@@ -858,16 +951,10 @@ function showCustomerNotes(customerId, returnTo) {
   customerNotesReturnTo = returnTo || { screen: 'customers' };
   renderCustomerFiles(customerId);
   customerNotesTitle.textContent = title.trim() ? title.trim() : 'Unnamed customer';
-  if (customerNotesBackBtn) {
-    if (customerNotesReturnTo.screen === 'aggregator' && customerNotesReturnTo.keyword) {
-      customerNotesBackBtn.textContent = `Back to ${customerNotesReturnTo.keyword}`;
-    } else {
-      customerNotesBackBtn.textContent = 'Back to Customers';
-    }
-  }
   hideAllScreens();
   customerNotesView.classList.add('active');
   renderCustomerNotesList(customerId);
+  restoreScroll('customer-notes:' + customerId);
   if (!handlingPopstate) history.pushState({ screen: 'customer-notes', customerId, returnTo: customerNotesReturnTo }, '');
 }
 
@@ -890,26 +977,6 @@ function showEditor(record, type, cursorHint) {
     bodyInput.placeholder = 'Address';
     titleInput.value = record.name || '';
     bodyInput.value = record.address || '';
-  }
-
-  let backLabel = null;
-  if (returnScreen === 'customer-notes' && (record.customerId || activeCustomerId)) {
-    const cid = record.customerId || activeCustomerId;
-    const def = Storage.getDefaultNoteForCustomer(cid);
-    const name = def ? (splitTitleAndBody(def.body).title || '').trim() : '';
-    backLabel = name || 'Customer notes';
-  } else if (returnScreen === 'customers') {
-    backLabel = 'Customers';
-  } else if (returnScreen === 'orphans') {
-    backLabel = 'Orphaned Notes';
-  }
-  if (backBtn) {
-    if (backLabel) {
-      backBtn.textContent = `Back to ${backLabel}`;
-      backBtn.style.display = '';
-    } else {
-      backBtn.style.display = 'none';
-    }
   }
 
   resetNoteSearch();
@@ -1275,10 +1342,10 @@ function renderNotesList() {
       const key = btn.dataset.count;
       const delta = parseInt(btn.dataset.delta, 10);
       const getters = { aggregator: getAggregatorCount, recent: getRecentCount, notes: getGeneralNotesCount };
-      const setters = { aggregator: setAggregatorCount, recent: setRecentCount, notes: setGeneralNotesCount };
+      const settingKeys = { aggregator: 'aggregatorCount', recent: 'recentCount', notes: 'generalNotesCount' };
       if (!getters[key]) return;
       const next = Math.max(0, getters[key]() + delta);
-      await setters[key](next);
+      queueSetting(settingKeys[key], next); // debounced write, instant UI
       renderNotesList();
     });
   });
@@ -1286,7 +1353,7 @@ function renderNotesList() {
     btn.addEventListener('click', async (e) => {
       e.stopPropagation();
       if (btn.disabled) return;
-      await movePinnedSection(btn.dataset.move, parseInt(btn.dataset.dir, 10));
+      movePinnedSection(btn.dataset.move, parseInt(btn.dataset.dir, 10));
       renderNotesList();
     });
   });
@@ -1507,11 +1574,6 @@ customerNotesFab.addEventListener('click', () => {
   showEditor(note, 'note');
 });
 
-if (customerNotesBackBtn) customerNotesBackBtn.addEventListener('click', () => {
-  const ret = customerNotesReturnTo;
-  if (ret && ret.screen === 'aggregator' && ret.keyword) showAggregator(ret.keyword);
-  else showCustomers();
-});
 settingsBtn.addEventListener('click', showSettings);
 
 function goHome() {
@@ -1519,6 +1581,8 @@ function goHome() {
   activeKeyword = null;
   homeSearchTerm = '';
   if (homeSearchInput) homeSearchInput.value = '';
+  // Home button = home AND top; back navigation keeps its place
+  resetScrollMemory();
   showNotes();
   // Check GitHub for a newer version every time we land on the home screen.
   // If one is found, it's downloaded, activated, and applied automatically —
@@ -2123,16 +2187,6 @@ function commitAndCleanupEditor() {
   return cancelledCustomer;
 }
 
-if (backBtn) backBtn.addEventListener('click', () => {
-  const cancelledCustomer = commitAndCleanupEditor();
-  if (cancelledCustomer) {
-    activeCustomerId = null;
-    showCustomers();
-    return;
-  }
-  returnFromEditor();
-});
-
 // Android/browser back button support
 window.addEventListener('popstate', (e) => {
   handlingPopstate = true;
@@ -2331,6 +2385,8 @@ if (assignSaveBtn) {
 // ---------- auth bootstrap ----------
 function showSignin() {
   hideAllScreens();
+  // Never fall back to the plain form while a link sign-in is still in play
+  if (linkinCard && !linkinCard.hidden) { signinView.classList.add('active'); return; }
   signinView.classList.add('active');
 }
 
@@ -2438,31 +2494,141 @@ if (setPasswordSkip) {
 }
 
 // Complete magic-link sign-in if the page was opened from an emailed link.
+//
+// The tricky case is an INVITE: the admin triggered the email, so the
+// invitee's browser has no stored address. The old code used window.prompt(),
+// which browsers can suppress (and in-app email webviews often do) — the
+// function then returned silently and the plain sign-in screen appeared, as if
+// the link had failed. It also stripped the link's one-time code from the URL
+// even on failure, so nothing could be retried. Now: a dedicated
+// "Finishing sign-in…" card, an in-page email confirm form, and the URL is
+// only cleaned after success.
 let pendingPasswordPrompt = false;
-async function completeEmailLinkSignin() {
-  if (!isSignInWithEmailLink(auth, window.location.href)) return;
-  let email = window.localStorage.getItem(EMAIL_FOR_SIGNIN_KEY);
-  if (!email) {
-    // Link was opened on a different device/browser than the one that requested it.
-    email = window.prompt('Please confirm your email address to finish signing in:');
+const linkinCard = document.getElementById('linkin-card');
+const signinCard = document.getElementById('signin-card');
+const linkinStatus = document.getElementById('linkin-status');
+const linkinConfirm = document.getElementById('linkin-confirm');
+const linkinEmail = document.getElementById('linkin-email');
+const linkinContinue = document.getElementById('linkin-continue');
+const linkinError = document.getElementById('linkin-error');
+const linkinNewLink = document.getElementById('linkin-newlink');
+
+function showLinkinCard(on) {
+  if (!linkinCard || !signinCard) return;
+  linkinCard.hidden = !on;
+  signinCard.hidden = on;
+  if (on) {
+    hideAllScreens();
+    signinView.classList.add('active');
+  } else if (linkinError) {
+    linkinError.textContent = '';
+    if (linkinConfirm) linkinConfirm.hidden = true;
+    if (linkinNewLink) linkinNewLink.hidden = true;
   }
-  if (!email) return;
+}
+function linkinAskForEmail(msg) {
+  if (linkinStatus) linkinStatus.textContent = msg || 'Confirm your email to finish signing in.';
+  if (linkinConfirm) linkinConfirm.hidden = false;
+  if (linkinNewLink) linkinNewLink.hidden = false;
+  setTimeout(() => { if (linkinEmail) linkinEmail.focus(); }, 50);
+}
+
+async function tryLinkSignin(email) {
+  if (linkinError) linkinError.textContent = '';
+  const addr = (email || '').trim();
+  if (!addr) { linkinAskForEmail(); return false; }
+  if (linkinStatus) linkinStatus.textContent = 'Finishing sign-in…';
+  if (linkinConfirm) linkinConfirm.hidden = true;
   try {
-    await signInWithEmailLink(auth, email.trim(), window.location.href);
+    await signInWithEmailLink(auth, addr, window.location.href);
     window.localStorage.removeItem(EMAIL_FOR_SIGNIN_KEY);
     pendingPasswordPrompt = true;
+    // Only now is the one-time code spent — safe to clean the URL. Keep a
+    // screen state: a stateless bottom entry breaks the back button.
+    window.history.replaceState({ screen: 'home' }, document.title, window.location.origin + window.location.pathname);
+    maybeShowInstallHint();
+    return true;
   } catch (err) {
     console.error(err);
-    signinError.textContent = friendlyAuthError(err);
-    showSignin();
-  } finally {
-    // Remove the one-time-code params from the URL. Keep the screen state —
-    // a stateless bottom entry breaks the back button (exits the app).
-    window.history.replaceState({ screen: 'home' }, document.title, window.location.origin + window.location.pathname);
+    const code = err && err.code;
+    if (linkinError) linkinError.textContent = friendlyAuthError(err);
+    if (code === 'auth/invalid-action-code' || code === 'auth/expired-action-code') {
+      // The link itself is spent — retrying the address won't help
+      if (linkinStatus) linkinStatus.textContent = 'This sign-in link can’t be used.';
+      if (linkinConfirm) linkinConfirm.hidden = true;
+      if (linkinNewLink) linkinNewLink.hidden = false;
+    } else {
+      // Most likely a mistyped/mismatched address — let them correct it. The
+      // URL still holds the code, so Continue can try again.
+      linkinAskForEmail('That didn’t match. Confirm the email address this link was sent to:');
+    }
+    return false;
   }
+}
+
+async function completeEmailLinkSignin() {
+  if (!isSignInWithEmailLink(auth, window.location.href)) return;
+  showLinkinCard(true);
+  const stored = window.localStorage.getItem(EMAIL_FOR_SIGNIN_KEY);
+  if (stored) { await tryLinkSignin(stored); return; }
+  // Invite case: this browser never requested the link, so ask in-page
+  linkinAskForEmail();
+}
+
+if (linkinContinue) {
+  linkinContinue.addEventListener('click', () => tryLinkSignin(linkinEmail.value));
+}
+if (linkinEmail) {
+  linkinEmail.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); tryLinkSignin(linkinEmail.value); }
+  });
+}
+if (linkinNewLink) {
+  linkinNewLink.addEventListener('click', async () => {
+    const addr = (linkinEmail && linkinEmail.value.trim()) || '';
+    if (!addr) { linkinAskForEmail('Enter your email address and we’ll send a fresh link.'); return; }
+    showLinkinCard(false);
+    if (signinEmailInput) signinEmailInput.value = addr;
+    await sendMagicLink(addr);
+  });
+}
+
+// After signing in from a link in a normal browser tab, nudge the user to
+// install the app — sessions in an email app's in-app browser don't carry
+// over, and the installed app is what they'll want day to day.
+const installHint = document.getElementById('install-hint');
+const installHintText = document.getElementById('install-hint-text');
+const installHintClose = document.getElementById('install-hint-close');
+function maybeShowInstallHint() {
+  if (!installHint || isStandaloneApp) return;
+  if (localStorage.getItem('na-install-hint-dismissed') === '1') return;
+  const iOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+  installHintText.textContent = iOS
+    ? 'Tip: tap the Share button, then “Add to Home Screen” to keep JobPilot one tap away.'
+    : 'Tip: use your browser’s “Install app” / “Add to Home screen” option to keep JobPilot one tap away.';
+  installHint.hidden = false;
+}
+if (installHintClose) {
+  installHintClose.addEventListener('click', () => {
+    localStorage.setItem('na-install-hint-dismissed', '1');
+    installHint.hidden = true;
+  });
 }
 // ---------- always-visible ✕ clear buttons on search fields ----------
 const SEARCH_CLEAR_IDS = ['home-search-input', 'customer-search', 'customer-notes-search', 'note-search-input', 'assign-customer-search'];
+
+// Empty every search field and its backing term (used by the tutorial: a
+// filtered list hides the cards its steps point at).
+function clearAllSearches() {
+  homeSearchTerm = '';
+  customerSearchTerm = '';
+  customerNotesSearchTerm = '';
+  if (homeSearchInput) homeSearchInput.value = '';
+  if (customerSearchInput) customerSearchInput.value = '';
+  if (customerNotesSearchInput) customerNotesSearchInput.value = '';
+  if (noteSearchInput) noteSearchInput.value = '';
+  refreshSearchClears();
+}
 
 function refreshSearchClears() {
   SEARCH_CLEAR_IDS.forEach(id => {
@@ -2547,6 +2713,8 @@ if (signoutBtn) {
 }
 
 // ---------- role-based UI ----------
+const ROLE_LABELS = { admin: 'Admin', employee: 'Employee', bookkeeper: 'Bookkeeper', customer: 'Customer' };
+
 function applyRoleUI(role) {
   const isAdminRole = role === 'admin';
   const isCustomer = role === 'customer';
@@ -2555,7 +2723,6 @@ function applyRoleUI(role) {
     document.getElementById('customers-fab'),
     document.getElementById('customer-notes-fab'),
     document.getElementById('delete-btn'),
-    document.getElementById('list-fab'),
   ];
   adminControls.forEach(el => { if (el) el.style.display = isAdminRole ? '' : 'none'; });
   // Home + FAB: admins and employees can create general notes; read-only roles cannot
@@ -2848,8 +3015,28 @@ onAuthStateChanged(auth, async (user) => {
     return;
   }
   hideInitError();
+  // Link sign-in finished and the account loaded — retire the "Finishing
+  // sign-in…" card so a later sign-out shows the normal form.
+  showLinkinCard(false);
   // Hide write controls for customer role
   applyRoleUI(Storage.getRole());
+  // An admin can change our role while we're using the app — follow it live
+  Storage.onRoleChange((newRole, prevRole) => {
+    if (!newRole) {
+      // Removed from the org: close up and show the no-access banner
+      if (editorView.classList.contains('active')) commitAndCleanupEditor();
+      showInitError(user, { code: 'app/no-access' });
+      return;
+    }
+    // Leave the editor first — a demoted user must not keep typing into a
+    // note the server will now reject (saves are flushed on the way out).
+    if (editorView.classList.contains('active')) commitAndCleanupEditor();
+    applyRoleUI(newRole);
+    // Land on home: the previous screen (customers, a note list) may no longer
+    // be readable under the new role.
+    goHome();
+    showEditorToast(`Your access level changed to ${ROLE_LABELS[newRole] || newRole}`);
+  });
   showNotes();
   // One-time catch-up: stamp customer names onto already-shared notes
   Storage.backfillAssignedCustomerNames();
@@ -3373,7 +3560,7 @@ function updateOrphanDeleteBtn() {
 function showOrphanNotes() {
   hideAllScreens();
   orphanView.classList.add('active');
-  window.scrollTo(0, 0);
+  restoreScroll('orphans');
   if (!handlingPopstate) history.pushState({ screen: 'orphans' }, '');
   renderOrphanList();
   if (orphanDeleteSelectedBtn) orphanDeleteSelectedBtn.disabled = true;
@@ -3424,6 +3611,7 @@ const tutorialClose = document.getElementById('tutorial-close');
 
 let tutorialStepIndex = 0;
 let tutorialPart = 1;
+let tutorialStartPart = 1; // the part the user launched — back never goes before it
 const TUTORIAL_PARTS = 3;
 
 // The tutorial is split into three short parts, each startable from Settings.
@@ -3627,27 +3815,55 @@ function positionBubble(targetEl) {
   tutorialBubble.style.left = Math.max(8, left) + 'px';
 }
 
+// A step whose data doesn't exist yet (no customers, no notes) shouldn't kill
+// the tour — skip forward, or back if we're reversing, and only stop when a
+// whole part has nothing to show.
+let tutorialDirection = 1;
+function tutorialSkipStep(index) {
+  const steps = tutorialSteps(tutorialPart);
+  const next = index + tutorialDirection;
+  if (next >= 0 && next < steps.length) { runTutorialStep(next); return; }
+  if (tutorialDirection > 0 && tutorialPart < TUTORIAL_PARTS) {
+    tutorialPart++;
+    runTutorialStep(0);
+    return;
+  }
+  if (tutorialDirection < 0 && tutorialPart > tutorialStartPart) {
+    tutorialPart--;
+    runTutorialStep(Math.max(0, tutorialSteps(tutorialPart).length - 1));
+    return;
+  }
+  endTutorial();
+}
+
 async function runTutorialStep(index) {
   const steps = tutorialSteps(tutorialPart);
   if (index >= steps.length) { endTutorial(); return; }
+  tutorialStepIndex = index;
   const step = steps[index];
+
+  // A filtered list shows search results instead of the usual cards, which
+  // would make step targets disappear — start every step from a clean slate.
+  clearAllSearches();
 
   // Navigate if needed
   if (step.setup) {
     const ok = step.setup();
-    if (ok === false) { endTutorial(); return; }
+    if (ok === false) { tutorialSkipStep(index); return; }
   } else if (step.screen === 'home') {
     goHome();
   }
 
-  // Scroll to top so targets are visible
+  // Scroll to top so targets are visible (and so a remembered position from a
+  // previous visit doesn't scroll the page out from under the bubble)
+  resetScrollMemory();
   window.scrollTo(0, 0);
 
   // Wait for render
   await new Promise(r => setTimeout(r, 120));
 
   const target = step.target();
-  if (!target) { endTutorial(); return; }
+  if (!target) { tutorialSkipStep(index); return; }
 
   // Scroll target into view if needed
   target.scrollIntoView({ block: 'center', behavior: 'instant' });
@@ -3655,12 +3871,19 @@ async function runTutorialStep(index) {
 
   tutorialText.textContent = step.text;
   if (tutorialProgress) tutorialProgress.textContent = `Part ${tutorialPart} · ${index + 1} of ${steps.length}`;
-  if (tutorialBack) tutorialBack.hidden = (index === 0);
+  // Back is always visible, greyed when there's nothing before this step
+  // (step 1 of the part the user launched).
+  if (tutorialBack) {
+    tutorialBack.hidden = false;
+    tutorialBack.textContent = '←';
+    tutorialBack.disabled = (index === 0 && tutorialPart === tutorialStartPart);
+  }
   // Last bubble of parts 1 and 2 chains into the next part
   if (tutorialNext) {
     const last = index === steps.length - 1;
     tutorialNext.textContent = !last ? 'Got it →'
-      : (tutorialPart < TUTORIAL_PARTS ? `Continue to Part ${tutorialPart + 1} →` : 'Done ✓');
+      : (tutorialPart < TUTORIAL_PARTS ? 'Next part →' : 'Done ✓');
+    tutorialNext.disabled = false;
   }
   tutorialOverlay.hidden = false;
   // Render bubble off-screen first to measure height
@@ -3688,10 +3911,12 @@ function endTutorial() {
   if (tutorialOverlay) tutorialOverlay.hidden = true;
   tutorialStepIndex = 0;
   tutorialPart = 1;
+  tutorialStartPart = 1;
 }
 
 if (tutorialNext) tutorialNext.addEventListener('click', () => {
   clearHighlights();
+  tutorialDirection = 1;
   const steps = tutorialSteps(tutorialPart);
   if (tutorialStepIndex + 1 >= steps.length) {
     if (tutorialPart < TUTORIAL_PARTS) {
@@ -3708,7 +3933,17 @@ if (tutorialNext) tutorialNext.addEventListener('click', () => {
 });
 
 if (tutorialBack) tutorialBack.addEventListener('click', () => {
-  if (tutorialStepIndex === 0) return;
+  tutorialDirection = -1;
+  if (tutorialStepIndex === 0) {
+    // Step back into the previous part's last step (never before the part the
+    // user launched from Settings)
+    if (tutorialPart <= tutorialStartPart) return;
+    clearHighlights();
+    tutorialPart--;
+    tutorialStepIndex = Math.max(0, tutorialSteps(tutorialPart).length - 1);
+    runTutorialStep(tutorialStepIndex);
+    return;
+  }
   clearHighlights();
   tutorialStepIndex--;
   runTutorialStep(tutorialStepIndex);
@@ -3719,7 +3954,10 @@ if (tutorialClose) tutorialClose.addEventListener('click', endTutorial);
 document.querySelectorAll('[data-tutorial-part]').forEach(btn => {
   btn.addEventListener('click', () => {
     tutorialPart = parseInt(btn.dataset.tutorialPart, 10) || 1;
+    tutorialStartPart = tutorialPart;
+    tutorialDirection = 1;
     tutorialStepIndex = 0;
+    clearAllSearches();
     runTutorialStep(0);
   });
 });

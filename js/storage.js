@@ -19,6 +19,7 @@ const _cache = {
   members: [], invites: [],
 };
 const _listeners = new Set();
+let _onRoleChange = null;
 let _uid = null;
 let _orgId = null;
 let _role = null; // 'admin' | 'employee' | 'customer'
@@ -79,6 +80,31 @@ function attachListeners() {
   }));
   _unsubs.push(onSnapshot(membersCol(), (snap) => {
     _cache.members = snap.docs.map(d => ({ uid: d.id, ...d.data() }));
+    // An admin can change our role (or remove us) while the app is open.
+    // Firestore rules apply the new role instantly, so the UI and the data
+    // listeners must follow — otherwise the screen shows powers the server
+    // now rejects. Re-attach listeners (the notes query differs per role)
+    // and tell the app to re-apply its role-based UI.
+    const me = _cache.members.find(m => m.uid === _uid);
+    const newRole = me ? me.role : null;
+    if (newRole !== _role) {
+      const prevRole = _role;
+      _role = newRole;
+      if (!newRole) {
+        // Removed from the org entirely
+        emit();
+        if (_onRoleChange) _onRoleChange(null, prevRole);
+        return;
+      }
+      // Re-attach on a fresh tick — we're inside a listener callback that
+      // detachListeners() would otherwise tear down mid-flight.
+      setTimeout(() => {
+        if (_role !== newRole) return; // superseded by a later change
+        attachListeners();
+        if (_onRoleChange) _onRoleChange(newRole, prevRole);
+      }, 0);
+      return;
+    }
     emit();
   }));
   // Only admins may read invites (firestore.rules) — skip the listener for other roles.
@@ -161,6 +187,9 @@ async function resolveOrg(userId, userEmail) {
 // ---------- public API ----------
 export const Storage = {
   onChange(cb) { _listeners.add(cb); return () => _listeners.delete(cb); },
+  // Called when THIS user's role changes while the app is open:
+  // cb(newRole, previousRole); newRole is null if they were removed.
+  onRoleChange(cb) { _onRoleChange = cb; },
   isReady() { return _ready; },
   getNotesError() { return _notesError; },
   getRole() { return _role; },
@@ -401,6 +430,21 @@ export const Storage = {
 
   // ---------- Settings ----------
   getSettings() { return { ...DEFAULT_SETTINGS, ..._cache.settings }; },
+  // Update a setting in the local cache only (instant UI), leaving the
+  // Firestore write to a later writeSettings() — used by the debounced
+  // home-screen steppers so rapid taps cost one write, not one per tap.
+  setSettingLocal(key, value) {
+    _cache.settings = { ...DEFAULT_SETTINGS, ..._cache.settings, [key]: value };
+    emit();
+  },
+  async writeSettings() {
+    try {
+      await setDoc(settingsDoc(), _cache.settings, { merge: true });
+    } catch (err) {
+      console.warn("writeSettings", err);
+    }
+  },
+
   async setSetting(key, value) {
     _cache.settings = { ...DEFAULT_SETTINGS, ..._cache.settings, [key]: value };
     emit();
