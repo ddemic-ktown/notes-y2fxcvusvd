@@ -13,6 +13,9 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 10, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.07.28-2253', 'Clearer wording: only the first note’s title is used as the customer’s name'],
+  ['v2026.07.28-2250', 'Fixed: the + button disappeared while the tutorial highlighted it'],
+  ['v2026.07.28-2248', 'Fixed: tutorial bubble drifted sideways when scrolling on desktop'],
   ['v2026.07.28-2237', 'Tutorial bubbles stay put when you scroll, fit the screen, and dim the background'],
   ['v2026.07.28-2230', 'Home + offers note or customer; clearer placeholders on new notes'],
   ['v2026.07.28-2203', 'Sample data you can add or remove, a welcome offer on an empty app, smoother tutorial'],
@@ -20,9 +23,6 @@ const CHANGELOG = [
   ['v2026.07.28-2152', 'Employees no longer see a customer link that led to an error'],
   ['v2026.07.28-2151', 'Tutorial wording tightened; undo/redo, orphaned notes and replay steps added'],
   ['v2026.07.28-2150', 'Tutorials clear search filters and skip steps with nothing to show'],
-  ['v2026.07.28-2145', 'Signing in from an emailed link is clearer and retryable, with an install tip'],
-  ['v2026.07.28-2130', 'Customer sort is now per device (bookkeepers can sort too) and steppers write less'],
-  ['v2026.07.28-2115', 'Back button inside installed iPhone/desktop apps, which have no system back'],
 ];
 const APP_VERSION = CHANGELOG[0][0];
 
@@ -975,7 +975,7 @@ function showEditor(record, type, cursorHint) {
     // note's title IS the customer's name, which isn't obvious otherwise.
     if (currentIsDefault) {
       titleInput.placeholder = 'Customer name (e.g. John Canuck)';
-      bodyInput.placeholder = 'Address, phone, email…';
+      bodyInput.placeholder = 'Address, phone, email, notes… (optional)';
     } else {
       titleInput.placeholder = record.customerId ? 'Note title' : 'General note title';
       bodyInput.placeholder = 'Start typing…';
@@ -3774,7 +3774,7 @@ function tutorialSteps(part) {
         return true;
       },
       target: () => document.querySelector('#customer-notes-list .note-card'),
-      text: 'Each customer has their own notes. The first note’s TITLE is the customer’s name — everything below it is their contact info.',
+      text: 'Each customer has their own notes. Whatever you type as this first note’s title becomes the customer’s name — that’s the only part the app uses. The rest is a normal note; address and phone are just handy things to keep there.',
     },
     {
       screen: 'customer-notes',
@@ -3934,7 +3934,11 @@ function tutorialSteps(part) {
 function positionBubble(targetEl) {
   if (!targetEl || !tutorialBubble) return;
   const r = targetEl.getBoundingClientRect();
-  const bw = tutorialBubble.offsetWidth || 260;
+  // Width is PINNED, not re-measured: re-reading offsetWidth on every scroll
+  // tick let tiny differences (text rewrap, a scrollbar appearing) shift
+  // `left` a little each time, so the bubble slowly walked sideways.
+  const bw = Math.min(260, window.innerWidth - 24);
+  tutorialBubble.style.width = bw + 'px';
   const bh = tutorialBubble.offsetHeight || 120;
   const margin = 12;
   const arrowSize = 18;
@@ -4018,13 +4022,20 @@ function waitForScrollSettle(el, timeout = 600) {
 // can scroll, rotate, or watch the iOS toolbar resize the viewport.
 let bubbleTarget = null;
 let bubbleTickQueued = false;
+let bubbleLastRect = '';
 function repositionBubble() {
   if (!bubbleTarget || !tutorialOverlay || tutorialOverlay.hidden) return;
   if (bubbleTickQueued) return;
   bubbleTickQueued = true;
   requestAnimationFrame(() => {
     bubbleTickQueued = false;
-    if (bubbleTarget && tutorialOverlay && !tutorialOverlay.hidden) positionBubble(bubbleTarget);
+    if (!bubbleTarget || !tutorialOverlay || tutorialOverlay.hidden) return;
+    // Skip when the target hasn't actually moved — nothing can accumulate
+    const r = bubbleTarget.getBoundingClientRect();
+    const key = [Math.round(r.top), Math.round(r.left), Math.round(r.width), Math.round(r.height), window.innerWidth, window.innerHeight].join(':');
+    if (key === bubbleLastRect) return;
+    bubbleLastRect = key;
+    positionBubble(bubbleTarget);
   });
 }
 window.addEventListener('scroll', repositionBubble, { passive: true });
@@ -4137,6 +4148,7 @@ async function showTutorialBubble(target, text, index, stepCount) {
   tutorialBubble.style.left = '-9999px';
   await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
   bubbleTarget = target;
+  bubbleLastRect = '';
   positionBubble(target);
 
   // Highlight target, and dim everything else so "where to tap" is obvious.
@@ -4144,13 +4156,17 @@ async function showTutorialBubble(target, text, index, stepCount) {
   target.style.outline = '3px solid var(--accent, #2563eb)';
   target.style.outlineOffset = '3px';
   target.style.boxShadow = '0 0 0 9999px rgba(0,0,0,0.55)';
-  target.style.position = target.style.position || 'relative';
+  // Only STATIC elements need a position for z-index to apply. Checking the
+  // inline style instead of the computed one forced position:relative onto the
+  // fixed FABs, dropping them out of the corner — the + vanished mid-tutorial.
+  if (getComputedStyle(target).position === 'static') target.style.position = 'relative';
   target.style.zIndex = '1000';
   target.dataset.tutorialHighlight = '1';
 }
 
 function clearHighlights() {
   bubbleTarget = null;
+  bubbleLastRect = '';
   document.querySelectorAll('[data-tutorial-highlight]').forEach(el => {
     el.style.outline = '';
     el.style.outlineOffset = '';
