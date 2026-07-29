@@ -13,6 +13,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 10, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.07.28-2308', 'Tutorial now describes the + menu on the home screen'],
   ['v2026.07.28-2253', 'Clearer wording: only the first note’s title is used as the customer’s name'],
   ['v2026.07.28-2250', 'Fixed: the + button disappeared while the tutorial highlighted it'],
   ['v2026.07.28-2248', 'Fixed: tutorial bubble drifted sideways when scrolling on desktop'],
@@ -22,7 +23,6 @@ const CHANGELOG = [
   ['v2026.07.28-2153', 'A customer note can be turned back into a general note from the assign picker'],
   ['v2026.07.28-2152', 'Employees no longer see a customer link that led to an error'],
   ['v2026.07.28-2151', 'Tutorial wording tightened; undo/redo, orphaned notes and replay steps added'],
-  ['v2026.07.28-2150', 'Tutorials clear search filters and skip steps with nothing to show'],
 ];
 const APP_VERSION = CHANGELOG[0][0];
 
@@ -3804,7 +3804,7 @@ function tutorialSteps(part) {
         {
           screen: 'home',
           target: () => document.getElementById('fab'),
-          text: 'Tap + for a new general note.',
+          text: 'Tap + to start something new — a general note or a customer.',
         },
       ],
       aggregator: [
