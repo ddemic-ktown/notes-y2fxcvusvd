@@ -380,6 +380,105 @@ export const Storage = {
     }
   },
 
+  // ---------- Sample data ----------
+  // Everything created here carries demo:true so it can be removed in one go.
+  // Admin only (firestore.rules); no "hours" note is created — that's the Time
+  // Logger's input and fake hours could reach a real IIF export.
+  async seedSampleData() {
+    if (_role !== 'admin') return { customers: 0, notes: 0 };
+    const now = nowIso();
+    const samples = [
+      {
+        def: 'Bill & Karen Eagle\n148 Eagle Crescent\n(403) 555-0142\nbill.eagle@example.com',
+        notes: [
+          'Kitchen reno\nStarted framing Tuesday.\n\ntodo: order cabinet handles\n☐ confirm sink cutout size\n☐ call inspector before drywall\n\nmaterials: 12 sheets 1/2" drywall, 3 boxes screws',
+          'Deck quote\nRough estimate 22x14 cedar deck.\n\ntodo: send written quote by Friday',
+        ],
+      },
+      {
+        def: 'Anne Bull\n77 Bull Crescent\n(403) 555-0199',
+        notes: [
+          'Basement bathroom\nRough-in inspection passed.\n\nmaterials: vanity, 2 shutoff valves, silicone\n\ntodo: pick up vanity from supplier',
+        ],
+      },
+      {
+        def: 'Sunrise Cafe\n1120 Main Street\n(403) 555-0177\nAsk for Dana',
+        notes: [
+          'Patio lighting\nOwner wants string lights before the long weekend.\n\ntodo: quote transformer + 60ft cable\n☑ site visit done',
+        ],
+      },
+    ];
+    let noteCount = 0;
+    for (const s of samples) {
+      const cid = uid();
+      const customer = { id: cid, created: now, updated: now, demo: true };
+      _cache.customers.push(customer);
+      setDoc(doc(customersCol(), cid), stripId(customer)).catch(err => console.warn("seed.customer", err));
+      const defId = uid();
+      const defaultNote = {
+        id: defId, body: s.def, customerId: cid, isDefault: true,
+        assignedTo: [], created: now, updated: now, demo: true,
+      };
+      _cache.notes.push(defaultNote);
+      setDoc(doc(notesCol(), defId), stripId(defaultNote)).catch(err => console.warn("seed.defnote", err));
+      noteCount++;
+      for (const body of s.notes) {
+        const nid = uid();
+        const note = {
+          id: nid, body, customerId: cid, isDefault: false, assignedTo: [],
+          customerName: (s.def.split('\n')[0] || '').trim(),
+          created: now, updated: now, demo: true,
+        };
+        _cache.notes.push(note);
+        setDoc(doc(notesCol(), nid), stripId(note)).catch(err => console.warn("seed.note", err));
+        noteCount++;
+      }
+    }
+    // A couple of general notes (no customer)
+    const generals = [
+      'Shop list\ntodo: pick up 2x4s and deck screws\n☐ return borrowed nailer',
+      'Ideas\nmaterials: try the composite decking sample from the supplier\nCall back about the trailer hitch.',
+    ];
+    for (const body of generals) {
+      const nid = uid();
+      const note = {
+        id: nid, body, customerId: null, isDefault: false, assignedTo: [],
+        customerName: '', created: now, updated: now, demo: true,
+      };
+      _cache.notes.push(note);
+      setDoc(doc(notesCol(), nid), stripId(note)).catch(err => console.warn("seed.general", err));
+      noteCount++;
+    }
+    // Seed keywords so the aggregator section has something to show
+    const kw = Array.isArray(_cache.settings.keywords) ? _cache.settings.keywords : [];
+    if (kw.length === 0) {
+      _cache.settings = { ..._cache.settings, keywords: ['todo', 'materials'] };
+      setDoc(settingsDoc(), _cache.settings, { merge: true }).catch(err => console.warn("seed.keywords", err));
+    }
+    emit();
+    return { customers: samples.length, notes: noteCount };
+  },
+
+  hasSampleData() {
+    return _cache.notes.some(n => n.demo) || _cache.customers.some(c => c.demo);
+  },
+
+  async removeSampleData() {
+    if (_role !== 'admin') return { customers: 0, notes: 0 };
+    const notes = _cache.notes.filter(n => n.demo);
+    const customers = _cache.customers.filter(c => c.demo);
+    _cache.notes = _cache.notes.filter(n => !n.demo);
+    _cache.customers = _cache.customers.filter(c => !c.demo);
+    emit();
+    for (const n of notes) deleteDoc(doc(notesCol(), n.id)).catch(err => console.warn("unseed.note", err));
+    for (const c of customers) deleteDoc(doc(customersCol(), c.id)).catch(err => console.warn("unseed.customer", err));
+    return { customers: customers.length, notes: notes.length };
+  },
+
+  isOrgEmpty() {
+    return _cache.notes.length === 0 && _cache.customers.length === 0;
+  },
+
   // ---------- Aggregator ----------
   aggregateParagraphsByKeyword(keyword) {
     if (!keyword) return [];

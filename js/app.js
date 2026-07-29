@@ -13,6 +13,9 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 10, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.07.28-2237', 'Tutorial bubbles stay put when you scroll, fit the screen, and dim the background'],
+  ['v2026.07.28-2230', 'Home + offers note or customer; clearer placeholders on new notes'],
+  ['v2026.07.28-2203', 'Sample data you can add or remove, a welcome offer on an empty app, smoother tutorial'],
   ['v2026.07.28-2153', 'A customer note can be turned back into a general note from the assign picker'],
   ['v2026.07.28-2152', 'Employees no longer see a customer link that led to an error'],
   ['v2026.07.28-2151', 'Tutorial wording tightened; undo/redo, orphaned notes and replay steps added'],
@@ -20,9 +23,6 @@ const CHANGELOG = [
   ['v2026.07.28-2145', 'Signing in from an emailed link is clearer and retryable, with an install tip'],
   ['v2026.07.28-2130', 'Customer sort is now per device (bookkeepers can sort too) and steppers write less'],
   ['v2026.07.28-2115', 'Back button inside installed iPhone/desktop apps, which have no system back'],
-  ['v2026.07.28-2058', 'Role changes apply live — no need to restart the app'],
-  ['v2026.07.28-2041', 'Going back to a list returns you to where you were; Home still goes to the top'],
-  ['v2026.07.28-2025', 'Internal cleanup: removed leftover code for buttons deleted back in v64'],
 ];
 const APP_VERSION = CHANGELOG[0][0];
 
@@ -448,6 +448,8 @@ function restoreScroll(key) {
 function hideAllScreens() {
   rememberScroll();
   flushSettings(); // don't leave a debounced setting unwritten on navigation
+  const fm = document.getElementById('fab-menu');
+  if (fm) fm.hidden = true;
   listView.classList.remove('active');
   customersView.classList.remove('active');
   customerNotesView.classList.remove('active');
@@ -900,6 +902,7 @@ function showSettings() {
   renderKeywordList();
   renderEmployeeList();
   if (accountEmailEl && auth.currentUser) accountEmailEl.textContent = auth.currentUser.email || '';
+  refreshSeedButtons();
   const moveCheckedInput = document.getElementById('setting-move-checked');
   if (moveCheckedInput) moveCheckedInput.checked = getMoveCheckedToBottom();
   const collapseSearchInput = document.getElementById('setting-collapse-search');
@@ -968,8 +971,15 @@ function showEditor(record, type, cursorHint) {
 
   if (type === 'note') {
     const { title, body } = splitTitleAndBody(record.body);
-    titleInput.placeholder = currentIsDefault ? 'Title (default note)' : 'Title';
-    bodyInput.placeholder = 'Start typing…';
+    // Placeholders spell out what each kind of note expects — the default
+    // note's title IS the customer's name, which isn't obvious otherwise.
+    if (currentIsDefault) {
+      titleInput.placeholder = 'Customer name (e.g. John Canuck)';
+      bodyInput.placeholder = 'Address, phone, email…';
+    } else {
+      titleInput.placeholder = record.customerId ? 'Note title' : 'General note title';
+      bodyInput.placeholder = 'Start typing…';
+    }
     titleInput.value = title;
     bodyInput.value = body;
   } else {
@@ -1559,10 +1569,32 @@ function commitSave() {
   }
 }
 
-fab.addEventListener('click', () => {
+// Home + : admins pick note or customer; employees only create general notes,
+// so for them it stays a single tap.
+const fabMenu = document.getElementById('fab-menu');
+function closeFabMenu() { if (fabMenu) fabMenu.hidden = true; }
+function newGeneralNote() {
   const note = Storage.createNote();
   returnScreen = 'notes';
   showEditor(note, 'note');
+}
+fab.addEventListener('click', (e) => {
+  if (!isAdminRole() || !fabMenu) { newGeneralNote(); return; }
+  e.stopPropagation();
+  fabMenu.hidden = !fabMenu.hidden;
+});
+const fabNewNote = document.getElementById('fab-new-note');
+const fabNewCustomer = document.getElementById('fab-new-customer');
+if (fabNewNote) fabNewNote.addEventListener('click', () => { closeFabMenu(); newGeneralNote(); });
+if (fabNewCustomer) fabNewCustomer.addEventListener('click', () => {
+  closeFabMenu();
+  const { customer, defaultNote } = Storage.createCustomer();
+  activeCustomerId = customer.id;
+  returnScreen = 'customer-notes';
+  showEditor(defaultNote, 'note');
+});
+document.addEventListener('click', (e) => {
+  if (fabMenu && !fabMenu.hidden && !fabMenu.contains(e.target) && e.target !== fab) closeFabMenu();
 });
 customersFab.addEventListener('click', () => {
   const { customer, defaultNote } = Storage.createCustomer();
@@ -2736,6 +2768,72 @@ if (signoutBtn) {
   signoutBtn.addEventListener('click', async () => { await signOut(auth); });
 }
 
+// ---------- sample data + first-run welcome ----------
+const seedBtn = document.getElementById('seed-btn');
+const unseedBtn = document.getElementById('unseed-btn');
+const seedStatus = document.getElementById('seed-status');
+const welcomeModal = document.getElementById('welcome-modal');
+
+function refreshSeedButtons() {
+  if (!seedBtn || !unseedBtn) return;
+  const has = Storage.hasSampleData();
+  unseedBtn.hidden = !has;
+  seedBtn.textContent = has ? 'Add more sample data' : 'Add sample data';
+}
+
+if (seedBtn) {
+  seedBtn.addEventListener('click', async () => {
+    seedBtn.disabled = true;
+    if (seedStatus) seedStatus.textContent = 'Adding…';
+    const { customers, notes } = await Storage.seedSampleData();
+    if (seedStatus) seedStatus.textContent = `Added ${customers} customers and ${notes} notes.`;
+    seedBtn.disabled = false;
+    refreshSeedButtons();
+  });
+}
+if (unseedBtn) {
+  unseedBtn.addEventListener('click', async () => {
+    if (!confirm('Remove all sample customers and notes? Your own data is not affected.')) return;
+    unseedBtn.disabled = true;
+    const { customers, notes } = await Storage.removeSampleData();
+    if (seedStatus) seedStatus.textContent = `Removed ${customers} customers and ${notes} notes.`;
+    unseedBtn.disabled = false;
+    refreshSeedButtons();
+  });
+}
+
+// Offer sample data + the tour the first time an admin opens an empty org.
+// The choice is stored org-side so other devices don't ask again.
+function maybeShowWelcome() {
+  if (!welcomeModal) return;
+  if (!isAdminRole()) return;
+  if (Storage.getSettings().onboardingSeen) return;
+  if (!Storage.isOrgEmpty()) return;
+  welcomeModal.hidden = false;
+}
+function dismissWelcome() {
+  if (welcomeModal) welcomeModal.hidden = true;
+  Storage.setSetting('onboardingSeen', true);
+}
+const welcomeSeedTour = document.getElementById('welcome-seed-tour');
+const welcomeTour = document.getElementById('welcome-tour');
+const welcomeEmpty = document.getElementById('welcome-empty');
+if (welcomeSeedTour) {
+  welcomeSeedTour.addEventListener('click', async () => {
+    welcomeSeedTour.disabled = true;
+    await Storage.seedSampleData();
+    refreshSeedButtons();
+    dismissWelcome();
+    welcomeSeedTour.disabled = false;
+    // Let the seeded data render before the first bubble measures its target
+    setTimeout(() => startTutorial(1), 200);
+  });
+}
+if (welcomeTour) {
+  welcomeTour.addEventListener('click', () => { dismissWelcome(); setTimeout(() => startTutorial(1), 100); });
+}
+if (welcomeEmpty) welcomeEmpty.addEventListener('click', dismissWelcome);
+
 // ---------- role-based UI ----------
 const ROLE_LABELS = { admin: 'Admin', employee: 'Employee', bookkeeper: 'Bookkeeper', customer: 'Customer' };
 
@@ -3072,6 +3170,9 @@ onAuthStateChanged(auth, async (user) => {
   if (pendingPasswordPrompt) {
     pendingPasswordPrompt = false;
     showSetPasswordModal();
+  } else {
+    // Brand-new empty org: offer sample data and the tour
+    maybeShowWelcome();
   }
 });
 
@@ -3660,6 +3761,12 @@ function tutorialSteps(part) {
     },
     {
       screen: 'customer-notes',
+      group: 'customer',
+      requires: () => Storage.listCustomers().length > 0,
+      fallback: {
+        target: () => document.querySelector('#notes-list .note-card[data-nav="customers"]'),
+        text: 'You have no customers yet. Add one from the Customers list — or load sample data from Settings — then run this tour again to see the rest.',
+      },
       setup: () => {
         const customers = Storage.listCustomers();
         if (!customers.length) return false;
@@ -3671,13 +3778,17 @@ function tutorialSteps(part) {
     },
     {
       screen: 'customer-notes',
+      group: 'customer',
+      requires: () => Storage.listCustomers().length > 0,
       target: () => document.getElementById('customer-notes-fab'),
       text: 'Tap + to add another note for this customer.',
     },
     {
       screen: 'customer-notes',
+      group: 'customer',
+      requires: () => Storage.listCustomers().length > 0,
       target: () => document.querySelector('#customer-notes-view .home-btn'),
-      text: 'Home takes you back here from anywhere.',
+      text: 'Tap Home on any screen to come back to the home screen.',
     },
   ];
 
@@ -3700,7 +3811,7 @@ function tutorialSteps(part) {
         {
           screen: 'home',
           target: () => document.querySelector('[data-section="aggregator"]'),
-          text: 'Start a paragraph with a keyword — todo, materials — and it shows up here. Tap the keyword to open every match as one note; edits save back into the original notes.',
+          text: 'Start a paragraph with a keyword — todo, materials — and it shows up here. Tap a keyword to see every matching paragraph auto-merged into one note you can edit; changes save back to the original notes.',
         },
       ],
       recent: [
@@ -3739,6 +3850,12 @@ function tutorialSteps(part) {
   return [
     {
       screen: 'editor',
+      group: 'note',
+      requires: () => Storage.listRecentCustomerNotes(1).length > 0,
+      fallback: {
+        target: () => document.getElementById('fab'),
+        text: 'Add a note first — tap + — and run this part again to see the editor tools.',
+      },
       setup: () => {
         const recent = Storage.listRecentCustomerNotes(1);
         if (!recent.length) return false;
@@ -3750,30 +3867,40 @@ function tutorialSteps(part) {
         return true;
       },
       target: () => document.getElementById('customer-link-btn'),
-      text: 'Shows which customer this note belongs to — tap to jump to them.',
+      text: 'Shows which customer this note belongs to — tap to go to their file.',
     },
     {
       screen: 'editor',
+      group: 'note',
+      requires: () => Storage.listRecentCustomerNotes(1).length > 0,
       target: () => document.getElementById('editor-more-btn'),
       text: 'Note tools: insert a date, share the note, move it to another customer.',
     },
     {
       screen: 'editor',
+      group: 'note',
+      requires: () => Storage.listRecentCustomerNotes(1).length > 0,
       target: () => document.getElementById('checkbox-btn'),
       text: 'Turn lines into a checklist. Tap a box in the text to check it off — the keyboard stays down.',
     },
     {
       screen: 'editor',
+      group: 'note',
+      requires: () => Storage.listRecentCustomerNotes(1).length > 0,
       target: () => document.getElementById('undo-btn'),
       text: 'Undo and redo your edits, one word or action at a time.',
     },
     {
       screen: 'editor',
+      group: 'note',
+      requires: () => Storage.listRecentCustomerNotes(1).length > 0,
       target: () => document.getElementById('note-search-input'),
       text: 'Find text in this note. Arrows appear when there’s more than one match.',
     },
     {
       screen: 'customer-notes',
+      group: 'customer',
+      requires: () => Storage.listCustomers().length > 0,
       setup: () => {
         const customers = Storage.listCustomers();
         if (!customers.length) return false;
@@ -3813,55 +3940,114 @@ function positionBubble(targetEl) {
   const arrowSize = 18;
   const vw = window.innerWidth;
   const vh = window.innerHeight;
+  const clampX = (x) => Math.max(8, Math.min(x, vw - bw - 8));
+  const clampY = (y) => Math.max(8, Math.min(y, vh - bh - 8));
 
   const spaceBelow = vh - r.bottom - margin;
   const spaceAbove = r.top - margin;
   const spaceRight = vw - r.right - margin;
+  const spaceLeft = r.left - margin;
 
+  // Prefer a side that actually fits; otherwise take the roomiest one so the
+  // bubble never has to sit on top of the thing it's pointing at.
   let placement;
   if (spaceBelow >= bh + arrowSize) placement = 'below';
   else if (spaceAbove >= bh + arrowSize) placement = 'above';
   else if (spaceRight >= bw + arrowSize) placement = 'right';
-  else placement = 'left';
+  else if (spaceLeft >= bw + arrowSize) placement = 'left';
+  else {
+    const best = Math.max(spaceBelow, spaceAbove, spaceRight, spaceLeft);
+    placement = best === spaceBelow ? 'below'
+      : best === spaceAbove ? 'above'
+      : best === spaceRight ? 'right' : 'left';
+  }
 
   let top, left;
   const targetCX = r.left + r.width / 2;
   const targetCY = r.top + r.height / 2;
 
   if (placement === 'below') {
-    top = r.bottom + arrowSize;
-    left = Math.max(8, Math.min(targetCX - bw / 2, vw - bw - 8));
+    top = clampY(r.bottom + arrowSize);
+    left = clampX(targetCX - bw / 2);
     const arrowH = Math.max(8, Math.min(targetCX - left - 8, bw - 24));
     tutorialBubble.className = 'tutorial-bubble arrow-up';
     tutorialBubble.style.setProperty('--arrow-h', arrowH + 'px');
   } else if (placement === 'above') {
-    top = r.top - bh - arrowSize;
-    left = Math.max(8, Math.min(targetCX - bw / 2, vw - bw - 8));
+    top = clampY(r.top - bh - arrowSize);
+    left = clampX(targetCX - bw / 2);
     const arrowH = Math.max(8, Math.min(targetCX - left - 8, bw - 24));
     tutorialBubble.className = 'tutorial-bubble arrow-down';
     tutorialBubble.style.setProperty('--arrow-h', arrowH + 'px');
   } else if (placement === 'right') {
-    left = r.right + arrowSize;
-    top = Math.max(8, Math.min(targetCY - bh / 2, vh - bh - 8));
+    left = clampX(r.right + arrowSize);
+    top = clampY(targetCY - bh / 2);
     const arrowV = Math.max(8, Math.min(targetCY - top - 8, bh - 24));
     tutorialBubble.className = 'tutorial-bubble arrow-left';
     tutorialBubble.style.setProperty('--arrow-v', arrowV + 'px');
   } else {
-    left = r.left - bw - arrowSize;
-    top = Math.max(8, Math.min(targetCY - bh / 2, vh - bh - 8));
+    left = clampX(r.left - bw - arrowSize);
+    top = clampY(targetCY - bh / 2);
     const arrowV = Math.max(8, Math.min(targetCY - top - 8, bh - 24));
     tutorialBubble.className = 'tutorial-bubble arrow-right';
     tutorialBubble.style.setProperty('--arrow-v', arrowV + 'px');
   }
 
-  tutorialBubble.style.top = Math.max(8, top) + 'px';
-  tutorialBubble.style.left = Math.max(8, left) + 'px';
+  tutorialBubble.style.top = top + 'px';
+  tutorialBubble.style.left = left + 'px';
 }
+
+// iOS scrolls asynchronously (and its address bar resizes the viewport), so a
+// position measured right after scrollIntoView lands where the target WAS.
+// Wait for the rect to stop moving before the first placement.
+function waitForScrollSettle(el, timeout = 600) {
+  return new Promise(resolve => {
+    let last = null, stable = 0;
+    const started = Date.now();
+    const tick = () => {
+      const r = el.getBoundingClientRect();
+      const key = Math.round(r.top) + ':' + Math.round(r.left);
+      if (key === last) stable++; else { stable = 0; last = key; }
+      if (stable >= 2 || Date.now() - started > timeout) { resolve(); return; }
+      requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  });
+}
+
+// Keep the bubble glued to its target while the step is on screen: the user
+// can scroll, rotate, or watch the iOS toolbar resize the viewport.
+let bubbleTarget = null;
+let bubbleTickQueued = false;
+function repositionBubble() {
+  if (!bubbleTarget || !tutorialOverlay || tutorialOverlay.hidden) return;
+  if (bubbleTickQueued) return;
+  bubbleTickQueued = true;
+  requestAnimationFrame(() => {
+    bubbleTickQueued = false;
+    if (bubbleTarget && tutorialOverlay && !tutorialOverlay.hidden) positionBubble(bubbleTarget);
+  });
+}
+window.addEventListener('scroll', repositionBubble, { passive: true });
+window.addEventListener('resize', repositionBubble);
+window.addEventListener('orientationchange', repositionBubble);
 
 // A step whose data doesn't exist yet (no customers, no notes) shouldn't kill
 // the tour — skip forward, or back if we're reversing, and only stop when a
 // whole part has nothing to show.
 let tutorialDirection = 1;
+// Groups of steps that need data (a customer, a note). When it's missing, the
+// group shows ONE substitute bubble instead of silently vanishing.
+let tutorialGroupShown = {};
+// An element on an inactive screen still EXISTS (screens are display:none), so
+// existence isn't enough — it must actually be laid out, or the bubble ends up
+// parked in the corner pointing at nothing.
+function isTargetVisible(el) {
+  if (!el || !el.getBoundingClientRect) return false;
+  if (el.offsetParent === null && getComputedStyle(el).position !== 'fixed') return false;
+  const r = el.getBoundingClientRect();
+  return r.width > 0 && r.height > 0;
+}
+
 function tutorialSkipStep(index) {
   const steps = tutorialSteps(tutorialPart);
   const next = index + tutorialDirection;
@@ -3889,6 +4075,19 @@ async function runTutorialStep(index) {
   // would make step targets disappear — start every step from a clean slate.
   clearAllSearches();
 
+  // A step whose data is missing: show the group's substitute bubble once,
+  // then skip the rest of that group.
+  if (step.group && step.requires && !step.requires()) {
+    if (tutorialGroupShown[step.group] || !step.fallback) { tutorialSkipStep(index); return; }
+    tutorialGroupShown[step.group] = true;
+    goHome();
+    await new Promise(r => setTimeout(r, 120));
+    const fbTarget = step.fallback.target();
+    if (!isTargetVisible(fbTarget)) { tutorialSkipStep(index); return; }
+    showTutorialBubble(fbTarget, step.fallback.text, index, steps.length);
+    return;
+  }
+
   // Navigate if needed
   if (step.setup) {
     const ok = step.setup();
@@ -3906,45 +4105,58 @@ async function runTutorialStep(index) {
   await new Promise(r => setTimeout(r, 120));
 
   const target = step.target();
-  if (!target) { tutorialSkipStep(index); return; }
+  if (!isTargetVisible(target)) { tutorialSkipStep(index); return; }
 
-  // Scroll target into view if needed
+  await showTutorialBubble(target, step.text, index, steps.length);
+}
+
+// Point the bubble at an element and wire the footer controls.
+async function showTutorialBubble(target, text, index, stepCount) {
   target.scrollIntoView({ block: 'center', behavior: 'instant' });
-  await new Promise(r => setTimeout(r, 30));
+  await waitForScrollSettle(target);
 
-  tutorialText.textContent = step.text;
-  if (tutorialProgress) tutorialProgress.textContent = `Part ${tutorialPart} · ${index + 1} of ${steps.length}`;
+  tutorialText.textContent = text;
+  if (tutorialProgress) tutorialProgress.textContent = `Part ${tutorialPart} \u00b7 ${index + 1} of ${stepCount}`;
   // Back is always visible, greyed when there's nothing before this step
   // (step 1 of the part the user launched).
   if (tutorialBack) {
     tutorialBack.hidden = false;
-    tutorialBack.textContent = '←';
+    tutorialBack.textContent = '\u2190';
     tutorialBack.disabled = (index === 0 && tutorialPart === tutorialStartPart);
   }
   // Last bubble of parts 1 and 2 chains into the next part
   if (tutorialNext) {
-    const last = index === steps.length - 1;
-    tutorialNext.textContent = !last ? 'Got it →'
-      : (tutorialPart < TUTORIAL_PARTS ? 'Next part →' : 'Done ✓');
+    const last = index === stepCount - 1;
+    tutorialNext.textContent = !last ? 'Got it \u2192'
+      : (tutorialPart < TUTORIAL_PARTS ? 'Next part \u2192' : 'Done \u2713');
     tutorialNext.disabled = false;
   }
   tutorialOverlay.hidden = false;
   // Render bubble off-screen first to measure height
   tutorialBubble.style.top = '-9999px';
   tutorialBubble.style.left = '-9999px';
-  await new Promise(r => setTimeout(r, 30));
+  await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+  bubbleTarget = target;
   positionBubble(target);
 
-  // Highlight target
+  // Highlight target, and dim everything else so "where to tap" is obvious.
+  // The huge spread box-shadow is the spotlight; it needs a stacking context.
   target.style.outline = '3px solid var(--accent, #2563eb)';
   target.style.outlineOffset = '3px';
+  target.style.boxShadow = '0 0 0 9999px rgba(0,0,0,0.55)';
+  target.style.position = target.style.position || 'relative';
+  target.style.zIndex = '1000';
   target.dataset.tutorialHighlight = '1';
 }
 
 function clearHighlights() {
+  bubbleTarget = null;
   document.querySelectorAll('[data-tutorial-highlight]').forEach(el => {
     el.style.outline = '';
     el.style.outlineOffset = '';
+    el.style.boxShadow = '';
+    el.style.zIndex = '';
+    el.style.position = '';
     delete el.dataset.tutorialHighlight;
   });
 }
@@ -3955,6 +4167,18 @@ function endTutorial() {
   tutorialStepIndex = 0;
   tutorialPart = 1;
   tutorialStartPart = 1;
+  tutorialGroupShown = {};
+}
+
+// Start a tutorial part programmatically (welcome modal, sample-data flow)
+function startTutorial(part) {
+  tutorialPart = part || 1;
+  tutorialStartPart = tutorialPart;
+  tutorialDirection = 1;
+  tutorialStepIndex = 0;
+  tutorialGroupShown = {};
+  clearAllSearches();
+  runTutorialStep(0);
 }
 
 if (tutorialNext) tutorialNext.addEventListener('click', () => {
@@ -4000,6 +4224,7 @@ document.querySelectorAll('[data-tutorial-part]').forEach(btn => {
     tutorialStartPart = tutorialPart;
     tutorialDirection = 1;
     tutorialStepIndex = 0;
+    tutorialGroupShown = {};
     clearAllSearches();
     runTutorialStep(0);
   });

@@ -90,6 +90,10 @@
     <main id="notes-list" class="notes-list">
       <p class="empty-state" style="font-style:normal"><span class="nav-spinner" style="width:20px;height:20px;border-width:3px;"></span></p>
     </main>
+    <div id="fab-menu" class="fab-menu" hidden>
+      <button id="fab-new-note" class="fab-menu-item" type="button">New general note</button>
+      <button id="fab-new-customer" class="fab-menu-item" type="button">New customer</button>
+    </div>
     <button id="fab" class="fab" aria-label="New note">+</button>
   </section>
 
@@ -291,6 +295,14 @@
       </div>
 
       <div class="setting-row setting-list-row" data-staff-only>
+        <h3 class="setting-list-title">Sample data</h3>
+        <p class="muted setting-hint">Fills the app with a few example customers, notes and keywords so you can try things out. Remove it any time — your own data isn’t touched.</p>
+        <button id="seed-btn" class="secondary setting-wide-btn">Add sample data</button>
+        <button id="unseed-btn" class="secondary setting-wide-btn" hidden>Remove sample data</button>
+        <p id="seed-status" class="muted setting-hint" style="margin-top:8px;"></p>
+      </div>
+
+      <div class="setting-row setting-list-row" data-staff-only>
         <h3 class="setting-list-title">Import customers from CSV</h3>
         <p class="muted" style="margin:0 0 8px; font-size:13px;">
           Paste rows from a spreadsheet. First row is treated as column headers (unchecked → first row is a customer). Each row becomes a customer; non-empty cells are joined as lines in their default note.
@@ -390,6 +402,21 @@
       </div>
     </main>
   </section>
+
+  <!-- First-run welcome (empty org, admin only) -->
+  <div id="welcome-modal" class="modal-overlay" hidden>
+    <div class="modal-panel">
+      <div class="modal-header">
+        <h2 class="modal-title">Welcome to JobPilot</h2>
+      </div>
+      <p class="modal-hint">Your app is empty. Want to look around with some sample customers and notes first? You can remove them any time from Settings.</p>
+      <div class="setting-btn-col">
+        <button id="welcome-seed-tour" class="primary setting-wide-btn">Add sample data &amp; take the tour</button>
+        <button id="welcome-tour" class="secondary setting-wide-btn">Just take the tour</button>
+        <button id="welcome-empty" class="secondary setting-wide-btn">Start empty</button>
+      </div>
+    </div>
+  </div>
 
   <!-- Compiled Aggregator Resolve Modal -->
   <div id="compiled-modal" class="modal-overlay" hidden>
