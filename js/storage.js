@@ -300,14 +300,15 @@ export const Storage = {
     deleteDoc(doc(notesCol(), id)).catch(err => console.warn("deleteNote", err));
   },
 
+  // customerId === null moves the note back to the general pool.
   assignNoteToCustomer(noteId, customerId) {
     const i = _cache.notes.findIndex(n => n.id === noteId);
     if (i === -1) return null;
     // Stamp the denormalized customer name so non-admin viewers see the
     // NEW customer, not a stale snapshot from before the move.
     const next = {
-      ..._cache.notes[i], customerId, updated: nowIso(),
-      customerName: this.getCustomerNameSnapshot(customerId),
+      ..._cache.notes[i], customerId: customerId || null, updated: nowIso(),
+      customerName: customerId ? this.getCustomerNameSnapshot(customerId) : '',
     };
     _cache.notes[i] = next;
     emit();

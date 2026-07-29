@@ -13,6 +13,8 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 10, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.07.28-2153', 'A customer note can be turned back into a general note from the assign picker'],
+  ['v2026.07.28-2152', 'Employees no longer see a customer link that led to an error'],
   ['v2026.07.28-2151', 'Tutorial wording tightened; undo/redo, orphaned notes and replay steps added'],
   ['v2026.07.28-2150', 'Tutorials clear search filters and skip steps with nothing to show'],
   ['v2026.07.28-2145', 'Signing in from an emailed link is clearer and retryable, with an install tip'],
@@ -21,8 +23,6 @@ const CHANGELOG = [
   ['v2026.07.28-2058', 'Role changes apply live — no need to restart the app'],
   ['v2026.07.28-2041', 'Going back to a list returns you to where you were; Home still goes to the top'],
   ['v2026.07.28-2025', 'Internal cleanup: removed leftover code for buttons deleted back in v64'],
-  ['v2026.07.28-2012', 'Settings regrouped — Time Logger and IIF export together — and tidier on small screens'],
-  ['v2026.07.28-1955', 'Tutorial: back arrow always shown (greyed at the start), shorter button labels'],
 ];
 const APP_VERSION = CHANGELOG[0][0];
 
@@ -1008,7 +1008,10 @@ function showEditor(record, type, cursorHint) {
 
   const sameAsBack = returnScreen === 'customer-notes'
     && record.customerId && record.customerId === activeCustomerId;
-  if (type === 'note' && record.customerId && !sameAsBack) {
+  // Only roles that can READ the customers collection get the link — employees
+  // and customers can't, so for them it showed "Go to: Customer" and led to a
+  // bogus "this customer no longer exists" alert.
+  if (type === 'note' && record.customerId && !sameAsBack && canViewAllRole()) {
     const def = Storage.getDefaultNoteForCustomer(record.customerId);
     const name = def ? splitTitleAndBody(def.body).title.trim() : '';
     customerLinkBtn.textContent = 'Go to: ' + ((name && name.length > 0) ? name : 'Customer');
@@ -2332,11 +2335,22 @@ function renderAssignCustomerList(filter) {
     return words.every(w => haystack.includes(w));
   });
   if (!assignCustomerList) return;
+  // A note that already belongs to a customer can be sent back to the general
+  // pool from here (no separate menu item needed).
+  const note = currentId ? Storage.getNote(currentId) : null;
+  const noneRow = (note && note.customerId)
+    ? `<li class="assign-customer-item assign-customer-none" data-id="">
+         <p class="assign-none-title">None — make this a general note</p>
+         <p class="assign-none-hint">Removes it from the customer; the note itself is kept.</p>
+       </li>`
+    : '';
   if (customers.length === 0) {
-    assignCustomerList.innerHTML = '<li style="padding:10px;font-size:14px;color:var(--ink-soft)">No customers found.</li>';
+    assignCustomerList.innerHTML = noneRow
+      + '<li style="padding:10px;font-size:14px;color:var(--ink-soft)">No customers found.</li>';
+    wireAssignCustomerRows();
     return;
   }
-  assignCustomerList.innerHTML = customers.map(c => {
+  assignCustomerList.innerHTML = noneRow + customers.map(c => {
     const def = Storage.getDefaultNoteForCustomer(c.id);
     const { title, body } = def ? splitTitleAndBody(def.body) : { title: '', body: '' };
     const name = title.trim() || 'Unnamed customer';
@@ -2346,16 +2360,26 @@ function renderAssignCustomerList(filter) {
       ${secondLine ? `<p style="margin:2px 0 0;font-size:12px;color:var(--ink-soft);">${escapeHtml(secondLine)}</p>` : ''}
     </li>`;
   }).join('');
+  wireAssignCustomerRows();
+}
+
+function wireAssignCustomerRows() {
   assignCustomerList.querySelectorAll('.assign-customer-item').forEach(item => {
     item.addEventListener('click', () => {
       if (!currentId) return;
       commitSave();
-      Storage.assignNoteToCustomer(currentId, item.dataset.id);
+      const targetId = item.dataset.id || null; // '' = None (general note)
+      Storage.assignNoteToCustomer(currentId, targetId);
       assignCustomerModal.hidden = true;
       currentId = null; currentType = null; currentIsDefault = false;
-      activeCustomerId = item.dataset.id;
+      if (!targetId) {
+        activeCustomerId = null;
+        showNotes();
+        return;
+      }
+      activeCustomerId = targetId;
       returnScreen = 'customer-notes';
-      showCustomerNotes(item.dataset.id);
+      showCustomerNotes(targetId);
     });
   });
 }
