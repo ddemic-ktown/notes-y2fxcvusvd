@@ -13,6 +13,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 10, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.07.28-2151', 'Tutorial wording tightened; undo/redo, orphaned notes and replay steps added'],
   ['v2026.07.28-2150', 'Tutorials clear search filters and skip steps with nothing to show'],
   ['v2026.07.28-2145', 'Signing in from an emailed link is clearer and retryable, with an install tip'],
   ['v2026.07.28-2130', 'Customer sort is now per device (bookkeepers can sort too) and steppers write less'],
@@ -22,7 +23,6 @@ const CHANGELOG = [
   ['v2026.07.28-2025', 'Internal cleanup: removed leftover code for buttons deleted back in v64'],
   ['v2026.07.28-2012', 'Settings regrouped — Time Logger and IIF export together — and tidier on small screens'],
   ['v2026.07.28-1955', 'Tutorial: back arrow always shown (greyed at the start), shorter button labels'],
-  ['v2026.07.28-1820', 'Home screen headings get − + ↑ ↓ controls; the matching settings options are gone'],
 ];
 const APP_VERSION = CHANGELOG[0][0];
 
@@ -3621,18 +3621,18 @@ function tutorialSteps(part) {
     {
       screen: 'home',
       target: () => document.getElementById('settings-btn'),
-      text: 'On the home screen, the settings button is in the upper right.',
+      text: 'Settings live here — keywords, users, your QuickBooks export.',
     },
     {
       screen: 'home',
       target: () => document.querySelector('#notes-list .note-card[data-nav="customers"]'),
-      text: 'Click here to view and add customers.',
+      text: 'Your customers live here. Tap to open the list.',
     },
     {
       screen: 'customers',
       setup: () => showCustomers(),
       target: () => document.getElementById('customers-fab'),
-      text: 'After tapping the customers card, the list of all customers is shown. Add a new customer with the blue +.',
+      text: 'Tap + to add a customer.',
     },
     {
       screen: 'customer-notes',
@@ -3643,17 +3643,17 @@ function tutorialSteps(part) {
         return true;
       },
       target: () => document.querySelector('#customer-notes-list .note-card'),
-      text: 'After clicking on a customer, it shows you the list of notes for that customer. The default note\'s title is treated as the customer\'s name.',
+      text: 'Each customer has their own notes. The first note’s TITLE is the customer’s name — everything below it is their contact info.',
     },
     {
       screen: 'customer-notes',
       target: () => document.getElementById('customer-notes-fab'),
-      text: 'You can add new notes to the selected customer by tapping the blue +.',
+      text: 'Tap + to add another note for this customer.',
     },
     {
       screen: 'customer-notes',
       target: () => document.querySelector('#customer-notes-view .home-btn'),
-      text: 'You can click the home button any time to go back to the home screen.',
+      text: 'Home takes you back here from anywhere.',
     },
   ];
 
@@ -3664,31 +3664,31 @@ function tutorialSteps(part) {
         {
           screen: 'home',
           target: () => document.querySelector('[data-section="notes"]'),
-          text: 'The home screen, in addition to the customers card, also has general notes that are not assigned to any customer.',
+          text: 'General notes aren’t tied to a customer — shopping lists, reminders, your hours.',
         },
         {
           screen: 'home',
           target: () => document.getElementById('fab'),
-          text: 'Tapping the blue + on the home screen will add a new general note.',
+          text: 'Tap + for a new general note.',
         },
       ],
       aggregator: [
         {
           screen: 'home',
           target: () => document.querySelector('[data-section="aggregator"]'),
-          text: 'Aggregator cards collect paragraphs that start with your keywords (todo, to buy, materials…). Tap a keyword to open them all as ONE note — edits there save straight back into each customer\'s note.',
+          text: 'Start a paragraph with a keyword — todo, materials — and it shows up here. Tap the keyword to open every match as one note; edits save back into the original notes.',
         },
       ],
       recent: [
         {
           screen: 'home',
           target: () => document.querySelector('[data-section="recent"]'),
-          text: 'The home screen also shows the customer notes that have been edited last.',
+          text: 'The customer notes you edited most recently.',
         },
         {
           screen: 'home',
           target: () => document.querySelector('#notes-list .home-pinned'),
-          text: 'Clicking on a note brings up the note to view and edit.',
+          text: 'Tap any card to open the note.',
         },
       ],
     };
@@ -3697,12 +3697,17 @@ function tutorialSteps(part) {
     ordered.push({
       screen: 'home',
       target: () => document.getElementById('home-search-input'),
-      text: 'Search every note by words here. Open a result and your search is carried into the note with the first match highlighted. The ✕ clears a search any time.',
+      text: 'Search all your notes at once. Open a result and the word is already highlighted inside the note.',
     });
     ordered.push({
       screen: 'home',
       target: () => document.querySelector('#notes-list .section-ctrls'),
-      text: 'Each heading has its own controls: − and + change how many items that section shows, ↑ and ↓ move the whole section up or down the home screen.',
+      text: '− and + change how many items a section shows. ↑ and ↓ reorder the sections.',
+    });
+    ordered.push({
+      screen: 'home',
+      target: () => document.querySelector('#notes-list .orphan-nav-card'),
+      text: 'Notes whose customer was deleted land here, so nothing is lost by accident.',
     });
     return ordered;
   }
@@ -3721,22 +3726,27 @@ function tutorialSteps(part) {
         return true;
       },
       target: () => document.getElementById('customer-link-btn'),
-      text: 'You can see which customer this note is assigned to at the top.',
+      text: 'Shows which customer this note belongs to — tap to jump to them.',
     },
     {
       screen: 'editor',
       target: () => document.getElementById('editor-more-btn'),
-      text: 'The ⋯ menu holds the note tools: insert a date, share with users, assign the note to a customer — or move it to a different one — and Generate IIF on the hours note.',
+      text: 'Note tools: insert a date, share the note, move it to another customer.',
     },
     {
       screen: 'editor',
       target: () => document.getElementById('checkbox-btn'),
-      text: 'This button adds or removes checkboxes on the current line or selection. Tap a checkbox in the text to check it off — the keyboard stays out of the way.',
+      text: 'Turn lines into a checklist. Tap a box in the text to check it off — the keyboard stays down.',
+    },
+    {
+      screen: 'editor',
+      target: () => document.getElementById('undo-btn'),
+      text: 'Undo and redo your edits, one word or action at a time.',
     },
     {
       screen: 'editor',
       target: () => document.getElementById('note-search-input'),
-      text: 'Find text inside the note here — every match is highlighted and the arrows jump between them.',
+      text: 'Find text in this note. Arrows appear when there’s more than one match.',
     },
     {
       screen: 'customer-notes',
@@ -3747,7 +3757,7 @@ function tutorialSteps(part) {
         return true;
       },
       target: () => document.getElementById('customer-files-section'),
-      text: 'Each customer also has a Files section for photos and documents. Files stay on this device only — they are not synced.',
+      text: 'Photos and documents for this customer. They stay on this device only — not synced or backed up.',
     },
     {
       screen: 'settings',
@@ -3756,7 +3766,16 @@ function tutorialSteps(part) {
         const el = document.getElementById('setting-move-checked');
         return el ? el.closest('.setting-row') : null;
       },
-      text: 'Optional: turn this on and checked-off items sink to the bottom of their paragraph. It\'s a per-device setting.',
+      text: 'Optional: checked-off items sink to the bottom of their paragraph.',
+    },
+    {
+      screen: 'settings',
+      setup: () => { showSettings(); return true; },
+      target: () => {
+        const el = document.getElementById('tutorial-btn-1');
+        return el ? el.closest('.setting-row') : null;
+      },
+      text: 'Replay any part of this tour any time.',
     },
   ];
 }
