@@ -13,6 +13,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 10, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.07.28-1803', 'Aggregators now include general notes, labelled by note title and owner'],
   ['v2026.07.25-1422', 'Checkbox taps really keep the keyboard down now'],
   ['v2026.07.25-1407', 'Search arrows show only with 2+ hits; optional 🔍-collapsed search bars'],
   ['v2026.07.25-1251', 'Redo button joins undo in the editor'],
@@ -22,7 +23,6 @@ const CHANGELOG = [
   ['v2026.07.25-1201', 'Tapping a checkbox no longer brings up the keyboard'],
   ['v2026.07.25-1136', 'Opening a note from home search highlights the search term inside the note'],
   ['v2026.07.25-1128', 'Show/Hide password button on the sign-in screen and the set-password prompt'],
-  ['v2026.07.25-1127', 'Checking a box keeps the cursor in place while the line sinks to the paragraph bottom'],
 ];
 const APP_VERSION = CHANGELOG[0][0];
 
@@ -422,13 +422,36 @@ if (compiledModalClose) compiledModalClose.addEventListener('click', () => close
 
 function compiledHeaderLine(name) { return `━━ ${name} ━━`; }
 
+// Label for one aggregator match: the customer's name for customer notes; for
+// general notes the note's own title, plus the owner's name when the note
+// belongs to someone else (so you can see whose note you're editing).
+function aggregateMatchLabel(match) {
+  if (match.customerId) {
+    const def = Storage.getDefaultNoteForCustomer(match.customerId);
+    const name = def ? (splitTitleAndBody(def.body).title || '').trim() : '';
+    return name || 'Unnamed customer';
+  }
+  const note = Storage.getNote(match.noteId);
+  const title = note ? (splitTitleAndBody(note.body).title || '').trim() : '';
+  let label = title || 'General note';
+  const owners = (note && Array.isArray(note.assignedTo) ? note.assignedTo : [])
+    .filter(uid => uid !== Storage.getUid())
+    .map(uid => {
+      const m = Storage.getMember(uid);
+      return m ? (m.name || m.email || '') : '';
+    })
+    .filter(Boolean);
+  if (owners.length) label += ' — ' + owners.join(', ');
+  return label;
+}
+
 function buildCompiledSections(keyword) {
   const matches = Storage.aggregateParagraphsByKeyword(keyword);
-  compiledSections = matches.map(m => {
-    const def = Storage.getDefaultNoteForCustomer(m.customerId);
-    const name = (def ? (splitTitleAndBody(def.body).title || '').trim() : '') || 'Unnamed customer';
-    return { noteId: m.noteId, expectedName: name, originalParagraph: m.paragraph };
-  });
+  compiledSections = matches.map(m => ({
+    noteId: m.noteId,
+    expectedName: aggregateMatchLabel(m),
+    originalParagraph: m.paragraph,
+  }));
   return compiledSections.map(s => compiledHeaderLine(s.expectedName) + '\n' + s.originalParagraph).join('\n\n');
 }
 
@@ -742,11 +765,12 @@ function renderSectionView(key) {
       let previewHtml = '';
       if (count > 0) {
         const m = matches[0];
-        const def = Storage.getDefaultNoteForCustomer(m.customerId);
-        const customerName = def ? (splitTitleAndBody(def.body).title || '').trim() : '';
+        const label = aggregateMatchLabel(m);
         const list = stripKeywordToList(m.paragraph, kw);
-        const notePart = Storage.getNote(m.noteId) ? ` - ${escapeHtml((splitTitleAndBody(Storage.getNote(m.noteId).body).title || '').trim())}` : '';
-        previewHtml = `<span class="match-customer">${escapeHtml(customerName || 'Unnamed customer')}</span>${notePart} - ${escapeHtml(list || '(empty)')}`;
+        const note = Storage.getNote(m.noteId);
+        const noteTitle = (m.customerId && note) ? (splitTitleAndBody(note.body).title || '').trim() : '';
+        const notePart = noteTitle ? ` - ${escapeHtml(noteTitle)}` : '';
+        previewHtml = `<span class="match-customer">${escapeHtml(label)}</span>${notePart} - ${escapeHtml(list || '(empty)')}`;
       }
       return `
         <article class="note-card keyword-card" data-keyword="${escapeHtml(kw)}">
@@ -1176,14 +1200,14 @@ function renderNotesList() {
     let previewHtml = '';
     if (count > 0) {
       const m = matches[0];
-      const def = Storage.getDefaultNoteForCustomer(m.customerId);
-      const customerName = def ? (splitTitleAndBody(def.body).title || '').trim() : '';
-      const customer = customerName || 'Unnamed customer';
+      const label = aggregateMatchLabel(m);
       const note = Storage.getNote(m.noteId);
-      const noteTitle = note ? (splitTitleAndBody(note.body).title || '').trim() : '';
+      // For customer notes the note title adds context; for general notes the
+      // label IS the note title, so don't repeat it.
+      const noteTitle = (m.customerId && note) ? (splitTitleAndBody(note.body).title || '').trim() : '';
       const list = stripKeywordToList(m.paragraph, kw);
       const notePart = noteTitle ? ` - ${escapeHtml(noteTitle)}` : '';
-      previewHtml = `<span class="match-customer">${escapeHtml(customer)}</span>${notePart} - ${escapeHtml(list || '(empty)')}`;
+      previewHtml = `<span class="match-customer">${escapeHtml(label)}</span>${notePart} - ${escapeHtml(list || '(empty)')}`;
     }
     return `
       <article class="note-card keyword-card" data-keyword="${escapeHtml(kw)}">

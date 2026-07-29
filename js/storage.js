@@ -356,8 +356,9 @@ export const Storage = {
     const kwLower = keyword.toLowerCase();
     const results = [];
     for (const note of _cache.notes) {
-      if (!note.customerId) continue;
-      if (_customersReady && !_cache.customers.find(c => c.id === note.customerId)) {
+      // General notes (no customerId) ARE aggregated — the app labels them
+      // with the note title (plus the owner's name when it isn't the viewer's).
+      if (note.customerId && _customersReady && !_cache.customers.find(c => c.id === note.customerId)) {
         // Orphaned note — skip it in aggregation results.
         // The app will prompt the user to delete or ignore orphaned notes.
         continue;
@@ -377,7 +378,7 @@ export const Storage = {
               j++;
             }
             results.push({
-              noteId: note.id, customerId: note.customerId,
+              noteId: note.id, customerId: note.customerId || null,
               paragraph: paraLines.join("\n"), updated: note.updated,
             });
             i = j;
