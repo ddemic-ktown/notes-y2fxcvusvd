@@ -13,6 +13,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 10, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.07.30-0211', 'Cancel always fits on small screens; the bin is hidden while it shows'],
   ['v2026.07.30-0200', 'Cancel button when adding a new customer or note discards it'],
   ['v2026.07.30-0158', 'Fixed: the note toolbar could scroll out of view right after the app loaded'],
   ['v2026.07.30-0154', 'Tapping an empty checkbox line lets you type instead of ticking it'],
@@ -22,7 +23,6 @@ const CHANGELOG = [
   ['v2026.07.30-0138', 'Price Table: pinch to zoom, reorder rows and columns, CSV export and import'],
   ['v2026.07.30-0125', 'New Price Table: items × vendors, latest price and availability, full history per cell'],
   ['v2026.07.28-2322', 'Every screen shows a Home › Customers › … trail so you always know where you are'],
-  ['v2026.07.28-2308', 'Tutorial now describes the + menu on the home screen'],
 ];
 const APP_VERSION = CHANGELOG[0][0];
 
@@ -2901,6 +2901,10 @@ function updateCancelBtn() {
   if (!editorCancelBtn) return;
   const show = !!pendingNewRecord && currentType === 'note' && currentId === pendingNewRecord.id;
   editorCancelBtn.hidden = !show;
+  // Cancel already discards the record — showing 🗑 next to it is redundant.
+  // (showEditor sets delete per role/note type; this only overrides while a
+  // brand-new record is open.)
+  if (show && deleteBtn) deleteBtn.style.display = 'none';
 }
 if (editorCancelBtn) editorCancelBtn.addEventListener('click', () => {
   const rec = pendingNewRecord;
