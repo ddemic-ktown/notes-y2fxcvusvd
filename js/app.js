@@ -13,16 +13,16 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 10, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.07.30-0200', 'Cancel button when adding a new customer or note discards it'],
+  ['v2026.07.30-0158', 'Fixed: the note toolbar could scroll out of view right after the app loaded'],
+  ['v2026.07.30-0154', 'Tapping an empty checkbox line lets you type instead of ticking it'],
+  ['v2026.07.30-0150', 'Section controls hide until you tap Layout on the home screen'],
+  ['v2026.07.30-0148', 'Customers and Price Table cards sit side by side on the home screen'],
+  ['v2026.07.30-0147', 'Price Table: reorder, export, import and share moved into a ⋯ menu'],
   ['v2026.07.30-0138', 'Price Table: pinch to zoom, reorder rows and columns, CSV export and import'],
   ['v2026.07.30-0125', 'New Price Table: items × vendors, latest price and availability, full history per cell'],
   ['v2026.07.28-2322', 'Every screen shows a Home › Customers › … trail so you always know where you are'],
   ['v2026.07.28-2308', 'Tutorial now describes the + menu on the home screen'],
-  ['v2026.07.28-2253', 'Clearer wording: only the first note’s title is used as the customer’s name'],
-  ['v2026.07.28-2250', 'Fixed: the + button disappeared while the tutorial highlighted it'],
-  ['v2026.07.28-2248', 'Fixed: tutorial bubble drifted sideways when scrolling on desktop'],
-  ['v2026.07.28-2237', 'Tutorial bubbles stay put when you scroll, fit the screen, and dim the background'],
-  ['v2026.07.28-2230', 'Home + offers note or customer; clearer placeholders on new notes'],
-  ['v2026.07.28-2203', 'Sample data you can add or remove, a welcome offer on an empty app, smoother tutorial'],
 ];
 const APP_VERSION = CHANGELOG[0][0];
 
@@ -482,6 +482,12 @@ function renderPriceTable() {
   if (reorderBtn) reorderBtn.hidden = !canEdit;
   if (importBtn) importBtn.hidden = !canEdit;
   if (exportBtn) exportBtn.hidden = !Storage.canViewPriceTable();
+  // Hide the ⋯ button when every item inside it is hidden
+  const moreWrap = priceMoreBtn ? priceMoreBtn.closest('.editor-more-wrap') : null;
+  if (moreWrap) {
+    const anyVisible = [reorderBtn, importBtn, exportBtn, shareBtn].some(b => b && !b.hidden);
+    moreWrap.style.display = anyVisible ? '' : 'none';
+  }
 
   if (!cfg.vendors.length && !items.length) {
     priceTableEl.innerHTML = `<tbody><tr><td class="price-empty-state">${canEdit
@@ -681,6 +687,18 @@ if (priceShareBtn) priceShareBtn.addEventListener('click', () => {
 if (priceShareClose) priceShareClose.addEventListener('click', () => { priceShareModal.hidden = true; });
 if (priceShareModal) priceShareModal.addEventListener('click', (e) => { if (e.target === priceShareModal) priceShareModal.hidden = true; });
 
+// ---------- viewport height ----------
+// iOS changes the visible height as the address bar shows/hides, and 100dvh
+// doesn't always keep up — the editor could end up taller than the screen on
+// first load, letting its toolbar scroll out of view. Track the real height.
+function updateAppVh() {
+  document.documentElement.style.setProperty('--app-vh', window.innerHeight + 'px');
+}
+updateAppVh();
+window.addEventListener('resize', updateAppVh);
+window.addEventListener('orientationchange', updateAppVh);
+if (window.visualViewport) window.visualViewport.addEventListener('resize', updateAppVh);
+
 // ---------- price table: pinch zoom ----------
 // Two-finger pinch adjusts the same zoom the −/+ buttons use. One finger is
 // left alone so normal scrolling/panning still works.
@@ -710,13 +728,29 @@ if (priceScrollEl) {
   priceScrollEl.addEventListener('pointerleave', dropPt);
 }
 
+// ---------- price table: ⋯ menu ----------
+const priceMoreBtn = document.getElementById('price-more-btn');
+const priceMoreDropdown = document.getElementById('price-more-dropdown');
+function closePriceMenu() { if (priceMoreDropdown) priceMoreDropdown.hidden = true; }
+if (priceMoreBtn) priceMoreBtn.addEventListener('click', (e) => {
+  e.stopPropagation();
+  if (priceMoreDropdown) priceMoreDropdown.hidden = !priceMoreDropdown.hidden;
+});
+if (priceMoreDropdown) priceMoreDropdown.addEventListener('click', () => closePriceMenu());
+document.addEventListener('click', (e) => {
+  if (priceMoreDropdown && !priceMoreDropdown.hidden
+      && !priceMoreDropdown.contains(e.target) && e.target !== priceMoreBtn) closePriceMenu();
+});
+
 // ---------- price table: reorder mode ----------
 let priceReorderMode = false;
 const priceReorderBtn = document.getElementById('price-reorder');
 if (priceReorderBtn) priceReorderBtn.addEventListener('click', () => {
   priceReorderMode = !priceReorderMode;
   priceReorderBtn.setAttribute('aria-pressed', String(priceReorderMode));
-  priceReorderBtn.classList.toggle('active', priceReorderMode);
+  priceReorderBtn.textContent = priceReorderMode ? 'Done reordering' : 'Reorder rows & columns';
+  // Make it obvious from the closed menu that reorder mode is on
+  if (priceMoreBtn) priceMoreBtn.classList.toggle('active', priceReorderMode);
   openCellKey = null;
   renderPriceTable();
 });
@@ -960,9 +994,16 @@ function restoreScroll(key) {
 
 function hideAllScreens() {
   rememberScroll();
+  // Don't come back to a home screen full of layout controls
+  if (homeLayoutMode && listView.classList.contains('active')) {
+    homeLayoutMode = false;
+    applyLayoutMode();
+  }
   flushSettings(); // don't leave a debounced setting unwritten on navigation
   const fm = document.getElementById('fab-menu');
   if (fm) fm.hidden = true;
+  const pm = document.getElementById('price-more-dropdown');
+  if (pm) pm.hidden = true;
   listView.classList.remove('active');
   customersView.classList.remove('active');
   customerNotesView.classList.remove('active');
@@ -1485,6 +1526,10 @@ function showCustomerNotes(customerId, returnTo) {
 
 function showEditor(record, type, cursorHint) {
   clearCompiledState();
+  // Any editor open other than the one right after a + button clears Cancel;
+  // the creating handler re-sets it immediately afterwards.
+  pendingNewRecord = null;
+  updateCancelBtn();
   currentId = record.id;
   currentType = type;
   currentIsDefault = !!record.isDefault;
@@ -1868,8 +1913,11 @@ function renderNotesList() {
       </div>
       <p class="note-preview">${orphanCount > 0 ? 'Tap to review notes with no customer' : 'No orphaned notes'}</p>
     </article>`;
-  notesList.innerHTML = customersCard + priceCard + pinnedBlock + olderHtml + orphanCard;
+  // Customers and Price Table sit side by side at the top of the home screen
+  const navRow = `<div class="nav-card-row">${customersCard}${priceCard}</div>`;
+  notesList.innerHTML = navRow + pinnedBlock + olderHtml + orphanCard;
 
+  applyLayoutMode();
   notesList.querySelectorAll('[data-section]').forEach(btn => {
     btn.addEventListener('click', () => {
       btn.innerHTML = '<span class="nav-spinner" style="width:14px;height:14px;border-width:2px;vertical-align:middle;"></span>';
@@ -2103,10 +2151,15 @@ function commitSave() {
 // so for them it stays a single tap.
 const fabMenu = document.getElementById('fab-menu');
 function closeFabMenu() { if (fabMenu) fabMenu.hidden = true; }
+// A record created seconds ago by a + button: Cancel discards it entirely.
+// Cleared as soon as the editor opens anything else.
+let pendingNewRecord = null; // { kind: 'note' | 'customer', id, customerId }
 function newGeneralNote() {
   const note = Storage.createNote();
   returnScreen = 'notes';
   showEditor(note, 'note');
+  pendingNewRecord = { kind: 'note', id: note.id };
+  updateCancelBtn();
 }
 fab.addEventListener('click', (e) => {
   if (!isAdminRole() || !fabMenu) { newGeneralNote(); return; }
@@ -2122,6 +2175,8 @@ if (fabNewCustomer) fabNewCustomer.addEventListener('click', () => {
   activeCustomerId = customer.id;
   returnScreen = 'customer-notes';
   showEditor(defaultNote, 'note');
+  pendingNewRecord = { kind: 'customer', id: customer.id };
+  updateCancelBtn();
 });
 document.addEventListener('click', (e) => {
   if (fabMenu && !fabMenu.hidden && !fabMenu.contains(e.target) && e.target !== fab) closeFabMenu();
@@ -2131,15 +2186,37 @@ customersFab.addEventListener('click', () => {
   activeCustomerId = customer.id;
   returnScreen = 'customer-notes';
   showEditor(defaultNote, 'note');
+  pendingNewRecord = { kind: 'customer', id: customer.id };
+  updateCancelBtn();
 });
 customerNotesFab.addEventListener('click', () => {
   if (!activeCustomerId) return;
   const note = Storage.createNote({ customerId: activeCustomerId });
   returnScreen = 'customer-notes';
   showEditor(note, 'note');
+  pendingNewRecord = { kind: 'note', id: note.id, customerId: activeCustomerId };
+  updateCancelBtn();
 });
 
 settingsBtn.addEventListener('click', showSettings);
+
+// ---------- home layout mode ----------
+// The − + ↑ ↓ controls beside each section heading only appear while layout
+// mode is on, so the everyday home screen stays clean.
+let homeLayoutMode = false;
+const layoutBtn = document.getElementById('layout-btn');
+function applyLayoutMode() {
+  if (notesList) notesList.classList.toggle('layout-mode', homeLayoutMode);
+  if (layoutBtn) {
+    layoutBtn.textContent = homeLayoutMode ? 'Done' : 'Layout';
+    layoutBtn.setAttribute('aria-pressed', String(homeLayoutMode));
+    layoutBtn.classList.toggle('active', homeLayoutMode);
+  }
+}
+if (layoutBtn) layoutBtn.addEventListener('click', () => {
+  homeLayoutMode = !homeLayoutMode;
+  applyLayoutMode();
+});
 
 function goHome() {
   activeCustomerId = null;
@@ -2468,8 +2545,14 @@ bodyInput.addEventListener('click', () => {
   const lineStart = pos == null ? -1 : value.lastIndexOf('\n', pos - 1) + 1;
   const col = pos == null ? -1 : pos - lineStart;
   const head = lineStart < 0 ? '' : value.substring(lineStart, lineStart + 2);
+  // An EMPTY checkbox line is only two characters long, so every tap on it
+  // lands "on the box" — tapping to type would tick the item instead. Skip the
+  // toggle when there's no text yet and just place the cursor.
+  let lineEnd = lineStart < 0 ? -1 : value.indexOf('\n', lineStart);
+  if (lineEnd === -1) lineEnd = value.length;
+  const lineHasText = lineStart >= 0 && value.substring(lineStart + 2, lineEnd).trim() !== '';
   let replacement = null;
-  if (col >= 0 && col <= 2) {
+  if (col >= 0 && col <= 2 && lineHasText) {
     if (head === '☐ ') replacement = '☑ ';
     else if (head === '☑ ') replacement = '☐ ';
   }
@@ -2732,6 +2815,8 @@ function commitAndCleanupEditor() {
   currentIsDefault = false;
   resetUndo();
   lastKnownRemoteBody = null;
+  pendingNewRecord = null;
+  updateCancelBtn();
   return cancelledCustomer;
 }
 
@@ -2808,6 +2893,33 @@ window.addEventListener('popstate', (e) => {
   if (screen === 'settings') { showSettings(); handlingPopstate = false; return; }
   showNotes();
   handlingPopstate = false;
+});
+
+// ---------- Cancel (discard a just-created note/customer) ----------
+const editorCancelBtn = document.getElementById('editor-cancel-btn');
+function updateCancelBtn() {
+  if (!editorCancelBtn) return;
+  const show = !!pendingNewRecord && currentType === 'note' && currentId === pendingNewRecord.id;
+  editorCancelBtn.hidden = !show;
+}
+if (editorCancelBtn) editorCancelBtn.addEventListener('click', () => {
+  const rec = pendingNewRecord;
+  if (!rec) return;
+  // Nothing to keep: drop the save timer so it can't resurrect the record
+  if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
+  pendingNewRecord = null;
+  currentId = null; currentType = null; currentIsDefault = false;
+  resetUndo();
+  clearCompiledState();
+  if (rec.kind === 'customer') {
+    Storage.deleteCustomer(rec.id);
+    activeCustomerId = null;
+    showCustomers();
+  } else {
+    Storage.deleteNote(rec.id);
+    if (rec.customerId) showCustomerNotes(rec.customerId);
+    else showNotes();
+  }
 });
 
 deleteBtn.addEventListener('click', () => {
@@ -3368,6 +3480,9 @@ function applyRoleUI(role) {
   document.querySelectorAll('[data-staff-only]').forEach(el => {
     el.style.display = isAdminRole ? '' : 'none';
   });
+  // Layout button only for roles that see the home sections at all
+  const layoutBtnEl = document.getElementById('layout-btn');
+  if (layoutBtnEl) layoutBtnEl.hidden = !(role === 'admin' || role === 'bookkeeper');
   // Personal editing prefs: hidden for read-only roles (they can't edit notes)
   document.querySelectorAll('[data-editor-pref]').forEach(el => {
     el.style.display = (isCustomer || role === 'bookkeeper') ? 'none' : '';
@@ -4354,7 +4469,7 @@ function tutorialSteps(part) {
     ordered.push({
       screen: 'home',
       target: () => document.querySelector('#notes-list .section-ctrls'),
-      text: '− and + change how many items a section shows. ↑ and ↓ reorder the sections.',
+      text: 'Tap Layout at the top to show these controls: − and + change how many items a section shows, ↑ and ↓ reorder the sections.',
     });
     ordered.push({
       screen: 'home',

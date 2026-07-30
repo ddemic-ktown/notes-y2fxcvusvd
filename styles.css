@@ -359,6 +359,23 @@ body.editor-open {
   padding: 4px 6px;
 }
 
+/* Customers + Price Table side by side at the top of the home screen */
+.nav-card-row { display: flex; gap: 8px; align-items: stretch; }
+.nav-card-row .note-card {
+  flex: 1 1 0;
+  min-width: 0;
+  margin: 10px 0;          /* match the vertical rhythm of stacked cards */
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+.nav-card-row .note-title,
+.nav-card-row .note-preview { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Very narrow phones: stack rather than squeeze */
+@media (max-width: 340px) {
+  .nav-card-row { flex-direction: column; gap: 0; }
+}
+
 /* ---- Price table ---- */
 .price-main { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .price-scroll { flex: 1; overflow: auto; -webkit-overflow-scrolling: touch; padding: 8px; }
@@ -499,7 +516,9 @@ body.show-app-back .app-back-btn { display: inline-flex; }
 body.show-app-back .app-back-btn[hidden] { display: none !important; }
 
 /* Inline home-screen section controls: − + ↑ ↓ beside each heading */
-.section-ctrls { display: inline-flex; align-items: center; gap: 2px; margin-left: 6px; flex-shrink: 0; }
+/* Section controls are hidden until the Layout button is pressed */
+.section-ctrls { display: none; align-items: center; gap: 2px; margin-left: 6px; flex-shrink: 0; }
+#notes-list.layout-mode .section-ctrls { display: inline-flex; }
 .section-ctrl {
   border: 1px solid var(--line);
   background: var(--surface);
@@ -1642,11 +1661,20 @@ input[type="search"]::-webkit-search-cancel-button {
   background: var(--surface);
   display: flex;
   flex-direction: column;
+  /* --app-vh is set from window.innerHeight in JS: on iOS the address bar
+     showing/hiding changes the visible height, and 100dvh lags behind it.
+     Fallbacks in order for older browsers. */
   height: 100vh;
   height: 100dvh;
+  height: var(--app-vh, 100dvh);
   min-height: 0;
-  max-height: 100dvh;
-  overflow-y: auto;
+  max-height: var(--app-vh, 100dvh);
+  /* The section itself must NEVER scroll — otherwise, when the viewport is
+     briefly shorter than the editor (first load with the address bar showing),
+     this outer scroller moves and takes the sticky toolbar with it, and once
+     it settles the toolbar appears "stuck" for good. .editor-main is the only
+     scroller. */
+  overflow: hidden;
 }
 #editor-view .app-header,
 #editor-view .editor-title { flex-shrink: 0; }
