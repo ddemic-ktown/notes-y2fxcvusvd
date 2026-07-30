@@ -189,6 +189,60 @@
     <button id="install-hint-close" class="secondary" type="button">Got it</button>
   </div>
 
+  <!-- PRICE TABLE VIEW -->
+  <section id="price-view" class="screen">
+    <header class="app-header customers-header">
+      <div class="customers-header-top">
+        <button class="icon-btn date-btn app-back-btn" aria-label="Back">‹ Back</button>
+        <nav class="crumbs" id="crumbs-price" aria-label="Breadcrumb"></nav>
+        <div class="price-zoom" role="group" aria-label="Zoom">
+          <button id="price-zoom-out" class="icon-btn" aria-label="Zoom out">−</button>
+          <button id="price-zoom-in" class="icon-btn" aria-label="Zoom in">+</button>
+        </div>
+      </div>
+      <div class="customers-header-bottom price-actions">
+        <button id="price-add-item" class="icon-btn date-btn" type="button">+ Item</button>
+        <button id="price-add-vendor" class="icon-btn date-btn" type="button">+ Vendor</button>
+        <button id="price-share" class="icon-btn date-btn" type="button">Share</button>
+      </div>
+    </header>
+    <main class="price-main">
+      <div id="price-scroll" class="price-scroll">
+        <table id="price-table" class="price-table"></table>
+      </div>
+      <p class="price-legend">
+        <span class="avail-dot avail-yes"></span> available
+        <span class="avail-dot avail-soon"></span> 2–3 days
+        <span class="avail-dot avail-later"></span> longer
+        <span class="avail-dot avail-no"></span> not available
+      </p>
+    </main>
+  </section>
+
+  <!-- PRICE CELL HISTORY SHEET (long-press a cell) -->
+  <div id="price-history-modal" class="modal-overlay" hidden>
+    <div class="modal-panel">
+      <div class="modal-header">
+        <h2 class="modal-title" id="price-history-title">History</h2>
+        <button id="price-history-close" class="icon-btn" aria-label="Close">✕</button>
+      </div>
+      <p id="price-history-sub" class="modal-hint"></p>
+      <ul id="price-history-list" class="price-history-list"></ul>
+    </div>
+  </div>
+
+  <!-- PRICE TABLE SHARE MODAL -->
+  <div id="price-share-modal" class="modal-overlay" hidden>
+    <div class="modal-panel">
+      <div class="modal-header">
+        <h2 class="modal-title">Share price table</h2>
+        <button id="price-share-close" class="icon-btn" aria-label="Close">✕</button>
+      </div>
+      <p class="modal-hint">Employees you pick can view and edit the whole table.</p>
+      <ul id="price-share-list" class="members-list"></ul>
+    </div>
+  </div>
+
   <!-- SECTION DETAIL VIEW -->
   <section id="section-view" class="screen">
     <header class="app-header customers-header">

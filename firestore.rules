@@ -91,6 +91,32 @@ service cloud.firestore {
         allow write: if isAdmin();
       }
 
+      // ---- Price table ----
+      // priceMeta/config holds the vendor columns and the share list.
+      // Each row (item) is its own doc in priceItems, so a price edit rewrites
+      // only that row and two people on different rows can't clobber each other.
+      // Access: admin full; bookkeeper read-only (as everywhere); employee full
+      // read/write ONLY when their uid is in priceMeta/config.sharedWith;
+      // customer role has no access at all.
+      function priceSharedWith() {
+        return get(/databases/$(database)/documents/orgs/$(orgId)/priceMeta/config).data.sharedWith;
+      }
+      function isPriceSharedEmployee() {
+        return isEmployee() &&
+          exists(/databases/$(database)/documents/orgs/$(orgId)/priceMeta/config) &&
+          ('sharedWith' in get(/databases/$(database)/documents/orgs/$(orgId)/priceMeta/config).data) &&
+          request.auth.uid in priceSharedWith();
+      }
+      match /priceMeta/{doc} {
+        allow read: if isAdmin() || isBookkeeper() || isEmployee();
+        // Only an admin may change who the table is shared with
+        allow write: if isAdmin();
+      }
+      match /priceItems/{itemId} {
+        allow read: if isAdmin() || isBookkeeper() || isPriceSharedEmployee();
+        allow create, update, delete: if isAdmin() || isPriceSharedEmployee();
+      }
+
       // Customers — admin (write) and bookkeeper (read-only)
       match /customers/{customerId} {
         allow read: if isAdmin() || isBookkeeper();

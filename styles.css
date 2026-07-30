@@ -359,6 +359,68 @@ body.editor-open {
   padding: 4px 6px;
 }
 
+/* ---- Price table ---- */
+.price-main { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.price-scroll { flex: 1; overflow: auto; -webkit-overflow-scrolling: touch; padding: 8px; }
+.price-table { border-collapse: separate; border-spacing: 0; background: var(--surface); }
+.price-table th, .price-table td {
+  border-bottom: 1px solid var(--line);
+  border-right: 1px solid var(--line);
+  padding: 8px 10px;
+  font-size: 14px;
+  text-align: left;
+  white-space: nowrap;
+  background: var(--surface);
+}
+/* Sticky header row and item column so you never lose your place */
+.price-table thead th { position: sticky; top: 0; z-index: 2; background: var(--bg); font-size: 13px; }
+.price-table .price-item, .price-table .price-corner {
+  position: sticky; left: 0; z-index: 1; background: var(--bg); font-weight: 600; max-width: 40vw;
+  overflow: hidden; text-overflow: ellipsis;
+}
+.price-table .price-corner { z-index: 3; }
+.price-vendor, .price-item { cursor: pointer; }
+.price-cell { cursor: pointer; min-width: 84px; }
+.price-value { font-weight: 600; }
+.price-unavailable { text-decoration: line-through; color: var(--ink-soft); font-weight: 500; }
+.price-empty { color: var(--ink-soft); }
+.price-empty-state { color: var(--ink-soft); font-style: italic; padding: 24px 12px; white-space: normal; }
+.avail-dot {
+  display: inline-block; width: 9px; height: 9px; border-radius: 50%;
+  margin-left: 6px; vertical-align: middle; flex-shrink: 0;
+}
+.avail-yes { background: #16a34a; }
+.avail-soon { background: #f59e0b; }
+.avail-later { background: #9ca3af; }
+.avail-no { background: #dc2626; }
+.price-legend { margin: 0; padding: 8px 12px; font-size: 12px; color: var(--ink-soft); border-top: 1px solid var(--line); }
+.price-legend .avail-dot { margin-left: 12px; margin-right: 3px; }
+.price-legend .avail-dot:first-child { margin-left: 0; }
+.price-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.price-zoom { display: flex; gap: 2px; flex-shrink: 0; }
+/* Inline cell entry */
+.price-cell-editing { white-space: normal; min-width: 160px; }
+.price-cell-editing input, .price-cell-editing select {
+  width: 100%; margin-bottom: 4px; padding: 6px 8px; font-size: 14px;
+  border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--ink);
+}
+.price-cell-actions { display: flex; gap: 6px; }
+.price-cell-actions button {
+  flex: 1; padding: 6px 8px; font-size: 13px; border-radius: 6px; cursor: pointer;
+  border: 1px solid var(--line); background: var(--surface); color: var(--ink); font-family: inherit;
+}
+.price-cell-actions .price-save { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
+/* History sheet */
+.price-history-list { list-style: none; margin: 0; padding: 0; max-height: 50vh; overflow-y: auto; }
+.price-history-item {
+  display: flex; align-items: center; gap: 8px; padding: 10px 4px;
+  border-bottom: 1px solid var(--line); font-size: 14px;
+}
+.price-history-price { font-weight: 600; min-width: 62px; }
+.price-history-date { color: var(--ink-soft); font-size: 13px; }
+.price-history-avail { color: var(--ink-soft); font-size: 12px; flex: 1; }
+.price-history-del { background: none; border: none; color: var(--danger); cursor: pointer; font-size: 15px; padding: 4px 6px; }
+
 /* Home + menu: new general note / new customer */
 .fab-menu {
   position: fixed;

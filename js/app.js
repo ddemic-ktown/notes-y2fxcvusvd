@@ -13,6 +13,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 10, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.07.30-0125', 'New Price Table: items × vendors, latest price and availability, full history per cell'],
   ['v2026.07.28-2322', 'Every screen shows a Home › Customers › … trail so you always know where you are'],
   ['v2026.07.28-2308', 'Tutorial now describes the + menu on the home screen'],
   ['v2026.07.28-2253', 'Clearer wording: only the first note’s title is used as the customer’s name'],
@@ -22,7 +23,6 @@ const CHANGELOG = [
   ['v2026.07.28-2230', 'Home + offers note or customer; clearer placeholders on new notes'],
   ['v2026.07.28-2203', 'Sample data you can add or remove, a welcome offer on an empty app, smoother tutorial'],
   ['v2026.07.28-2153', 'A customer note can be turned back into a general note from the assign picker'],
-  ['v2026.07.28-2152', 'Employees no longer see a customer link that led to an error'],
 ];
 const APP_VERSION = CHANGELOG[0][0];
 
@@ -415,6 +415,252 @@ document.querySelectorAll('.app-back-btn').forEach(btn => {
 });
 updateAppBackButtons();
 
+// ---------- price table ----------
+// Rows = items, columns = vendors. A cell shows the newest entry's price and
+// an availability dot; tap to enter a new price inline, long-press for the
+// full history. Data lives one doc per row (see storage.js).
+const priceView = document.getElementById('price-view');
+const priceTableEl = document.getElementById('price-table');
+const AVAIL_LABELS = { yes: 'Available', no: 'Not available', soon: 'Available in 2–3 days', later: 'Available in more than 3 days' };
+let priceZoom = parseFloat(localStorage.getItem('na-price-zoom') || '1') || 1;
+let openCellKey = null; // "itemId|vendorId" currently in edit mode
+
+function showPriceTable() {
+  hideAllScreens();
+  priceView.classList.add('active');
+  renderCrumbs('crumbs-price', [{ label: 'Home', go: 'home' }, { label: 'Price Table' }]);
+  renderPriceTable();
+  restoreScroll('price');
+  if (!handlingPopstate) history.pushState({ screen: 'price' }, '');
+}
+
+function priceCellHtml(item, vendor, canEdit) {
+  const key = `${item.id}|${vendor.id}`;
+  const latest = Storage.latestPriceEntry(item, vendor.id);
+  if (openCellKey === key && canEdit) {
+    const today = new Date().toISOString().slice(0, 10);
+    return `<td class="price-cell price-cell-editing" data-key="${key}">
+      <input class="price-input" type="number" inputmode="decimal" step="0.01" placeholder="Price" value="" />
+      <input class="price-date" type="date" value="${today}" />
+      <select class="price-avail">
+        <option value="yes">Available</option>
+        <option value="soon">2–3 days</option>
+        <option value="later">Longer</option>
+        <option value="no">Not available</option>
+      </select>
+      <div class="price-cell-actions">
+        <button class="price-save" type="button">Save</button>
+        <button class="price-cancel" type="button">Cancel</button>
+      </div>
+    </td>`;
+  }
+  let inner = '<span class="price-empty">–</span>';
+  if (latest) {
+    const noPrice = latest.price == null || latest.price === '';
+    const priceTxt = noPrice ? '—' : Number(latest.price).toFixed(2);
+    const cls = latest.avail === 'no' ? 'price-value price-unavailable' : 'price-value';
+    inner = `<span class="${cls}">${escapeHtml(priceTxt)}</span><span class="avail-dot avail-${escapeHtml(latest.avail || 'yes')}" title="${escapeHtml(AVAIL_LABELS[latest.avail] || '')}"></span>`;
+  }
+  return `<td class="price-cell" data-key="${key}">${inner}</td>`;
+}
+
+function renderPriceTable() {
+  if (!priceTableEl) return;
+  const cfg = Storage.getPriceConfig();
+  const items = Storage.listPriceItems();
+  const canEdit = Storage.canEditPriceTable();
+  // Action buttons are admin/shared-employee only; Share is admin only
+  const addItemBtn = document.getElementById('price-add-item');
+  const addVendorBtn = document.getElementById('price-add-vendor');
+  const shareBtn = document.getElementById('price-share');
+  if (addItemBtn) addItemBtn.hidden = !canEdit;
+  if (addVendorBtn) addVendorBtn.hidden = !canEdit;
+  if (shareBtn) shareBtn.hidden = !isAdminRole();
+
+  if (!cfg.vendors.length && !items.length) {
+    priceTableEl.innerHTML = `<tbody><tr><td class="price-empty-state">${canEdit
+      ? 'Add a vendor and an item to start your price table.'
+      : 'The price table is empty.'}</td></tr></tbody>`;
+    return;
+  }
+  const head = `<thead><tr><th class="price-corner">Item</th>${
+    cfg.vendors.map(v => `<th class="price-vendor" data-vendor="${v.id}">${escapeHtml(v.name)}</th>`).join('')
+  }</tr></thead>`;
+  const body = `<tbody>${items.map(item => `<tr>
+      <th class="price-item" data-item="${item.id}">${escapeHtml(item.name)}</th>
+      ${cfg.vendors.map(v => priceCellHtml(item, v, canEdit)).join('')}
+    </tr>`).join('')}</tbody>`;
+  priceTableEl.innerHTML = head + body;
+  priceTableEl.style.transform = `scale(${priceZoom})`;
+  priceTableEl.style.transformOrigin = '0 0';
+  wirePriceTable(canEdit);
+}
+
+function wirePriceTable(canEdit) {
+  // Long-press (or right-click) opens history; a plain tap opens inline entry
+  priceTableEl.querySelectorAll('.price-cell').forEach(cell => {
+    let pressTimer = null;
+    let longPressed = false;
+    const key = cell.dataset.key;
+    const startPress = () => {
+      longPressed = false;
+      pressTimer = setTimeout(() => { longPressed = true; openPriceHistory(key); }, 500);
+    };
+    const cancelPress = () => { if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; } };
+    cell.addEventListener('pointerdown', startPress);
+    cell.addEventListener('pointerup', cancelPress);
+    cell.addEventListener('pointerleave', cancelPress);
+    cell.addEventListener('pointercancel', cancelPress);
+    cell.addEventListener('contextmenu', (e) => { e.preventDefault(); cancelPress(); openPriceHistory(key); });
+    cell.addEventListener('click', (e) => {
+      if (longPressed) { longPressed = false; return; }
+      if (!canEdit) return;
+      if (e.target.closest('.price-cell-editing')) return; // already editing
+      openCellKey = key;
+      renderPriceTable();
+      const input = priceTableEl.querySelector('.price-cell-editing .price-input');
+      if (input) input.focus();
+    });
+  });
+  const editing = priceTableEl.querySelector('.price-cell-editing');
+  if (editing) {
+    const [itemId, vendorId] = editing.dataset.key.split('|');
+    const save = async () => {
+      const price = editing.querySelector('.price-input').value;
+      const date = editing.querySelector('.price-date').value;
+      const avail = editing.querySelector('.price-avail').value;
+      openCellKey = null;
+      await Storage.addPriceEntry(itemId, vendorId, { price, date, avail });
+      renderPriceTable();
+    };
+    editing.querySelector('.price-save').addEventListener('click', save);
+    editing.querySelector('.price-cancel').addEventListener('click', () => { openCellKey = null; renderPriceTable(); });
+    editing.querySelector('.price-input').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); save(); }
+      if (e.key === 'Escape') { openCellKey = null; renderPriceTable(); }
+    });
+  }
+  // Rename / remove a row or column (edit rights only)
+  if (canEdit) {
+    priceTableEl.querySelectorAll('.price-item').forEach(th => {
+      th.addEventListener('click', async () => {
+        const item = Storage.listPriceItems().find(i => i.id === th.dataset.item);
+        if (!item) return;
+        const name = prompt('Item name (blank to delete):', item.name);
+        if (name === null) return;
+        if (!name.trim()) {
+          if (confirm(`Delete item "${item.name}" and its prices?`)) await Storage.removePriceItem(item.id);
+        } else {
+          await Storage.savePriceItem(item.id, { name: name.trim() });
+        }
+        renderPriceTable();
+      });
+    });
+    priceTableEl.querySelectorAll('.price-vendor').forEach(th => {
+      th.addEventListener('click', async () => {
+        const v = Storage.getPriceConfig().vendors.find(x => x.id === th.dataset.vendor);
+        if (!v) return;
+        const name = prompt('Vendor name (blank to delete):', v.name);
+        if (name === null) return;
+        if (!name.trim()) {
+          if (confirm(`Delete vendor "${v.name}" and its prices?`)) await Storage.removePriceVendor(v.id);
+        } else {
+          await Storage.renamePriceVendor(v.id, name.trim());
+        }
+        renderPriceTable();
+      });
+    });
+  }
+}
+
+// ---------- price history sheet ----------
+const priceHistoryModal = document.getElementById('price-history-modal');
+const priceHistoryTitle = document.getElementById('price-history-title');
+const priceHistorySub = document.getElementById('price-history-sub');
+const priceHistoryList = document.getElementById('price-history-list');
+
+function openPriceHistory(key) {
+  if (!priceHistoryModal || !key) return;
+  const [itemId, vendorId] = key.split('|');
+  const item = Storage.listPriceItems().find(i => i.id === itemId);
+  const vendor = Storage.getPriceConfig().vendors.find(v => v.id === vendorId);
+  if (!item || !vendor) return;
+  const canEdit = Storage.canEditPriceTable();
+  priceHistoryTitle.textContent = item.name;
+  priceHistorySub.textContent = vendor.name;
+  const entries = Storage.priceHistory(item, vendorId);
+  priceHistoryList.innerHTML = entries.length
+    ? entries.map(e => `<li class="price-history-item">
+        <span class="price-history-price">${e.price == null ? '—' : escapeHtml(Number(e.price).toFixed(2))}</span>
+        <span class="price-history-date">${escapeHtml(e.date || '')}</span>
+        <span class="avail-dot avail-${escapeHtml(e.avail || 'yes')}"></span>
+        <span class="price-history-avail">${escapeHtml(AVAIL_LABELS[e.avail] || '')}</span>
+        ${canEdit ? `<button class="price-history-del" data-added="${escapeHtml(e.added || '')}" aria-label="Delete entry">✕</button>` : ''}
+      </li>`).join('')
+    : '<li class="price-history-item">No prices recorded yet.</li>';
+  priceHistoryList.querySelectorAll('.price-history-del').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      await Storage.removePriceEntry(itemId, vendorId, btn.dataset.added);
+      openPriceHistory(key);
+      renderPriceTable();
+    });
+  });
+  priceHistoryModal.hidden = false;
+}
+const priceHistoryClose = document.getElementById('price-history-close');
+if (priceHistoryClose) priceHistoryClose.addEventListener('click', () => { priceHistoryModal.hidden = true; });
+if (priceHistoryModal) priceHistoryModal.addEventListener('click', (e) => { if (e.target === priceHistoryModal) priceHistoryModal.hidden = true; });
+
+// ---------- price table header actions ----------
+const priceAddItemBtn = document.getElementById('price-add-item');
+const priceAddVendorBtn = document.getElementById('price-add-vendor');
+const priceShareBtn = document.getElementById('price-share');
+const priceShareModal = document.getElementById('price-share-modal');
+const priceShareList = document.getElementById('price-share-list');
+const priceShareClose = document.getElementById('price-share-close');
+const priceZoomIn = document.getElementById('price-zoom-in');
+const priceZoomOut = document.getElementById('price-zoom-out');
+
+if (priceAddItemBtn) priceAddItemBtn.addEventListener('click', async () => {
+  const name = prompt('New item name:');
+  if (name && name.trim()) { await Storage.addPriceItem(name.trim()); renderPriceTable(); }
+});
+if (priceAddVendorBtn) priceAddVendorBtn.addEventListener('click', async () => {
+  const name = prompt('New vendor name:');
+  if (name && name.trim()) { await Storage.addPriceVendor(name.trim()); renderPriceTable(); }
+});
+function setPriceZoom(z) {
+  priceZoom = Math.max(0.5, Math.min(2, Math.round(z * 10) / 10));
+  localStorage.setItem('na-price-zoom', String(priceZoom));
+  if (priceTableEl) priceTableEl.style.transform = `scale(${priceZoom})`;
+}
+if (priceZoomIn) priceZoomIn.addEventListener('click', () => setPriceZoom(priceZoom + 0.1));
+if (priceZoomOut) priceZoomOut.addEventListener('click', () => setPriceZoom(priceZoom - 0.1));
+
+if (priceShareBtn) priceShareBtn.addEventListener('click', () => {
+  if (!priceShareModal || !isAdminRole()) return;
+  const shared = Storage.getPriceConfig().sharedWith;
+  const employees = Storage.listMembers().filter(m => m.role === 'employee');
+  priceShareList.innerHTML = employees.length
+    ? employees.map(m => `<li class="member-item">
+        <label style="display:flex;align-items:center;gap:8px;flex:1;min-width:0;cursor:pointer;">
+          <input type="checkbox" data-uid="${m.uid}" ${shared.includes(m.uid) ? 'checked' : ''} />
+          <span class="member-email">${escapeHtml(m.name || m.email || m.uid)}</span>
+        </label>
+      </li>`).join('')
+    : '<li class="member-item">No employees to share with yet.</li>';
+  priceShareList.querySelectorAll('input[data-uid]').forEach(cb => {
+    cb.addEventListener('change', async () => {
+      const cur = Storage.getPriceConfig().sharedWith;
+      const next = cb.checked ? [...new Set([...cur, cb.dataset.uid])] : cur.filter(u => u !== cb.dataset.uid);
+      await Storage.savePriceConfig({ sharedWith: next });
+    });
+  });
+  priceShareModal.hidden = false;
+});
+if (priceShareClose) priceShareClose.addEventListener('click', () => { priceShareModal.hidden = true; });
+if (priceShareModal) priceShareModal.addEventListener('click', (e) => { if (e.target === priceShareModal) priceShareModal.hidden = true; });
+
 // ---------- breadcrumbs ----------
 // Every screen's sticky header carries a trail: Home › Customers › John Canuck.
 // Earlier crumbs are tappable shortcuts; the last one is the current screen
@@ -460,6 +706,7 @@ function activeScreenKey() {
   if (customerNotesView.classList.contains('active')) return 'customer-notes:' + activeCustomerId;
   if (sectionView && sectionView.classList.contains('active')) return 'section:' + activeSectionKey;
   if (orphanView && orphanView.classList.contains('active')) return 'orphans';
+  if (priceView && priceView.classList.contains('active')) return 'price';
   return null;
 }
 function rememberScroll() {
@@ -485,6 +732,7 @@ function hideAllScreens() {
   settingsView.classList.remove('active');
   if (sectionView) sectionView.classList.remove('active');
   if (orphanView) orphanView.classList.remove('active');
+  if (priceView) priceView.classList.remove('active');
   editorView.classList.remove('active');
   if (signinView) signinView.classList.remove('active');
   // Body class controls page-level scroll lock for editor screen
@@ -1259,6 +1507,19 @@ function renderNotesList() {
     </article>
   `;
 
+  // Price table card — admins/bookkeepers always, employees only when shared
+  const priceItemCount = Storage.listPriceItems().length;
+  const priceVendorCount = Storage.getPriceConfig().vendors.length;
+  const priceCard = Storage.canViewPriceTable() ? `
+    <article class="note-card nav-card" data-nav="price">
+      <div class="note-head">
+        <p class="note-title">Price Table</p>
+        <span class="note-chevron">›</span>
+      </div>
+      <p class="note-preview">${priceItemCount} ${priceItemCount === 1 ? 'item' : 'items'} · ${priceVendorCount} ${priceVendorCount === 1 ? 'vendor' : 'vendors'}</p>
+    </article>
+  ` : '';
+
   const keywordsRanked = getKeywords()
     .map(kw => {
       const matches = Storage.aggregateParagraphsByKeyword(kw);
@@ -1370,7 +1631,7 @@ function renderNotesList() {
       </div>
       <p class="note-preview">${orphanCount > 0 ? 'Tap to review notes with no customer' : 'No orphaned notes'}</p>
     </article>`;
-  notesList.innerHTML = customersCard + pinnedBlock + olderHtml + orphanCard;
+  notesList.innerHTML = customersCard + priceCard + pinnedBlock + olderHtml + orphanCard;
 
   notesList.querySelectorAll('[data-section]').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -1410,6 +1671,7 @@ function renderNotesList() {
         setTimeout(showCustomers, 0);
       }
       else if (card.dataset.keyword) showAggregator(card.dataset.keyword);
+      else if (card.dataset.nav === 'price') showPriceTable();
       else if (card.dataset.nav === 'orphans') {
         const count = Storage.listOrphanedNotes().length;
         if (count > 0) showOrphanNotes();
@@ -2304,6 +2566,7 @@ window.addEventListener('popstate', (e) => {
   }
   if (screen === 'aggregator') { showAggregator(e.state.keyword); handlingPopstate = false; return; }
   if (screen === 'orphans') { showOrphanNotes(); handlingPopstate = false; return; }
+  if (screen === 'price') { showPriceTable(); handlingPopstate = false; return; }
   if (screen === 'section') { showSection(e.state.key); handlingPopstate = false; return; }
   if (screen === 'settings') { showSettings(); handlingPopstate = false; return; }
   showNotes();
@@ -3113,6 +3376,8 @@ function rerenderCurrent() {
   else if (customersView.classList.contains('active')) renderCustomersList();
   else if (customerNotesView.classList.contains('active') && activeCustomerId) {
     showCustomerNotes(activeCustomerId, customerNotesReturnTo);
+  } else if (priceView && priceView.classList.contains('active')) {
+    renderPriceTable();
   } else if (orphanView && orphanView.classList.contains('active')) {
     renderOrphanList();
   } else if (settingsView.classList.contains('active')) {

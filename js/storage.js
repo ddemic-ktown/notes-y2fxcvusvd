@@ -17,6 +17,12 @@ const DEFAULT_SETTINGS = {
 const _cache = {
   notes: [], customers: [], settings: { ...DEFAULT_SETTINGS },
   members: [], invites: [],
+  // Price table: one small config doc (vendor columns + share list) and one
+  // doc per ITEM (row). Split by row so a price edit rewrites only that row,
+  // two people on different rows can't clobber each other, and the 1 MiB
+  // per-document limit is unreachable.
+  priceConfig: { vendors: [], sharedWith: [] },
+  priceItems: [],
 };
 const _listeners = new Set();
 let _onRoleChange = null;
@@ -41,6 +47,8 @@ function settingsDoc()  { return doc(db, `orgs/${_orgId}/settings/preferences`);
 function membersCol()   { return collection(db, `orgs/${_orgId}/members`); }
 function invitesCol()   { return collection(db, `orgs/${_orgId}/invites`); }
 function orgDoc()       { return doc(db, `orgs/${_orgId}`); }
+function priceConfigDoc(){ return doc(db, `orgs/${_orgId}/priceMeta/config`); }
+function priceItemsCol() { return collection(db, `orgs/${_orgId}/priceItems`); }
 
 // ---------- listeners ----------
 function attachListeners() {
@@ -107,6 +115,21 @@ function attachListeners() {
     }
     emit();
   }));
+  // Price table: admins and bookkeepers always; employees only when the table
+  // has been shared with them (rules enforce it — a denied listener would just
+  // error, so employees attach and tolerate the error until shared).
+  if (_role !== 'customer') {
+    _unsubs.push(onSnapshot(priceConfigDoc(), (snap) => {
+      _cache.priceConfig = snap.exists()
+        ? { vendors: [], sharedWith: [], ...snap.data() }
+        : { vendors: [], sharedWith: [] };
+      emit();
+    }, (err) => { console.warn('priceConfig listener', err); }));
+    _unsubs.push(onSnapshot(priceItemsCol(), (snap) => {
+      _cache.priceItems = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      emit();
+    }, (err) => { console.warn('priceItems listener', err); }));
+  }
   // Only admins may read invites (firestore.rules) — skip the listener for other roles.
   if (_role === 'admin') {
     _unsubs.push(onSnapshot(invitesCol(), (snap) => {
@@ -206,6 +229,8 @@ export const Storage = {
     _cache.settings = { ...DEFAULT_SETTINGS };
     _cache.members = [];
     _cache.invites = [];
+    _cache.priceConfig = { vendors: [], sharedWith: [] };
+    _cache.priceItems = [];
 
     const { orgId, role } = await resolveOrg(userId, userEmail);
     _orgId = orgId;
@@ -223,6 +248,8 @@ export const Storage = {
     _cache.notes = []; _cache.customers = [];
     _cache.settings = { ...DEFAULT_SETTINGS };
     _cache.members = []; _cache.invites = [];
+    _cache.priceConfig = { vendors: [], sharedWith: [] };
+    _cache.priceItems = [];
     emit();
   },
 
@@ -378,6 +405,125 @@ export const Storage = {
     for (const nid of noteIds) {
       deleteDoc(doc(notesCol(), nid)).catch(err => console.warn("deleteCustomer.note", err));
     }
+  },
+
+  // ---------- Price table ----------
+  // Rows = items (one doc each), columns = vendors (in the config doc).
+  // A cell is an ARRAY of entries { price, date, avail, added }; the grid shows
+  // the newest by date, the history sheet shows them all.
+  // avail: 'yes' | 'no' | 'soon' (2–3 days) | 'later' (>3 days)
+  getPriceConfig() {
+    const c = _cache.priceConfig || {};
+    return { vendors: Array.isArray(c.vendors) ? c.vendors : [], sharedWith: Array.isArray(c.sharedWith) ? c.sharedWith : [] };
+  },
+  listPriceItems() {
+    return _cache.priceItems.slice().sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+  },
+  // Admins always; employees when the table is shared with them.
+  canEditPriceTable() {
+    if (_role === 'admin') return true;
+    if (_role === 'employee') return this.getPriceConfig().sharedWith.includes(_uid);
+    return false;
+  },
+  canViewPriceTable() {
+    return _role === 'admin' || _role === 'bookkeeper' || this.canEditPriceTable();
+  },
+  // Newest entry in a cell, by date then insertion time
+  latestPriceEntry(item, vendorId) {
+    const arr = (item && item.cells && item.cells[vendorId]) || [];
+    if (!arr.length) return null;
+    return arr.slice().sort((a, b) => {
+      const d = String(b.date || '').localeCompare(String(a.date || ''));
+      if (d !== 0) return d;
+      return String(b.added || '').localeCompare(String(a.added || ''));
+    })[0];
+  },
+  priceHistory(item, vendorId) {
+    const arr = (item && item.cells && item.cells[vendorId]) || [];
+    return arr.slice().sort((a, b) => {
+      const d = String(b.date || '').localeCompare(String(a.date || ''));
+      if (d !== 0) return d;
+      return String(b.added || '').localeCompare(String(a.added || ''));
+    });
+  },
+
+  async savePriceConfig(next) {
+    _cache.priceConfig = { vendors: [], sharedWith: [], ..._cache.priceConfig, ...next };
+    emit();
+    await setDoc(priceConfigDoc(), _cache.priceConfig, { merge: true })
+      .catch(err => console.warn("savePriceConfig", err));
+  },
+  async addPriceVendor(name) {
+    const n = (name || '').trim();
+    if (!n) return null;
+    const cfg = this.getPriceConfig();
+    const vendor = { id: uid(), name: n, order: cfg.vendors.length };
+    await this.savePriceConfig({ vendors: [...cfg.vendors, vendor] });
+    return vendor;
+  },
+  async renamePriceVendor(vendorId, name) {
+    const cfg = this.getPriceConfig();
+    await this.savePriceConfig({ vendors: cfg.vendors.map(v => v.id === vendorId ? { ...v, name: (name || '').trim() || v.name } : v) });
+  },
+  async removePriceVendor(vendorId) {
+    const cfg = this.getPriceConfig();
+    await this.savePriceConfig({ vendors: cfg.vendors.filter(v => v.id !== vendorId) });
+    // Drop that column's data from every row
+    for (const item of _cache.priceItems) {
+      if (item.cells && item.cells[vendorId]) {
+        const cells = { ...item.cells };
+        delete cells[vendorId];
+        await this.savePriceItem(item.id, { cells });
+      }
+    }
+  },
+  async addPriceItem(name) {
+    const n = (name || '').trim();
+    if (!n) return null;
+    const id = uid();
+    const now = nowIso();
+    const item = { id, name: n, order: _cache.priceItems.length, cells: {}, created: now, updated: now };
+    _cache.priceItems.push(item);
+    emit();
+    await setDoc(doc(priceItemsCol(), id), stripId(item)).catch(err => console.warn("addPriceItem", err));
+    return item;
+  },
+  async savePriceItem(itemId, patch) {
+    const i = _cache.priceItems.findIndex(n => n.id === itemId);
+    if (i === -1) return null;
+    const next = { ..._cache.priceItems[i], ...patch, updated: nowIso() };
+    _cache.priceItems[i] = next;
+    emit();
+    await setDoc(doc(priceItemsCol(), itemId), stripId(next)).catch(err => console.warn("savePriceItem", err));
+    return next;
+  },
+  async removePriceItem(itemId) {
+    _cache.priceItems = _cache.priceItems.filter(n => n.id !== itemId);
+    emit();
+    await deleteDoc(doc(priceItemsCol(), itemId)).catch(err => console.warn("removePriceItem", err));
+  },
+  // Add one price entry to a cell. price may be null/'' — "not available" often
+  // has no figure attached.
+  async addPriceEntry(itemId, vendorId, { price, date, avail }) {
+    const item = _cache.priceItems.find(n => n.id === itemId);
+    if (!item) return null;
+    const entry = {
+      price: (price === '' || price == null) ? null : Number(price),
+      date: date || nowIso().slice(0, 10),
+      avail: ['yes', 'no', 'soon', 'later'].includes(avail) ? avail : 'yes',
+      added: nowIso(),
+    };
+    const cells = { ...(item.cells || {}) };
+    cells[vendorId] = [...(cells[vendorId] || []), entry];
+    await this.savePriceItem(itemId, { cells });
+    return entry;
+  },
+  async removePriceEntry(itemId, vendorId, added) {
+    const item = _cache.priceItems.find(n => n.id === itemId);
+    if (!item || !item.cells || !item.cells[vendorId]) return;
+    const cells = { ...item.cells };
+    cells[vendorId] = cells[vendorId].filter(e => e.added !== added);
+    await this.savePriceItem(itemId, { cells });
   },
 
   // ---------- Sample data ----------
