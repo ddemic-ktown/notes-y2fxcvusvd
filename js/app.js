@@ -13,6 +13,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 10, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.07.30-0138', 'Price Table: pinch to zoom, reorder rows and columns, CSV export and import'],
   ['v2026.07.30-0125', 'New Price Table: items × vendors, latest price and availability, full history per cell'],
   ['v2026.07.28-2322', 'Every screen shows a Home › Customers › … trail so you always know where you are'],
   ['v2026.07.28-2308', 'Tutorial now describes the + menu on the home screen'],
@@ -22,7 +23,6 @@ const CHANGELOG = [
   ['v2026.07.28-2237', 'Tutorial bubbles stay put when you scroll, fit the screen, and dim the background'],
   ['v2026.07.28-2230', 'Home + offers note or customer; clearer placeholders on new notes'],
   ['v2026.07.28-2203', 'Sample data you can add or remove, a welcome offer on an empty app, smoother tutorial'],
-  ['v2026.07.28-2153', 'A customer note can be turned back into a general note from the assign picker'],
 ];
 const APP_VERSION = CHANGELOG[0][0];
 
@@ -476,6 +476,12 @@ function renderPriceTable() {
   if (addItemBtn) addItemBtn.hidden = !canEdit;
   if (addVendorBtn) addVendorBtn.hidden = !canEdit;
   if (shareBtn) shareBtn.hidden = !isAdminRole();
+  const reorderBtn = document.getElementById('price-reorder');
+  const importBtn = document.getElementById('price-import');
+  const exportBtn = document.getElementById('price-export');
+  if (reorderBtn) reorderBtn.hidden = !canEdit;
+  if (importBtn) importBtn.hidden = !canEdit;
+  if (exportBtn) exportBtn.hidden = !Storage.canViewPriceTable();
 
   if (!cfg.vendors.length && !items.length) {
     priceTableEl.innerHTML = `<tbody><tr><td class="price-empty-state">${canEdit
@@ -483,12 +489,18 @@ function renderPriceTable() {
       : 'The price table is empty.'}</td></tr></tbody>`;
     return;
   }
+  const vendors = cfg.vendors.slice().sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+  const reorder = priceReorderMode && canEdit;
   const head = `<thead><tr><th class="price-corner">Item</th>${
-    cfg.vendors.map(v => `<th class="price-vendor" data-vendor="${v.id}">${escapeHtml(v.name)}</th>`).join('')
+    vendors.map((v, i) => `<th class="price-vendor" data-vendor="${v.id}">${escapeHtml(v.name)}${
+      reorder ? `<span class="reorder-arrows"><button type="button" class="v-left" data-vendor="${v.id}" ${i === 0 ? 'disabled' : ''}>←</button><button type="button" class="v-right" data-vendor="${v.id}" ${i === vendors.length - 1 ? 'disabled' : ''}>→</button></span>` : ''
+    }</th>`).join('')
   }</tr></thead>`;
-  const body = `<tbody>${items.map(item => `<tr>
-      <th class="price-item" data-item="${item.id}">${escapeHtml(item.name)}</th>
-      ${cfg.vendors.map(v => priceCellHtml(item, v, canEdit)).join('')}
+  const body = `<tbody>${items.map((item, i) => `<tr>
+      <th class="price-item" data-item="${item.id}">${escapeHtml(item.name)}${
+        reorder ? `<span class="reorder-arrows"><button type="button" class="i-up" data-item="${item.id}" ${i === 0 ? 'disabled' : ''}>↑</button><button type="button" class="i-down" data-item="${item.id}" ${i === items.length - 1 ? 'disabled' : ''}>↓</button></span>` : ''
+      }</th>
+      ${vendors.map(v => priceCellHtml(item, v, canEdit)).join('')}
     </tr>`).join('')}</tbody>`;
   priceTableEl.innerHTML = head + body;
   priceTableEl.style.transform = `scale(${priceZoom})`;
@@ -539,6 +551,14 @@ function wirePriceTable(canEdit) {
       if (e.key === 'Enter') { e.preventDefault(); save(); }
       if (e.key === 'Escape') { openCellKey = null; renderPriceTable(); }
     });
+  }
+  // Reorder mode: arrows move rows/columns; taps don't rename
+  if (priceReorderMode && canEdit) {
+    priceTableEl.querySelectorAll('.i-up').forEach(b => b.addEventListener('click', (e) => { e.stopPropagation(); movePriceItem(b.dataset.item, -1); }));
+    priceTableEl.querySelectorAll('.i-down').forEach(b => b.addEventListener('click', (e) => { e.stopPropagation(); movePriceItem(b.dataset.item, 1); }));
+    priceTableEl.querySelectorAll('.v-left').forEach(b => b.addEventListener('click', (e) => { e.stopPropagation(); movePriceVendor(b.dataset.vendor, -1); }));
+    priceTableEl.querySelectorAll('.v-right').forEach(b => b.addEventListener('click', (e) => { e.stopPropagation(); movePriceVendor(b.dataset.vendor, 1); }));
+    return;
   }
   // Rename / remove a row or column (edit rights only)
   if (canEdit) {
@@ -660,6 +680,223 @@ if (priceShareBtn) priceShareBtn.addEventListener('click', () => {
 });
 if (priceShareClose) priceShareClose.addEventListener('click', () => { priceShareModal.hidden = true; });
 if (priceShareModal) priceShareModal.addEventListener('click', (e) => { if (e.target === priceShareModal) priceShareModal.hidden = true; });
+
+// ---------- price table: pinch zoom ----------
+// Two-finger pinch adjusts the same zoom the −/+ buttons use. One finger is
+// left alone so normal scrolling/panning still works.
+const priceScrollEl = document.getElementById('price-scroll');
+if (priceScrollEl) {
+  const pts = new Map();
+  let startDist = 0, startZoom = 1;
+  const dist = () => {
+    const [a, b] = [...pts.values()];
+    return Math.hypot(a.x - b.x, a.y - b.y);
+  };
+  priceScrollEl.addEventListener('pointerdown', (e) => {
+    pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pts.size === 2) { startDist = dist(); startZoom = priceZoom; }
+  });
+  priceScrollEl.addEventListener('pointermove', (e) => {
+    if (!pts.has(e.pointerId)) return;
+    pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pts.size === 2 && startDist > 0) {
+      e.preventDefault();
+      setPriceZoom(startZoom * (dist() / startDist));
+    }
+  });
+  const dropPt = (e) => { pts.delete(e.pointerId); if (pts.size < 2) startDist = 0; };
+  priceScrollEl.addEventListener('pointerup', dropPt);
+  priceScrollEl.addEventListener('pointercancel', dropPt);
+  priceScrollEl.addEventListener('pointerleave', dropPt);
+}
+
+// ---------- price table: reorder mode ----------
+let priceReorderMode = false;
+const priceReorderBtn = document.getElementById('price-reorder');
+if (priceReorderBtn) priceReorderBtn.addEventListener('click', () => {
+  priceReorderMode = !priceReorderMode;
+  priceReorderBtn.setAttribute('aria-pressed', String(priceReorderMode));
+  priceReorderBtn.classList.toggle('active', priceReorderMode);
+  openCellKey = null;
+  renderPriceTable();
+});
+async function movePriceItem(itemId, dir) {
+  const items = Storage.listPriceItems();
+  const i = items.findIndex(x => x.id === itemId);
+  const j = i + dir;
+  if (i === -1 || j < 0 || j >= items.length) return;
+  const a = items[i], b = items[j];
+  await Storage.savePriceItem(a.id, { order: j });
+  await Storage.savePriceItem(b.id, { order: i });
+  renderPriceTable();
+}
+async function movePriceVendor(vendorId, dir) {
+  const vendors = Storage.getPriceConfig().vendors.slice().sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+  const i = vendors.findIndex(v => v.id === vendorId);
+  const j = i + dir;
+  if (i === -1 || j < 0 || j >= vendors.length) return;
+  [vendors[i], vendors[j]] = [vendors[j], vendors[i]];
+  await Storage.savePriceConfig({ vendors: vendors.map((v, idx) => ({ ...v, order: idx })) });
+  renderPriceTable();
+}
+
+// ---------- price table: CSV export / import ----------
+function priceCsvCell(entry) {
+  if (!entry) return '';
+  const price = entry.price == null ? '' : Number(entry.price).toFixed(2);
+  return `${price}|${entry.avail || 'yes'}|${entry.date || ''}`;
+}
+function csvEscape(v) {
+  const s = String(v == null ? '' : v);
+  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+function exportPriceCsv() {
+  const cfg = Storage.getPriceConfig();
+  const vendors = cfg.vendors.slice().sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+  const items = Storage.listPriceItems();
+  const rows = [['Item', ...vendors.map(v => v.name)]];
+  for (const item of items) {
+    rows.push([item.name, ...vendors.map(v => priceCsvCell(Storage.latestPriceEntry(item, v.id)))]);
+  }
+  const csv = rows.map(r => r.map(csvEscape).join(',')).join('\n');
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `price-table-${new Date().toISOString().slice(0, 10)}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+const priceExportBtn = document.getElementById('price-export');
+if (priceExportBtn) priceExportBtn.addEventListener('click', exportPriceCsv);
+
+// Split a pasted table: real CSV (quoted commas) or tab-separated from a sheet
+function parseDelimited(text) {
+  const useTab = text.includes('\t');
+  const rows = [];
+  let row = [], field = '', inQuotes = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inQuotes) {
+      if (c === '"' && text[i + 1] === '"') { field += '"'; i++; }
+      else if (c === '"') inQuotes = false;
+      else field += c;
+      continue;
+    }
+    if (c === '"') { inQuotes = true; continue; }
+    if (c === (useTab ? '\t' : ',')) { row.push(field.trim()); field = ''; continue; }
+    if (c === '\n') { row.push(field.trim()); rows.push(row); row = []; field = ''; continue; }
+    if (c === '\r') continue;
+    field += c;
+  }
+  row.push(field.trim());
+  if (row.length > 1 || row[0] !== '') rows.push(row);
+  return rows.filter(r => r.some(v => v !== ''));
+}
+// A cell is "12.99", "12.99|soon", or "12.99|no|2026-07-22"; empty = skip
+function parsePriceCell(raw) {
+  const s = (raw || '').trim();
+  if (!s) return null;
+  const [p, a, d] = s.split('|').map(x => (x || '').trim());
+  // Strip currency symbols/spaces, but text with NO digits must not become 0:
+  // Number('') === 0, so "abc" would silently import as 0.00.
+  const cleaned = p.replace(/[^0-9.\-]/g, '');
+  const priceNum = p === '' ? null : (cleaned === '' ? NaN : Number(cleaned));
+  if (p !== '' && Number.isNaN(priceNum)) return null;
+  return {
+    price: priceNum,
+    avail: ['yes', 'no', 'soon', 'later'].includes(a) ? a : 'yes',
+    date: /^\d{4}-\d{2}-\d{2}$/.test(d || '') ? d : new Date().toISOString().slice(0, 10),
+  };
+}
+function analysePriceImport(text) {
+  const rows = parseDelimited(text);
+  if (rows.length < 2) return { error: 'Need a header row of vendors and at least one item row.' };
+  const cfg = Storage.getPriceConfig();
+  const existingVendors = cfg.vendors;
+  const existingItems = Storage.listPriceItems();
+  const header = rows[0].slice(1);
+  const newVendors = header.filter(h => h && !existingVendors.some(v => v.name.toLowerCase() === h.toLowerCase()));
+  let newItems = 0, entries = 0, skipped = 0;
+  const plan = [];
+  for (const r of rows.slice(1)) {
+    const name = (r[0] || '').trim();
+    if (!name) continue;
+    const known = existingItems.some(i => i.name.toLowerCase() === name.toLowerCase());
+    if (!known) newItems++;
+    const cells = [];
+    header.forEach((vName, idx) => {
+      const parsed = parsePriceCell(r[idx + 1]);
+      if (!vName) return;
+      if (parsed) { cells.push({ vendorName: vName, entry: parsed }); entries++; }
+      else if ((r[idx + 1] || '').trim()) skipped++;
+    });
+    plan.push({ itemName: name, cells });
+  }
+  return { plan, newVendors: [...new Set(newVendors)], newItems, entries, skipped };
+}
+async function applyPriceImport(analysis) {
+  // Create any missing vendors first, then rows, then entries
+  for (const name of analysis.newVendors) await Storage.addPriceVendor(name);
+  const vendors = Storage.getPriceConfig().vendors;
+  const vendorByName = new Map(vendors.map(v => [v.name.toLowerCase(), v]));
+  for (const row of analysis.plan) {
+    let item = Storage.listPriceItems().find(i => i.name.toLowerCase() === row.itemName.toLowerCase());
+    if (!item) item = await Storage.addPriceItem(row.itemName);
+    if (!item) continue;
+    for (const c of row.cells) {
+      const v = vendorByName.get(c.vendorName.toLowerCase());
+      if (!v) continue;
+      await Storage.addPriceEntry(item.id, v.id, c.entry);
+    }
+  }
+}
+const priceImportBtn = document.getElementById('price-import');
+const priceImportModal = document.getElementById('price-import-modal');
+const priceImportText = document.getElementById('price-import-text');
+const priceImportPreview = document.getElementById('price-import-preview');
+const priceImportCheck = document.getElementById('price-import-check');
+const priceImportApply = document.getElementById('price-import-apply');
+const priceImportClose = document.getElementById('price-import-close');
+let pendingPriceImport = null;
+
+if (priceImportBtn) priceImportBtn.addEventListener('click', () => {
+  if (!priceImportModal) return;
+  priceImportText.value = '';
+  priceImportPreview.textContent = '';
+  priceImportApply.disabled = true;
+  pendingPriceImport = null;
+  priceImportModal.hidden = false;
+});
+if (priceImportCheck) priceImportCheck.addEventListener('click', () => {
+  const res = analysePriceImport(priceImportText.value || '');
+  if (res.error) {
+    priceImportPreview.textContent = res.error;
+    priceImportApply.disabled = true;
+    pendingPriceImport = null;
+    return;
+  }
+  pendingPriceImport = res;
+  priceImportApply.disabled = res.entries === 0 && res.newItems === 0 && res.newVendors.length === 0;
+  priceImportPreview.textContent =
+    `Will add ${res.newVendors.length} vendor${res.newVendors.length === 1 ? '' : 's'}, `
+    + `${res.newItems} item${res.newItems === 1 ? '' : 's'} and ${res.entries} price entr${res.entries === 1 ? 'y' : 'ies'}.`
+    + (res.skipped ? ` ${res.skipped} cell${res.skipped === 1 ? '' : 's'} couldn't be read and will be skipped.` : '')
+    + ' Nothing is overwritten — entries are added to each cell\'s history.';
+});
+if (priceImportApply) priceImportApply.addEventListener('click', async () => {
+  if (!pendingPriceImport) return;
+  priceImportApply.disabled = true;
+  priceImportPreview.textContent = 'Importing…';
+  await applyPriceImport(pendingPriceImport);
+  priceImportModal.hidden = true;
+  pendingPriceImport = null;
+  renderPriceTable();
+});
+if (priceImportClose) priceImportClose.addEventListener('click', () => { priceImportModal.hidden = true; });
+if (priceImportModal) priceImportModal.addEventListener('click', (e) => { if (e.target === priceImportModal) priceImportModal.hidden = true; });
 
 // ---------- breadcrumbs ----------
 // Every screen's sticky header carries a trail: Home › Customers › John Canuck.

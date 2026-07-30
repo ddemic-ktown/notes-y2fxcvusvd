@@ -410,6 +410,17 @@ body.editor-open {
   border: 1px solid var(--line); background: var(--surface); color: var(--ink); font-family: inherit;
 }
 .price-cell-actions .price-save { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
+/* Reorder mode arrows on row/column headers */
+.reorder-arrows { display: inline-flex; gap: 2px; margin-left: 6px; }
+.reorder-arrows button {
+  border: 1px solid var(--line); background: var(--surface); color: var(--ink);
+  border-radius: 4px; font-size: 11px; line-height: 1; padding: 3px 5px; cursor: pointer;
+}
+.reorder-arrows button:disabled { opacity: 0.3; cursor: default; }
+.icon-btn.active { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+/* Pinch-to-zoom needs the browser to hand us two-finger gestures */
+.price-scroll { touch-action: pan-x pan-y; }
+
 /* History sheet */
 .price-history-list { list-style: none; margin: 0; padding: 0; max-height: 50vh; overflow-y: auto; }
 .price-history-item {
