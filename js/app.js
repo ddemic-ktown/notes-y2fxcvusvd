@@ -13,16 +13,16 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 10, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.07.30-2030', 'While adding, the header shows “New customer” so Cancel always fits'],
+  ['v2026.07.30-2013', 'Adding a customer from the home screen now goes back to the home screen'],
+  ['v2026.07.30-2011', 'Fixed: Cancel never appeared when adding a new customer'],
+  ['v2026.07.30-2007', 'Tutorial: general notes step now says they live on the home screen'],
   ['v2026.07.30-1807', 'Delete moved from the bin icon into the ⋯ menu'],
   ['v2026.07.30-1802', 'Two new tutorials: the price table, and installing the app on your phone'],
   ['v2026.07.30-0211', 'Cancel always fits on small screens; the bin is hidden while it shows'],
   ['v2026.07.30-0200', 'Cancel button when adding a new customer or note discards it'],
   ['v2026.07.30-0158', 'Fixed: the note toolbar could scroll out of view right after the app loaded'],
   ['v2026.07.30-0154', 'Tapping an empty checkbox line lets you type instead of ticking it'],
-  ['v2026.07.30-0150', 'Section controls hide until you tap Layout on the home screen'],
-  ['v2026.07.30-0148', 'Customers and Price Table cards sit side by side on the home screen'],
-  ['v2026.07.30-0147', 'Price Table: reorder, export, import and share moved into a ⋯ menu'],
-  ['v2026.07.30-0138', 'Price Table: pinch to zoom, reorder rows and columns, CSV export and import'],
 ];
 const APP_VERSION = CHANGELOG[0][0];
 
@@ -2153,12 +2153,18 @@ const fabMenu = document.getElementById('fab-menu');
 function closeFabMenu() { if (fabMenu) fabMenu.hidden = true; }
 // A record created seconds ago by a + button: Cancel discards it entirely.
 // Cleared as soon as the editor opens anything else.
-let pendingNewRecord = null; // { kind: 'note' | 'customer', id, customerId }
+// { kind, id, noteId, customerId }
+//   id      — what Cancel deletes (the customer, or the note)
+//   noteId  — the note actually open in the editor. For a CUSTOMER these
+//             differ: the editor shows the customer's default note, so
+//             comparing currentId against `id` never matched and Cancel
+//             never appeared for a new customer.
+let pendingNewRecord = null;
 function newGeneralNote() {
   const note = Storage.createNote();
   returnScreen = 'notes';
   showEditor(note, 'note');
-  pendingNewRecord = { kind: 'note', id: note.id };
+  pendingNewRecord = { kind: 'note', id: note.id, noteId: note.id };
   updateCancelBtn();
 }
 fab.addEventListener('click', (e) => {
@@ -2175,7 +2181,8 @@ if (fabNewCustomer) fabNewCustomer.addEventListener('click', () => {
   activeCustomerId = customer.id;
   returnScreen = 'customer-notes';
   showEditor(defaultNote, 'note');
-  pendingNewRecord = { kind: 'customer', id: customer.id };
+  // Started from HOME: going back should land on home, not the customers list
+  pendingNewRecord = { kind: 'customer', id: customer.id, noteId: defaultNote.id, origin: 'home' };
   updateCancelBtn();
 });
 document.addEventListener('click', (e) => {
@@ -2186,7 +2193,7 @@ customersFab.addEventListener('click', () => {
   activeCustomerId = customer.id;
   returnScreen = 'customer-notes';
   showEditor(defaultNote, 'note');
-  pendingNewRecord = { kind: 'customer', id: customer.id };
+  pendingNewRecord = { kind: 'customer', id: customer.id, noteId: defaultNote.id, origin: 'customers' };
   updateCancelBtn();
 });
 customerNotesFab.addEventListener('click', () => {
@@ -2194,7 +2201,7 @@ customerNotesFab.addEventListener('click', () => {
   const note = Storage.createNote({ customerId: activeCustomerId });
   returnScreen = 'customer-notes';
   showEditor(note, 'note');
-  pendingNewRecord = { kind: 'note', id: note.id, customerId: activeCustomerId };
+  pendingNewRecord = { kind: 'note', id: note.id, noteId: note.id, customerId: activeCustomerId };
   updateCancelBtn();
 });
 
@@ -2776,8 +2783,12 @@ bodyInput.addEventListener('keydown', (e) => {
   scheduleSave();
 });
 
+// Where the record open in the editor was created from, so every exit path
+// (back, popstate, Cancel, or discarding an empty new customer) returns there.
+let newRecordOrigin = null;
 function commitAndCleanupEditor() {
   let cancelledCustomer = false;
+  newRecordOrigin = pendingNewRecord ? pendingNewRecord.origin : null;
   if (currentType === 'compiled') {
     // Compiled aggregator note: flush the last save; never delete anything.
     if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
@@ -2854,10 +2865,13 @@ window.addEventListener('popstate', (e) => {
     const cancelledCustomer = commitAndCleanupEditor();
     if (cancelledCustomer) {
       activeCustomerId = null;
-      showCustomers();
+      if (newRecordOrigin === 'home') goHome(); else showCustomers();
+    } else if (newRecordOrigin === 'home') {
+      goHome();
     } else {
       returnFromEditor();
     }
+    newRecordOrigin = null;
     handlingPopstate = false; return;
   }
 
@@ -2899,12 +2913,22 @@ window.addEventListener('popstate', (e) => {
 const editorCancelBtn = document.getElementById('editor-cancel-btn');
 function updateCancelBtn() {
   if (!editorCancelBtn) return;
-  const show = !!pendingNewRecord && currentType === 'note' && currentId === pendingNewRecord.id;
+  const show = !!pendingNewRecord && currentType === 'note' && currentId === pendingNewRecord.noteId;
   editorCancelBtn.hidden = !show;
   // Cancel already discards the record — showing 🗑 next to it is redundant.
   // (showEditor sets delete per role/note type; this only overrides while a
   // brand-new record is open.)
   if (show && deleteBtn) deleteBtn.style.display = 'none';
+  // While creating, the breadcrumb has nothing useful to say — you just tapped
+  // + — and on a phone it crowded Cancel off the row. Swap it for a plain
+  // title; showEditor restores the real trail next time.
+  if (show) {
+    const el = document.getElementById('crumbs-editor');
+    if (el) {
+      const label = pendingNewRecord.kind === 'customer' ? 'New customer' : 'New note';
+      el.innerHTML = `<span class="crumb crumb-current">${escapeHtml(label)}</span>`;
+    }
+  }
 }
 if (editorCancelBtn) editorCancelBtn.addEventListener('click', () => {
   const rec = pendingNewRecord;
@@ -2918,7 +2942,7 @@ if (editorCancelBtn) editorCancelBtn.addEventListener('click', () => {
   if (rec.kind === 'customer') {
     Storage.deleteCustomer(rec.id);
     activeCustomerId = null;
-    showCustomers();
+    if (rec.origin === 'home') goHome(); else showCustomers();
   } else {
     Storage.deleteNote(rec.id);
     if (rec.customerId) showCustomerNotes(rec.customerId);
@@ -4435,7 +4459,7 @@ function tutorialSteps(part) {
         {
           screen: 'home',
           target: () => document.querySelector('[data-section="notes"]'),
-          text: 'General notes aren’t tied to a customer — shopping lists, reminders, your hours.',
+          text: 'General notes aren’t tied to a customer — shopping lists, reminders, your hours. They live right here on the home screen.',
         },
         {
           screen: 'home',
