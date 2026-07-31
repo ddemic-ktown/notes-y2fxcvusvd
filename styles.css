@@ -729,6 +729,13 @@ body.show-app-back .app-back-btn[hidden] { display: none !important; }
   cursor: pointer;
 }
 .editor-more-item:not(:last-child) { border-bottom: 1px solid var(--line); }
+/* Destructive item sits apart from the harmless ones above it */
+.editor-more-item.danger-item {
+  color: var(--danger);
+  font-weight: 600;
+  border-top: 2px solid var(--line);
+}
+body.dark-mode .editor-more-item.danger-item { color: #f87171; }
 .editor-more-item:active { background: var(--surface); }
 
 .customer-link-btn {

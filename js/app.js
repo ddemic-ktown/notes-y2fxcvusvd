@@ -13,6 +13,8 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 10, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.07.30-1807', 'Delete moved from the bin icon into the ⋯ menu'],
+  ['v2026.07.30-1802', 'Two new tutorials: the price table, and installing the app on your phone'],
   ['v2026.07.30-0211', 'Cancel always fits on small screens; the bin is hidden while it shows'],
   ['v2026.07.30-0200', 'Cancel button when adding a new customer or note discards it'],
   ['v2026.07.30-0158', 'Fixed: the note toolbar could scroll out of view right after the app loaded'],
@@ -21,8 +23,6 @@ const CHANGELOG = [
   ['v2026.07.30-0148', 'Customers and Price Table cards sit side by side on the home screen'],
   ['v2026.07.30-0147', 'Price Table: reorder, export, import and share moved into a ⋯ menu'],
   ['v2026.07.30-0138', 'Price Table: pinch to zoom, reorder rows and columns, CSV export and import'],
-  ['v2026.07.30-0125', 'New Price Table: items × vendors, latest price and availability, full history per cell'],
-  ['v2026.07.28-2322', 'Every screen shows a Home › Customers › … trail so you always know where you are'],
 ];
 const APP_VERSION = CHANGELOG[0][0];
 
@@ -4373,7 +4373,7 @@ const tutorialClose = document.getElementById('tutorial-close');
 let tutorialStepIndex = 0;
 let tutorialPart = 1;
 let tutorialStartPart = 1; // the part the user launched — back never goes before it
-const TUTORIAL_PARTS = 3;
+const TUTORIAL_PARTS = 5;
 
 // The tutorial is split into three short parts, each startable from Settings.
 // The last bubble of parts 1 and 2 offers to continue into the next part.
@@ -4483,6 +4483,88 @@ function tutorialSteps(part) {
     return ordered;
   }
 
+  if (part === 4) return [
+    {
+      screen: 'home',
+      setup: () => { goHome(); return true; },
+      target: () => document.querySelector('#notes-list .note-card[data-nav="price"]'),
+      text: 'The price table keeps what you buy (rows) against who you buy it from (columns), so you can compare before you order.',
+    },
+    {
+      screen: 'price',
+      setup: () => { showPriceTable(); return true; },
+      target: () => document.getElementById('price-add-vendor'),
+      text: 'Add your suppliers with + Vendor, and the things you buy with + Item. Tap a name later to rename it.',
+    },
+    {
+      screen: 'price',
+      group: 'pricecells',
+      requires: () => Storage.listPriceItems().length > 0 && Storage.getPriceConfig().vendors.length > 0,
+      fallback: {
+        target: () => document.getElementById('price-add-vendor'),
+        text: 'Add a vendor and an item first, then run this part again to see how prices work.',
+      },
+      setup: () => { showPriceTable(); return true; },
+      target: () => document.querySelector('#price-table .price-cell'),
+      text: 'Tap any cell to record a price: the amount, the date you got it, and whether it’s in stock. Each cell keeps every price you’ve entered.',
+    },
+    {
+      screen: 'price',
+      group: 'pricecells',
+      requires: () => Storage.listPriceItems().length > 0 && Storage.getPriceConfig().vendors.length > 0,
+      setup: () => { showPriceTable(); return true; },
+      target: () => document.querySelector('#price-view .price-legend'),
+      text: 'The dot shows availability: green now, amber 2–3 days, grey longer, red not available. A red dot with a dash means they had none and quoted no price.',
+    },
+    {
+      screen: 'price',
+      group: 'pricecells',
+      requires: () => Storage.listPriceItems().length > 0 && Storage.getPriceConfig().vendors.length > 0,
+      setup: () => { showPriceTable(); return true; },
+      target: () => document.querySelector('#price-table .price-cell'),
+      text: 'Press and hold a cell to see every price you’ve recorded for it, with dates — handy when a supplier says the price “hasn’t changed”.',
+    },
+    {
+      screen: 'price',
+      setup: () => { showPriceTable(); return true; },
+      target: () => document.getElementById('price-more-btn'),
+      text: 'The ⋯ menu reorders rows and columns, exports the table to a spreadsheet, imports prices back in, and shares the table with an employee.',
+    },
+  ];
+
+  if (part === 5) {
+    const iOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+    const android = /android/i.test(navigator.userAgent);
+    const homeTarget = () => document.querySelector('#list-view .home-header-top h1');
+    if (isStandaloneApp) return [
+      {
+        screen: 'home',
+        setup: () => { goHome(); return true; },
+        target: homeTarget,
+        text: 'You’re already running JobPilot as an installed app — that’s why there’s no browser bar. Nothing to do here.',
+      },
+    ];
+    const installText = iOS
+      ? 'Install JobPilot on your iPhone: tap the Share button in Safari’s toolbar (the square with an arrow), scroll to “Add to Home Screen”, then tap Add.'
+      : android
+        ? 'Install JobPilot on your Android phone: open your browser’s ⋮ menu and choose “Install app” (or “Add to home screen”), then confirm.'
+        : 'Install JobPilot on this computer: click the install icon at the right of the address bar (or your browser’s menu → “Install JobPilot”).';
+    return [
+      {
+        screen: 'home',
+        setup: () => { goHome(); return true; },
+        target: homeTarget,
+        text: installText,
+      },
+      {
+        screen: 'home',
+        target: homeTarget,
+        text: 'Once installed it opens full screen from your home screen, works with no signal, and keeps you signed in — the same notes, just quicker to reach.',
+      },
+    ];
+  }
+
+  // part 3 — editor & extras (the default)
   return [
     {
       screen: 'editor',
@@ -4510,7 +4592,7 @@ function tutorialSteps(part) {
       group: 'note',
       requires: () => Storage.listRecentCustomerNotes(1).length > 0,
       target: () => document.getElementById('editor-more-btn'),
-      text: 'Note tools: insert a date, share the note, move it to another customer.',
+      text: 'Note tools: insert a date, share the note, move it to another customer, or delete it.',
     },
     {
       screen: 'editor',
