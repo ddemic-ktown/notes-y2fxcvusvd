@@ -359,6 +359,33 @@ body.editor-open {
   padding: 4px 6px;
 }
 
+/* Contact strip on a customer screen — Call / Text / Email from their note */
+.contact-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 12px;
+  margin: 10px 0;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+.contact-btn {
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 6px 12px;
+  background: var(--bg);
+  white-space: nowrap;
+}
+.contact-btn:active { opacity: 0.7; }
+.contact-value { font-size: 12px; color: var(--ink-soft); margin-right: 4px; }
+
 /* Customers + Price Table side by side at the top of the home screen */
 .nav-card-row { display: flex; gap: 8px; align-items: stretch; }
 .nav-card-row .note-card {
@@ -401,6 +428,12 @@ body.editor-open {
 .price-value { font-weight: 600; }
 .price-unavailable { text-decoration: line-through; color: var(--ink-soft); font-weight: 500; }
 .price-empty { color: var(--ink-soft); }
+/* Cheapest available price in a row */
+.price-best { color: #15803d; }
+body.dark-mode .price-best { color: #4ade80; }
+.price-best-badge { color: #15803d; font-size: 11px; font-weight: 700; margin-left: 3px; }
+body.dark-mode .price-best-badge { color: #4ade80; }
+.price-legend .price-best-badge { margin-left: 12px; }
 .price-empty-state { color: var(--ink-soft); font-style: italic; padding: 24px 12px; white-space: normal; }
 .avail-dot {
   display: inline-block; width: 9px; height: 9px; border-radius: 50%;
@@ -662,6 +695,18 @@ body.show-app-back .app-back-btn[hidden] { display: none !important; }
 .editor-header .crumbs { flex: 1; }
 .editor-header .crumb-current { font-size: 15px; }
 .app-version { font-size: 12px; color: var(--ink-soft); }
+/* Sync indicator: quiet by default, only speaks when something is pending */
+.sync-status {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.sync-status.sync-saving { background: rgba(37, 99, 235, 0.12); color: var(--accent); }
+.sync-status.sync-offline { background: rgba(245, 158, 11, 0.18); color: #92400e; }
+body.dark-mode .sync-status.sync-offline { color: #fbbf24; }
 .update-btn { font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--accent); background: var(--accent); color: #fff; cursor: pointer; flex-shrink: 0; }
 .update-btn:active { opacity: 0.8; }
 .home-header { flex-direction: column; align-items: stretch; gap: 8px; }

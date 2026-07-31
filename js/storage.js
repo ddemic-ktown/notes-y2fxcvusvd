@@ -35,6 +35,20 @@ let _customersReady = false;
 let _notesError = null;
 
 function emit() { for (const cb of _listeners) cb(); }
+
+// ---------- write tracking (for the sync indicator) ----------
+// The app is offline-first and silent about it: a note saved in a basement
+// looks identical to one that reached the server. Count our own in-flight
+// writes so the UI can say "Saving…" and, when offline, reassure the user the
+// change is safe on the device.
+let _pendingWrites = 0;
+const _syncListeners = new Set();
+function emitSync() { for (const cb of _syncListeners) cb(); }
+function tracked(promise) {
+  _pendingWrites++;
+  emitSync();
+  return promise.finally(() => { _pendingWrites = Math.max(0, _pendingWrites - 1); emitSync(); });
+}
 function uid() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 }
@@ -210,6 +224,9 @@ async function resolveOrg(userId, userEmail) {
 // ---------- public API ----------
 export const Storage = {
   onChange(cb) { _listeners.add(cb); return () => _listeners.delete(cb); },
+  // Sync status for the header indicator
+  onSyncChange(cb) { _syncListeners.add(cb); return () => _syncListeners.delete(cb); },
+  pendingWrites() { return _pendingWrites; },
   // Called when THIS user's role changes while the app is open:
   // cb(newRole, previousRole); newRole is null if they were removed.
   onRoleChange(cb) { _onRoleChange = cb; },
@@ -254,30 +271,37 @@ export const Storage = {
   },
 
   // ---------- Notes ----------
+  // Deleting sets deletedAt instead of removing the document, so a mistake is
+  // recoverable (deleting a customer used to cascade to every note they had,
+  // with only a confirm dialog in the way). Every list filters them out; the
+  // Trash screen is the only place they appear, and a sweep on admin sign-in
+  // purges anything older than TRASH_DAYS.
+  liveNotes() { return _cache.notes.filter(n => !n.deletedAt); },
+  liveCustomers() { return _cache.customers.filter(c => !c.deletedAt); },
   listNotes() {
-    return _cache.notes
+    return this.liveNotes()
       .filter(n => !n.customerId)
       .sort((a, b) => new Date(b.updated).getTime() - new Date(a.updated).getTime());
   },
   listAllNotes() {
-    return _cache.notes
+    return this.liveNotes()
       .slice()
       .sort((a, b) => new Date(b.updated).getTime() - new Date(a.updated).getTime());
   },
   listNotesByCustomer(customerId) {
-    const all = _cache.notes.filter(n => n.customerId === customerId);
+    const all = this.liveNotes().filter(n => n.customerId === customerId);
     const defaults = all.filter(n => n.isDefault);
     const rest = all.filter(n => !n.isDefault)
       .sort((a, b) => new Date(b.updated).getTime() - new Date(a.updated).getTime());
     return [...defaults, ...rest];
   },
   listRecentCustomerNotes(limit = 4) {
-    return _cache.notes
+    return this.liveNotes()
       .filter(n => n.customerId)
       .sort((a, b) => new Date(b.updated).getTime() - new Date(a.updated).getTime())
       .slice(0, limit);
   },
-  getNote(id) { return _cache.notes.find(n => n.id === id) || null; },
+  getNote(id) { return _cache.notes.find(n => n.id === id && !n.deletedAt) || null; },
 
   createNote(opts = {}) {
     const id = uid();
@@ -295,7 +319,7 @@ export const Storage = {
     };
     _cache.notes.push(note);
     emit();
-    setDoc(doc(notesCol(), id), stripId(note)).catch(err => console.warn("createNote", err));
+    tracked(setDoc(doc(notesCol(), id), stripId(note))).catch(err => console.warn("createNote", err));
     return note;
   },
 
@@ -306,7 +330,7 @@ export const Storage = {
     const next = { ..._cache.notes[i], body, updated: nowIso() };
     _cache.notes[i] = next;
     emit();
-    setDoc(doc(notesCol(), id), stripId(next)).catch(err => console.warn("updateNote", err));
+    tracked(setDoc(doc(notesCol(), id), stripId(next))).catch(err => console.warn("updateNote", err));
     // Admin renamed a customer (default note title) — propagate to that customer's notes
     if (_role === 'admin' && next.isDefault && next.customerId) {
       const name = this.getCustomerNameSnapshot(next.customerId);
@@ -314,7 +338,7 @@ export const Storage = {
         if (n.customerId === next.customerId && !n.isDefault && (n.customerName || '') !== name) {
           const updated = { ...n, customerName: name };
           _cache.notes[idx] = updated;
-          setDoc(doc(notesCol(), n.id), stripId(updated)).catch(err => console.warn("propagate customerName", err));
+          tracked(setDoc(doc(notesCol(), n.id), stripId(updated))).catch(err => console.warn("propagate customerName", err));
         }
       });
     }
@@ -322,9 +346,12 @@ export const Storage = {
   },
 
   deleteNote(id) {
-    _cache.notes = _cache.notes.filter(n => n.id !== id);
+    const i = _cache.notes.findIndex(n => n.id === id);
+    if (i === -1) return;
+    const next = { ..._cache.notes[i], deletedAt: nowIso() };
+    _cache.notes[i] = next;
     emit();
-    deleteDoc(doc(notesCol(), id)).catch(err => console.warn("deleteNote", err));
+    tracked(setDoc(doc(notesCol(), id), stripId(next))).catch(err => console.warn("deleteNote", err));
   },
 
   // customerId === null moves the note back to the general pool.
@@ -339,7 +366,7 @@ export const Storage = {
     };
     _cache.notes[i] = next;
     emit();
-    setDoc(doc(notesCol(), noteId), stripId(next)).catch(err => console.warn("assignNoteToCustomer", err));
+    tracked(setDoc(doc(notesCol(), noteId), stripId(next))).catch(err => console.warn("assignNoteToCustomer", err));
     return next;
   },
 
@@ -351,13 +378,13 @@ export const Storage = {
 
   // ---------- Customers ----------
   listCustomers() {
-    return _cache.customers.slice().sort((a, b) =>
+    return this.liveCustomers().slice().sort((a, b) =>
       new Date(b.updated).getTime() - new Date(a.updated).getTime()
     );
   },
-  getCustomer(id) { return _cache.customers.find(c => c.id === id) || null; },
+  getCustomer(id) { return _cache.customers.find(c => c.id === id && !c.deletedAt) || null; },
   getDefaultNoteForCustomer(customerId) {
-    return _cache.notes.find(n => n.customerId === customerId && n.isDefault) || null;
+    return this.liveNotes().find(n => n.customerId === customerId && n.isDefault) || null;
   },
 
   // Denormalized customer name (first line of the default note) so non-admin
@@ -381,8 +408,8 @@ export const Storage = {
     };
     _cache.notes.push(defaultNote);
     emit();
-    setDoc(doc(customersCol(), cid), stripId(customer)).catch(err => console.warn("createCustomer.customer", err));
-    setDoc(doc(notesCol(), defId), stripId(defaultNote)).catch(err => console.warn("createCustomer.note", err));
+    tracked(setDoc(doc(customersCol(), cid), stripId(customer))).catch(err => console.warn("createCustomer.customer", err));
+    tracked(setDoc(doc(notesCol(), defId), stripId(defaultNote))).catch(err => console.warn("createCustomer.note", err));
     return { customer, defaultNote };
   },
 
@@ -392,19 +419,103 @@ export const Storage = {
     const next = { ..._cache.customers[i], ...patch, updated: nowIso() };
     _cache.customers[i] = next;
     emit();
-    setDoc(doc(customersCol(), id), stripId(next)).catch(err => console.warn("updateCustomer", err));
+    tracked(setDoc(doc(customersCol(), id), stripId(next))).catch(err => console.warn("updateCustomer", err));
     return next;
   },
 
+  // Marks the customer AND their notes, stamping the same trashedWith id so
+  // restoring the customer brings the whole set back together.
   deleteCustomer(id) {
-    _cache.customers = _cache.customers.filter(c => c.id !== id);
-    const noteIds = _cache.notes.filter(n => n.customerId === id).map(n => n.id);
-    _cache.notes = _cache.notes.filter(n => n.customerId !== id);
-    emit();
-    deleteDoc(doc(customersCol(), id)).catch(err => console.warn("deleteCustomer.customer", err));
-    for (const nid of noteIds) {
-      deleteDoc(doc(notesCol(), nid)).catch(err => console.warn("deleteCustomer.note", err));
+    const now = nowIso();
+    const ci = _cache.customers.findIndex(c => c.id === id);
+    if (ci !== -1) {
+      const nextC = { ..._cache.customers[ci], deletedAt: now };
+      _cache.customers[ci] = nextC;
+      tracked(setDoc(doc(customersCol(), id), stripId(nextC))).catch(err => console.warn("deleteCustomer.customer", err));
     }
+    _cache.notes.forEach((n, idx) => {
+      if (n.customerId === id && !n.deletedAt) {
+        const nextN = { ...n, deletedAt: now, trashedWith: id };
+        _cache.notes[idx] = nextN;
+        tracked(setDoc(doc(notesCol(), n.id), stripId(nextN))).catch(err => console.warn("deleteCustomer.note", err));
+      }
+    });
+    emit();
+  },
+
+  // ---------- Trash ----------
+  TRASH_DAYS: 30,
+  listTrash() {
+    const notes = _cache.notes.filter(n => n.deletedAt);
+    const customers = _cache.customers.filter(c => c.deletedAt);
+    // A customer and the notes deleted with them show as ONE entry
+    const grouped = customers.map(c => ({
+      kind: 'customer', id: c.id, deletedAt: c.deletedAt,
+      name: (() => {
+        const def = _cache.notes.find(n => n.customerId === c.id && n.isDefault);
+        const title = def ? (def.body || '').split('\n')[0].trim() : '';
+        return title || 'Unnamed customer';
+      })(),
+      noteCount: notes.filter(n => n.trashedWith === c.id).length,
+    }));
+    const loose = notes.filter(n => !n.trashedWith).map(n => ({
+      kind: 'note', id: n.id, deletedAt: n.deletedAt,
+      name: (n.body || '').split('\n')[0].trim() || 'Untitled note',
+    }));
+    return [...grouped, ...loose].sort((a, b) =>
+      new Date(b.deletedAt).getTime() - new Date(a.deletedAt).getTime());
+  },
+  async restoreFromTrash(kind, id) {
+    if (kind === 'customer') {
+      const ci = _cache.customers.findIndex(c => c.id === id);
+      if (ci !== -1) {
+        const c = { ..._cache.customers[ci] };
+        delete c.deletedAt;
+        _cache.customers[ci] = c;
+        tracked(setDoc(doc(customersCol(), id), stripId(c))).catch(err => console.warn("restore.customer", err));
+      }
+      _cache.notes.forEach((n, idx) => {
+        if (n.trashedWith === id) {
+          const nn = { ...n };
+          delete nn.deletedAt; delete nn.trashedWith;
+          _cache.notes[idx] = nn;
+          tracked(setDoc(doc(notesCol(), n.id), stripId(nn))).catch(err => console.warn("restore.note", err));
+        }
+      });
+    } else {
+      const i = _cache.notes.findIndex(n => n.id === id);
+      if (i !== -1) {
+        const nn = { ..._cache.notes[i] };
+        delete nn.deletedAt; delete nn.trashedWith;
+        _cache.notes[i] = nn;
+        tracked(setDoc(doc(notesCol(), id), stripId(nn))).catch(err => console.warn("restore.note", err));
+      }
+    }
+    emit();
+  },
+  async purgeFromTrash(kind, id) {
+    if (kind === 'customer') {
+      const noteIds = _cache.notes.filter(n => n.trashedWith === id).map(n => n.id);
+      _cache.customers = _cache.customers.filter(c => c.id !== id);
+      _cache.notes = _cache.notes.filter(n => n.trashedWith !== id);
+      emit();
+      tracked(deleteDoc(doc(customersCol(), id))).catch(err => console.warn("purge.customer", err));
+      for (const nid of noteIds) tracked(deleteDoc(doc(notesCol(), nid))).catch(err => console.warn("purge.note", err));
+    } else {
+      _cache.notes = _cache.notes.filter(n => n.id !== id);
+      emit();
+      tracked(deleteDoc(doc(notesCol(), id))).catch(err => console.warn("purge.note", err));
+    }
+  },
+  // Hard-delete anything binned more than TRASH_DAYS ago (admin sign-in sweep)
+  purgeExpiredTrash() {
+    if (_role !== 'admin') return 0;
+    const cutoff = Date.now() - this.TRASH_DAYS * 24 * 60 * 60 * 1000;
+    let purged = 0;
+    const expired = (d) => d && new Date(d).getTime() < cutoff;
+    _cache.customers.filter(c => expired(c.deletedAt)).forEach(c => { this.purgeFromTrash('customer', c.id); purged++; });
+    _cache.notes.filter(n => expired(n.deletedAt) && !n.trashedWith).forEach(n => { this.purgeFromTrash('note', n.id); purged++; });
+    return purged;
   },
 
   // ---------- Price table ----------
@@ -559,14 +670,14 @@ export const Storage = {
       const cid = uid();
       const customer = { id: cid, created: now, updated: now, demo: true };
       _cache.customers.push(customer);
-      setDoc(doc(customersCol(), cid), stripId(customer)).catch(err => console.warn("seed.customer", err));
+      tracked(setDoc(doc(customersCol(), cid), stripId(customer))).catch(err => console.warn("seed.customer", err));
       const defId = uid();
       const defaultNote = {
         id: defId, body: s.def, customerId: cid, isDefault: true,
         assignedTo: [], created: now, updated: now, demo: true,
       };
       _cache.notes.push(defaultNote);
-      setDoc(doc(notesCol(), defId), stripId(defaultNote)).catch(err => console.warn("seed.defnote", err));
+      tracked(setDoc(doc(notesCol(), defId), stripId(defaultNote))).catch(err => console.warn("seed.defnote", err));
       noteCount++;
       for (const body of s.notes) {
         const nid = uid();
@@ -576,7 +687,7 @@ export const Storage = {
           created: now, updated: now, demo: true,
         };
         _cache.notes.push(note);
-        setDoc(doc(notesCol(), nid), stripId(note)).catch(err => console.warn("seed.note", err));
+        tracked(setDoc(doc(notesCol(), nid), stripId(note))).catch(err => console.warn("seed.note", err));
         noteCount++;
       }
     }
@@ -592,7 +703,7 @@ export const Storage = {
         customerName: '', created: now, updated: now, demo: true,
       };
       _cache.notes.push(note);
-      setDoc(doc(notesCol(), nid), stripId(note)).catch(err => console.warn("seed.general", err));
+      tracked(setDoc(doc(notesCol(), nid), stripId(note))).catch(err => console.warn("seed.general", err));
       noteCount++;
     }
     // Seed keywords so the aggregator section has something to show
@@ -616,8 +727,8 @@ export const Storage = {
     _cache.notes = _cache.notes.filter(n => !n.demo);
     _cache.customers = _cache.customers.filter(c => !c.demo);
     emit();
-    for (const n of notes) deleteDoc(doc(notesCol(), n.id)).catch(err => console.warn("unseed.note", err));
-    for (const c of customers) deleteDoc(doc(customersCol(), c.id)).catch(err => console.warn("unseed.customer", err));
+    for (const n of notes) tracked(deleteDoc(doc(notesCol(), n.id))).catch(err => console.warn("unseed.note", err));
+    for (const c of customers) tracked(deleteDoc(doc(customersCol(), c.id))).catch(err => console.warn("unseed.customer", err));
     return { customers: customers.length, notes: notes.length };
   },
 
@@ -630,10 +741,10 @@ export const Storage = {
     if (!keyword) return [];
     const kwLower = keyword.toLowerCase();
     const results = [];
-    for (const note of _cache.notes) {
+    for (const note of this.liveNotes()) {
       // General notes (no customerId) ARE aggregated — the app labels them
       // with the note title (plus the owner's name when it isn't the viewer's).
-      if (note.customerId && _customersReady && !_cache.customers.find(c => c.id === note.customerId)) {
+      if (note.customerId && _customersReady && !this.liveCustomers().find(c => c.id === note.customerId)) {
         // Orphaned note — skip it in aggregation results.
         // The app will prompt the user to delete or ignore orphaned notes.
         continue;
@@ -669,8 +780,8 @@ export const Storage = {
 
   listOrphanedNotes() {
     if (!_customersReady) return [];
-    return _cache.notes.filter(n =>
-      n.customerId && !_cache.customers.find(c => c.id === n.customerId)
+    return this.liveNotes().filter(n =>
+      n.customerId && !this.liveCustomers().find(c => c.id === n.customerId)
     );
   },
 
@@ -685,7 +796,7 @@ export const Storage = {
   },
   async writeSettings() {
     try {
-      await setDoc(settingsDoc(), _cache.settings, { merge: true });
+      await tracked(setDoc(settingsDoc(), _cache.settings, { merge: true }));
     } catch (err) {
       console.warn("writeSettings", err);
     }
@@ -695,7 +806,7 @@ export const Storage = {
     _cache.settings = { ...DEFAULT_SETTINGS, ..._cache.settings, [key]: value };
     emit();
     try {
-      await setDoc(settingsDoc(), _cache.settings, { merge: true });
+      await tracked(setDoc(settingsDoc(), _cache.settings, { merge: true }));
     } catch (err) {
       console.warn("setSetting", err);
     }
@@ -713,7 +824,7 @@ export const Storage = {
     const next = { ...note, assignedTo: uids, customerName };
     _cache.notes[i] = next;
     emit();
-    setDoc(doc(notesCol(), noteId), stripId(next)).catch(err => console.warn("assignUsersToNote", err));
+    tracked(setDoc(doc(notesCol(), noteId), stripId(next))).catch(err => console.warn("assignUsersToNote", err));
   },
 
   // One-time catch-up: stamp customerName onto already-shared notes that lack it.
@@ -726,7 +837,7 @@ export const Storage = {
       if ((n.customerName || '') === name) return;
       const updated = { ...n, customerName: name };
       _cache.notes[idx] = updated;
-      setDoc(doc(notesCol(), n.id), stripId(updated)).catch(err => console.warn("backfill customerName", err));
+      tracked(setDoc(doc(notesCol(), n.id), stripId(updated))).catch(err => console.warn("backfill customerName", err));
     });
   },
   getMember(uid) { return _cache.members.find(m => m.uid === uid) || null; },
@@ -759,7 +870,7 @@ export const Storage = {
       if (!Array.isArray(n.assignedTo) || !n.assignedTo.includes(memberUid)) return;
       const updated = { ...n, assignedTo: n.assignedTo.filter(u => u !== memberUid) };
       _cache.notes[idx] = updated;
-      setDoc(doc(notesCol(), n.id), stripId(updated)).catch(err => console.warn("unassign", err));
+      tracked(setDoc(doc(notesCol(), n.id), stripId(updated))).catch(err => console.warn("unassign", err));
     });
     emit();
   },
@@ -776,7 +887,7 @@ export const Storage = {
       if (kept.length === n.assignedTo.length) return;
       const updated = { ...n, assignedTo: kept };
       _cache.notes[idx] = updated;
-      setDoc(doc(notesCol(), n.id), stripId(updated)).catch(err => console.warn("cleanup assignments", err));
+      tracked(setDoc(doc(notesCol(), n.id), stripId(updated))).catch(err => console.warn("cleanup assignments", err));
     });
     emit();
   },
@@ -795,7 +906,7 @@ export const Storage = {
       if (kept.length === n.assignedTo.length) return;
       const updated = { ...n, assignedTo: kept };
       _cache.notes[idx] = updated;
-      setDoc(doc(notesCol(), n.id), stripId(updated)).catch(err => console.warn("cleanup elevated assignments", err));
+      tracked(setDoc(doc(notesCol(), n.id), stripId(updated))).catch(err => console.warn("cleanup elevated assignments", err));
     });
     emit();
   },

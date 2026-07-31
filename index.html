@@ -79,6 +79,7 @@
       <div class="home-header-top">
         <h1>JobPilot</h1>
         <span id="app-version" class="app-version"></span>
+        <span id="sync-status" class="sync-status" role="status" hidden></span>
         <button id="layout-btn" class="icon-btn date-btn" type="button" aria-pressed="false" aria-label="Change home screen layout">Layout</button>
         <button id="settings-btn" class="icon-btn" aria-label="Settings">⚙</button>
       </div>
@@ -139,6 +140,7 @@
       </div>
     </header>
     <main class="notes-list">
+      <div id="customer-contact-strip" class="contact-strip" hidden></div>
       <div id="customer-files-section" class="customer-files-section">
         <div class="files-header">
           <button id="customer-files-toggle" class="section-label-btn files-toggle" type="button">Files (0) ▸</button>
@@ -224,6 +226,7 @@
         <span class="avail-dot avail-soon"></span> 2–3 days
         <span class="avail-dot avail-later"></span> longer
         <span class="avail-dot avail-no"></span> not available
+        <span class="price-best-badge">✓</span> lowest price you can get today
       </p>
     </main>
   </section>
@@ -370,6 +373,19 @@
       </div>
 
       <div class="setting-row setting-list-row" data-staff-only>
+        <h3 class="setting-list-title">Backup</h3>
+        <p class="muted setting-hint">Downloads everything — customers, notes, settings and the price table — as one file you can keep somewhere safe. Customer files stored on this device are not included.</p>
+        <button id="backup-btn" class="secondary setting-wide-btn" type="button">Download backup</button>
+        <p id="backup-status" class="muted setting-hint" style="margin-top:8px;"></p>
+      </div>
+
+      <div class="setting-row setting-list-row" data-staff-only>
+        <h3 class="setting-list-title">Trash</h3>
+        <p class="muted setting-hint">Deleted notes and customers stay here for 30 days, then go for good.</p>
+        <ul id="trash-list" class="members-list"></ul>
+      </div>
+
+      <div class="setting-row setting-list-row" data-staff-only>
         <h3 class="setting-list-title">Sample data</h3>
         <p class="muted setting-hint">Fills the app with a few example customers, notes and keywords so you can try things out. Remove it any time — your own data isn’t touched.</p>
         <button id="seed-btn" class="secondary setting-wide-btn">Add sample data</button>
@@ -451,6 +467,7 @@
             <label id="date-picker-btn" class="editor-more-item" aria-label="Pick a date to insert" style="cursor:pointer;">Pick a date…<input id="date-picker-input" type="date" style="position:absolute;opacity:0;pointer-events:none;width:1px;height:1px;" /></label>
             <button id="assign-btn" class="editor-more-item" aria-label="Share with users" hidden>Share with users</button>
             <button id="assign-customer-btn" class="editor-more-item" aria-label="Assign to customer" hidden>Assign to customer</button>
+            <button id="duplicate-note-btn" class="editor-more-item" aria-label="Duplicate note" hidden>Duplicate note</button>
             <button id="editor-iif-btn" class="editor-more-item" aria-label="Generate IIF file" hidden>Generate IIF file</button>
             <button id="delete-btn" class="editor-more-item danger-item" aria-label="Delete note">Delete note</button>
           </div>

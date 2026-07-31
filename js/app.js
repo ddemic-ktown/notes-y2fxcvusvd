@@ -13,6 +13,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 10, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.07.30-2050', 'Trash with 30-day undo, sync status, tap-to-call, backup, best-price mark, duplicate note'],
   ['v2026.07.30-2030', 'While adding, the header shows “New customer” so Cancel always fits'],
   ['v2026.07.30-2013', 'Adding a customer from the home screen now goes back to the home screen'],
   ['v2026.07.30-2011', 'Fixed: Cancel never appeared when adding a new customer'],
@@ -22,7 +23,6 @@ const CHANGELOG = [
   ['v2026.07.30-0211', 'Cancel always fits on small screens; the bin is hidden while it shows'],
   ['v2026.07.30-0200', 'Cancel button when adding a new customer or note discards it'],
   ['v2026.07.30-0158', 'Fixed: the note toolbar could scroll out of view right after the app loaded'],
-  ['v2026.07.30-0154', 'Tapping an empty checkbox line lets you type instead of ticking it'],
 ];
 const APP_VERSION = CHANGELOG[0][0];
 
@@ -434,7 +434,25 @@ function showPriceTable() {
   if (!handlingPopstate) history.pushState({ screen: 'price' }, '');
 }
 
-function priceCellHtml(item, vendor, canEdit) {
+// Lowest CURRENT price in a row, ignoring vendors whose latest entry says the
+// item isn't available (a price you can't buy at isn't the best price) and
+// entries with no figure at all. Returns null when nothing is comparable or
+// when several vendors tie — a tie has no single "best", and marking them all
+// would just be noise.
+function cheapestVendorId(item, vendors) {
+  let bestId = null, best = Infinity, ties = 0;
+  for (const v of vendors) {
+    const e = Storage.latestPriceEntry(item, v.id);
+    if (!e || e.avail === 'no' || e.price == null || e.price === '') continue;
+    const p = Number(e.price);
+    if (!Number.isFinite(p)) continue;
+    if (p < best) { best = p; bestId = v.id; ties = 1; }
+    else if (p === best) ties++;
+  }
+  return ties === 1 ? bestId : null;
+}
+
+function priceCellHtml(item, vendor, canEdit, isCheapest) {
   const key = `${item.id}|${vendor.id}`;
   const latest = Storage.latestPriceEntry(item, vendor.id);
   if (openCellKey === key && canEdit) {
@@ -458,8 +476,10 @@ function priceCellHtml(item, vendor, canEdit) {
   if (latest) {
     const noPrice = latest.price == null || latest.price === '';
     const priceTxt = noPrice ? '—' : Number(latest.price).toFixed(2);
-    const cls = latest.avail === 'no' ? 'price-value price-unavailable' : 'price-value';
-    inner = `<span class="${cls}">${escapeHtml(priceTxt)}</span><span class="avail-dot avail-${escapeHtml(latest.avail || 'yes')}" title="${escapeHtml(AVAIL_LABELS[latest.avail] || '')}"></span>`;
+    let cls = latest.avail === 'no' ? 'price-value price-unavailable' : 'price-value';
+    if (isCheapest) cls += ' price-best';
+    const badge = isCheapest ? '<span class="price-best-badge" title="Lowest price available">✓</span>' : '';
+    inner = `<span class="${cls}">${escapeHtml(priceTxt)}</span>${badge}<span class="avail-dot avail-${escapeHtml(latest.avail || 'yes')}" title="${escapeHtml(AVAIL_LABELS[latest.avail] || '')}"></span>`;
   }
   return `<td class="price-cell" data-key="${key}">${inner}</td>`;
 }
@@ -506,7 +526,7 @@ function renderPriceTable() {
       <th class="price-item" data-item="${item.id}">${escapeHtml(item.name)}${
         reorder ? `<span class="reorder-arrows"><button type="button" class="i-up" data-item="${item.id}" ${i === 0 ? 'disabled' : ''}>↑</button><button type="button" class="i-down" data-item="${item.id}" ${i === items.length - 1 ? 'disabled' : ''}>↓</button></span>` : ''
       }</th>
-      ${vendors.map(v => priceCellHtml(item, v, canEdit)).join('')}
+      ${(() => { const best = cheapestVendorId(item, vendors); return vendors.map(v => priceCellHtml(item, v, canEdit, v.id === best)).join(''); })()}
     </tr>`).join('')}</tbody>`;
   priceTableEl.innerHTML = head + body;
   priceTableEl.style.transform = `scale(${priceZoom})`;
@@ -1461,6 +1481,7 @@ function showSettings() {
   renderEmployeeList();
   if (accountEmailEl && auth.currentUser) accountEmailEl.textContent = auth.currentUser.email || '';
   refreshSeedButtons();
+  renderTrashList();
   const moveCheckedInput = document.getElementById('setting-move-checked');
   if (moveCheckedInput) moveCheckedInput.checked = getMoveCheckedToBottom();
   const collapseSearchInput = document.getElementById('setting-collapse-search');
@@ -1512,6 +1533,7 @@ function showCustomerNotes(customerId, returnTo) {
   returnScreen = 'customer-notes';
   customerNotesReturnTo = returnTo || { screen: 'customers' };
   renderCustomerFiles(customerId);
+  renderContactStrip(customerId);
   renderCrumbs('crumbs-customer-notes', [
     { label: 'Home', go: 'home' },
     { label: 'Customers', go: 'customers' },
@@ -1608,6 +1630,11 @@ function showEditor(record, type, cursorHint) {
       assignCustomerBtnEl.textContent = hasCustomer ? 'Assign note to different customer' : 'Assign note to customer';
     }
   }
+  const duplicateBtnEl = document.getElementById('duplicate-note-btn');
+  // Most job notes start out like the last one — duplicating is the cheap 90%
+  // of "templates". Never on a customer's default note: that note IS the
+  // customer, and a copy would look like a second customer record.
+  if (duplicateBtnEl) duplicateBtnEl.hidden = !(type === 'note' && !currentIsDefault && !isReadOnlyRole());
   const editorIifBtnEl = document.getElementById('editor-iif-btn');
   if (editorIifBtnEl) {
     const isHoursNote = type === 'note' && (splitTitleAndBody(record.body).title || '').trim().toLowerCase() === 'hours';
@@ -3070,6 +3097,22 @@ function wireAssignCustomerRows() {
   });
 }
 
+const duplicateNoteBtn = document.getElementById('duplicate-note-btn');
+if (duplicateNoteBtn) duplicateNoteBtn.addEventListener('click', () => {
+  if (!currentId || currentType !== 'note') return;
+  if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
+  commitSave();
+  const src = Storage.getNote(currentId);
+  if (!src) return;
+  const { title, body } = splitTitleAndBody(src.body || '');
+  const copyBody = composeBody(title ? `${title} (copy)` : 'Copy', body);
+  const copy = Storage.createNote({ customerId: src.customerId || null, body: copyBody });
+  currentId = null; currentType = null; currentIsDefault = false;
+  returnScreen = src.customerId ? 'customer-notes' : 'notes';
+  if (src.customerId) activeCustomerId = src.customerId;
+  showEditor(copy, 'note');
+});
+
 if (assignCustomerBtn) assignCustomerBtn.addEventListener('click', () => {
   if (!assignCustomerModal) return;
   if (assignCustomerSearch) assignCustomerSearch.value = '';
@@ -3422,6 +3465,150 @@ if (signoutBtn) {
   signoutBtn.addEventListener('click', async () => { await signOut(auth); });
 }
 
+// ---------- backup export ----------
+// One file with everything the cloud holds. There was no export path at all
+// before this (only the IIF and price CSVs), so a lost account meant lost
+// notes. Restore is deliberately NOT implemented: importing would have to
+// reconcile ids and could duplicate or clobber live data — this is a snapshot
+// you can read, print or hand to someone, not a sync mechanism.
+const backupBtn = document.getElementById('backup-btn');
+const backupStatus = document.getElementById('backup-status');
+if (backupBtn) backupBtn.addEventListener('click', () => {
+  const customers = Storage.listCustomers().map(c => ({
+    id: c.id,
+    name: customerCrumbLabel(c.id),
+    notes: Storage.listNotesByCustomer(c.id).map(n => ({ id: n.id, isDefault: !!n.isDefault, body: n.body, updated: n.updated })),
+  }));
+  const data = {
+    app: 'JobPilot',
+    version: APP_VERSION,
+    exported: new Date().toISOString(),
+    customers,
+    generalNotes: Storage.listNotes().map(n => ({ id: n.id, body: n.body, updated: n.updated })),
+    settings: Storage.getSettings(),
+    priceTable: {
+      vendors: Storage.getPriceConfig().vendors,
+      items: Storage.listPriceItems().map(i => ({ id: i.id, name: i.name, cells: i.cells || {} })),
+    },
+  };
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `jobpilot-backup-${new Date().toISOString().slice(0, 10)}.json`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  const noteCount = data.generalNotes.length + customers.reduce((s, c) => s + c.notes.length, 0);
+  if (backupStatus) backupStatus.textContent = `Saved ${customers.length} customers and ${noteCount} notes.`;
+});
+
+// ---------- customer contact strip ----------
+// Phone numbers and emails written in a customer's default note become Call /
+// Text / Email buttons. In the field you open a customer to phone them — no
+// reason to make anyone retype a number that's already on screen.
+const contactStripEl = document.getElementById('customer-contact-strip');
+// Deliberately conservative: 10+ digits with common separators, so job numbers
+// and measurements ("2x4", "3.5") don't turn into phone links.
+const PHONE_RE = /(\+?\d[\d\s().-]{8,}\d)/g;
+const EMAIL_RE = /\b[\w.+-]+@[\w-]+\.[\w.-]{2,}\b/g;
+
+function extractContacts(text) {
+  const body = text || '';
+  const emails = [...new Set((body.match(EMAIL_RE) || []))];
+  const phones = [...new Set((body.match(PHONE_RE) || [])
+    .map(p => p.trim())
+    .filter(p => (p.replace(/\D/g, '').length >= 10 && p.replace(/\D/g, '').length <= 15)))];
+  return { phones, emails };
+}
+
+function renderContactStrip(customerId) {
+  if (!contactStripEl) return;
+  const def = customerId ? Storage.getDefaultNoteForCustomer(customerId) : null;
+  const { phones, emails } = extractContacts(def ? def.body : '');
+  if (!phones.length && !emails.length) { contactStripEl.hidden = true; contactStripEl.innerHTML = ''; return; }
+  const parts = [];
+  phones.forEach(p => {
+    const tel = p.replace(/[^\d+]/g, '');
+    parts.push(`<a class="contact-btn" href="tel:${escapeHtml(tel)}">📞 Call</a>`);
+    parts.push(`<a class="contact-btn" href="sms:${escapeHtml(tel)}">💬 Text</a>`);
+    parts.push(`<span class="contact-value">${escapeHtml(p)}</span>`);
+  });
+  emails.forEach(e => {
+    parts.push(`<a class="contact-btn" href="mailto:${escapeHtml(e)}">✉️ Email</a>`);
+    parts.push(`<span class="contact-value">${escapeHtml(e)}</span>`);
+  });
+  contactStripEl.innerHTML = parts.join('');
+  contactStripEl.hidden = false;
+}
+
+// ---------- sync status ----------
+// Silence normally; "Saving…" while our writes are in flight; and when the
+// device is offline, a plain statement that the change is safe here and will
+// go up later — the app is offline-first, but a user in a basement had no way
+// to tell a saved note from a stranded one.
+const syncStatusEl = document.getElementById('sync-status');
+function renderSyncStatus() {
+  if (!syncStatusEl) return;
+  const offline = !navigator.onLine;
+  const pending = Storage.pendingWrites ? Storage.pendingWrites() : 0;
+  if (offline) {
+    syncStatusEl.textContent = 'Offline — saved on this device';
+    syncStatusEl.className = 'sync-status sync-offline';
+    syncStatusEl.hidden = false;
+  } else if (pending > 0) {
+    syncStatusEl.textContent = 'Saving…';
+    syncStatusEl.className = 'sync-status sync-saving';
+    syncStatusEl.hidden = false;
+  } else {
+    syncStatusEl.hidden = true;
+  }
+}
+if (Storage.onSyncChange) Storage.onSyncChange(renderSyncStatus);
+window.addEventListener('online', renderSyncStatus);
+window.addEventListener('offline', renderSyncStatus);
+renderSyncStatus();
+
+// ---------- trash ----------
+// Deleting is a soft delete (deletedAt); this is where things can be brought
+// back or finished off. A customer and the notes deleted with them appear as
+// one entry, so restoring puts the whole set back together.
+function renderTrashList() {
+  const el = document.getElementById('trash-list');
+  if (!el || !isAdminRole()) return;
+  const items = Storage.listTrash();
+  if (!items.length) {
+    el.innerHTML = '<li class="member-item"><span class="member-email">Trash is empty.</span></li>';
+    return;
+  }
+  const days = Storage.TRASH_DAYS;
+  el.innerHTML = items.map(it => {
+    const left = Math.max(0, days - Math.floor((Date.now() - new Date(it.deletedAt).getTime()) / 86400000));
+    const extra = it.kind === 'customer'
+      ? ` · customer${it.noteCount ? ` + ${it.noteCount} note${it.noteCount === 1 ? '' : 's'}` : ''}`
+      : ' · note';
+    return `<li class="member-item">
+      <span class="member-email">${escapeHtml(it.name)}<em class="setting-check-hint">${escapeHtml(String(left))} day${left === 1 ? '' : 's'} left${extra}</em></span>
+      <button class="trash-restore" data-kind="${it.kind}" data-id="${it.id}">Restore</button>
+      <button class="member-remove-btn trash-purge" data-kind="${it.kind}" data-id="${it.id}" title="Delete forever">✕</button>
+    </li>`;
+  }).join('');
+  el.querySelectorAll('.trash-restore').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      await Storage.restoreFromTrash(btn.dataset.kind, btn.dataset.id);
+      renderTrashList();
+    });
+  });
+  el.querySelectorAll('.trash-purge').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      if (!confirm('Delete this permanently? This cannot be undone.')) return;
+      await Storage.purgeFromTrash(btn.dataset.kind, btn.dataset.id);
+      renderTrashList();
+    });
+  });
+}
+
 // ---------- sample data + first-run welcome ----------
 const seedBtn = document.getElementById('seed-btn');
 const unseedBtn = document.getElementById('unseed-btn');
@@ -3764,6 +3951,7 @@ function rerenderCurrent() {
     renderKeywordList();
     renderEmployeeList();
     renderMembersList();
+    renderTrashList();
   }
 }
 
@@ -3823,6 +4011,8 @@ onAuthStateChanged(auth, async (user) => {
   Storage.backfillAssignedCustomerNames();
   // Drop stale assignments left behind by removed members (field edit only)
   Storage.cleanupOrphanedAssignments();
+  // Bin anything that has sat in Trash longer than 30 days
+  Storage.purgeExpiredTrash();
   // Strip admin/bookkeeper uids from assignedTo — they see everything anyway
   Storage.cleanupElevatedAssignments();
   // First magic-link sign-in (or forgot-password): prompt to set a password.
