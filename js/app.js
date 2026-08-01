@@ -13,6 +13,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 10, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.07.31-2122', 'Price table: dragging a column no longer scrolls the table instead of moving it'],
   ['v2026.07.31-2111', 'New note or customer opens with the cursor in the title and the keyboard up'],
   ['v2026.07.31-2109', 'Customer search no longer jumps to the top of the job sheet — it moves only as far as it needs to'],
   ['v2026.07.31-2104', 'Price table: holding a row, column or cell no longer starts selecting text'],
@@ -22,7 +23,6 @@ const CHANGELOG = [
   ['v2026.07.31-2046', 'Calendar fades with a small nudge when you change month or day'],
   ['v2026.07.31-2043', 'Calendar day view: swipe left or right to change days, with tappable cues either side'],
   ['v2026.07.31-2040', 'Pull-to-refresh no longer reloads the app by accident; a ⟳ button on the home screen refreshes instead'],
-  ['v2026.07.31-2036', 'Price table: long-press an item or vendor to drag it to a new position'],
 ];
 const APP_VERSION = CHANGELOG[0][0];
 
@@ -1474,6 +1474,9 @@ function renderPriceTable() {
 // because moving a COLUMN live means touching a cell in every row. One code
 // path serves both axes.
 let priceDrag = null;
+function blockPriceDragScroll(e) {
+  if (priceDrag && e.cancelable) e.preventDefault();
+}
 function priceDropLine() {
   let el = document.getElementById('price-drop-line');
   if (!el) {
@@ -1486,9 +1489,7 @@ function priceDropLine() {
 }
 function clearPriceDrag() {
   if (priceDrag && priceDrag.el) priceDrag.el.classList.remove('price-dragging');
-  // touch-action is set ONLY for the duration of a drag — leaving it on kills
-  // scrolling, which is exactly how the day view broke once.
-  if (priceScrollEl) priceScrollEl.style.touchAction = '';
+  document.removeEventListener('touchmove', blockPriceDragScroll, { passive: false });
   const line = document.getElementById('price-drop-line');
   if (line) line.remove();
   priceDrag = null;
@@ -1587,7 +1588,9 @@ function wirePriceHeaderDrag(el, axis, id) {
       timer = null;
       priceDrag = { el, axis, id, target: null };
       el.classList.add('price-dragging');
-      if (priceScrollEl) priceScrollEl.style.touchAction = 'none';
+      // Second line of defence: the axis is already reserved in CSS, but where
+      // the browser still allows it, cancel the scroll outright.
+      document.addEventListener('touchmove', blockPriceDragScroll, { passive: false });
       try { el.setPointerCapture(down.id); } catch (err) {}
       if (navigator.vibrate) navigator.vibrate(10);
     }, 500);

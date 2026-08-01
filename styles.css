@@ -2105,3 +2105,12 @@ input[type="search"]::-webkit-search-cancel-button {
   user-select: none;
   -webkit-touch-callout: none;
 }
+
+/* Each header reserves the axis it DRAGS on, and only that axis. This has to
+   be in the stylesheet, not set when the long-press fires: the browser latches
+   touch-action when the gesture begins, so changing it 500ms in does nothing
+   and the table just keeps panning.
+   Cost: you can't scroll vertically by dragging on the item column, or
+   horizontally by dragging on the vendor row. Everywhere else is unaffected. */
+.price-item   { touch-action: pan-x; }   /* rows drag up/down */
+.price-vendor { touch-action: pan-y; }   /* columns drag left/right */
