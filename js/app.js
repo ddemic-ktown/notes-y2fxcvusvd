@@ -13,6 +13,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 10, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.08.01-0401', 'Opening the app with an active session no longer flashes the sign-in screen'],
   ['v2026.08.01-0346', 'Calendar loads only nearby months, fetching older ones as you scroll to them'],
   ['v2026.08.01-0321', 'Fewer database writes while typing; saves on Enter, paste and leaving the app'],
   ['v2026.08.01-0311', 'Your theme, time format and other preferences now follow you to every device'],
@@ -22,7 +23,6 @@ const CHANGELOG = [
   ['v2026.08.01-0147', 'Settings buttons follow dark mode instead of staying bright white'],
   ['v2026.08.01-0145', 'Calendar toolbar arrows removed; the mouse wheel changes months on desktop'],
   ['v2026.08.01-0141', 'Fixes + buttons drifting up the screen or disappearing when no keyboard was open'],
-  ['v2026.08.01-0138', 'New note/customer gets a green ✓ Done; discard ✕ moves to the top right'],
 ];
 const APP_VERSION = CHANGELOG[0][0];
 
@@ -4832,11 +4832,21 @@ const linkinNewLink = document.getElementById('linkin-newlink');
 // Firestore init and first snapshot, not the credential check — it can run for
 // seconds on a phone, and leaving the sign-in form up makes it look like
 // nothing happened.
+//
+// ONLY over the sign-in screen (v2026.08.01-0401). This card lives inside
+// #signin-view, so switching it on used to force that screen active — which
+// meant every app open with a restored session flashed the sign-in screen even
+// though the user was never signing in. A restored session stays wherever it
+// is (the home skeleton, which draws its own spinner); the card is strictly
+// for the case where the sign-in form is already on screen.
 const loadingCard = document.getElementById('loading-card');
 function showLoadingCard(on) {
   if (!loadingCard || !signinCard) return;
   // The magic-link card has its own status text — don't fight it.
   if (linkinCard && !linkinCard.hidden) { loadingCard.hidden = true; return; }
+  // Not already on the sign-in screen? Then this is a session being restored,
+  // not a sign-in — don't drag the user onto the sign-in screen to show it.
+  if (on && !signinView.classList.contains('active')) { loadingCard.hidden = true; return; }
   loadingCard.hidden = !on;
   signinCard.hidden = on;
   if (on) {
