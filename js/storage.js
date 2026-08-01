@@ -274,6 +274,26 @@ export const Storage = {
     attachListeners();
   },
 
+  // ---------- per-user preferences ----------
+  // Stored at users/{uid}/prefs/app, NOT under orgs/ — these belong to the
+  // person, so they follow them into a different org. The existing
+  // users/{userId}/{document=**} rule already covers it, so no rules deploy.
+  // A subcollection rather than a field on users/{uid}: that doc is the
+  // sign-in pointer used by the old-path migration and shouldn't be shared.
+  async loadUserPrefs() {
+    if (!_uid) return null;
+    try {
+      const snap = await getDoc(doc(db, "users", _uid, "prefs", "app"));
+      return snap.exists() ? (snap.data() || null) : null;
+    } catch (err) { console.warn("loadUserPrefs", err); return null; }
+  },
+  async saveUserPrefs(values) {
+    if (!_uid) return;
+    const payload = { ...values, updated: nowIso() };
+    await tracked(setDoc(doc(db, "users", _uid, "prefs", "app"), payload))
+      .catch(err => console.warn("saveUserPrefs", err));
+  },
+
   signedOut() {
     detachListeners();
     _uid = null; _orgId = null; _role = null;

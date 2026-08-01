@@ -35,6 +35,16 @@
       <p id="linkin-error" class="signin-error" role="alert"></p>
       <button id="linkin-newlink" class="secondary" hidden>Send me a new link</button>
     </div>
+    <!-- Credentials accepted, account still loading. Without this the sign-in
+         form stays on screen through the Firestore snapshot wait and looks
+         like the sign-in silently failed. -->
+    <div id="loading-card" class="signin-card" hidden>
+      <h1>JobPilot</h1>
+      <p class="signin-message" role="status">
+        <span class="nav-spinner" style="width:18px;height:18px;border-width:3px;vertical-align:-3px;"></span>
+        Signing you in…
+      </p>
+    </div>
     <div id="signin-card" class="signin-card">
       <h1>JobPilot</h1>
       <p>Sign in to access your notes from any device.</p>

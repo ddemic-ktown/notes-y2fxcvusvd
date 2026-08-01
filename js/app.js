@@ -13,6 +13,9 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 10, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.08.01-0321', 'Fewer database writes while typing; saves on Enter, paste and leaving the app'],
+  ['v2026.08.01-0311', 'Your theme, time format and other preferences now follow you to every device'],
+  ['v2026.08.01-0306', 'Signing in shows a loading card instead of leaving the sign-in form on screen'],
   ['v2026.08.01-0207', 'Calendar day view: long-press to move a job works on the phone again'],
   ['v2026.08.01-0155', 'Android: share photos, files or links into JobPilot and pick a customer'],
   ['v2026.08.01-0147', 'Settings buttons follow dark mode instead of staying bright white'],
@@ -20,9 +23,6 @@ const CHANGELOG = [
   ['v2026.08.01-0141', 'Fixes + buttons drifting up the screen or disappearing when no keyboard was open'],
   ['v2026.08.01-0138', 'New note/customer gets a green ✓ Done; discard ✕ moves to the top right'],
   ['v2026.07.31-2133', 'Checks GitHub for a newer version on the home screen and when the app resumes'],
-  ['v2026.07.31-2122', 'Price table: dragging a column no longer scrolls the table instead of moving it'],
-  ['v2026.07.31-2111', 'New note or customer opens with the cursor in the title and the keyboard up'],
-  ['v2026.07.31-2109', 'Customer search no longer jumps to the top of the job sheet — it moves only as far as it needs to'],
 ];
 const APP_VERSION = CHANGELOG[0][0];
 
@@ -283,6 +283,54 @@ function movePinnedSection(key, direction) {
   [order[i], order[j]] = [order[j], order[i]];
   queueSetting('pinnedOrder', order); // debounced write, instant UI
 }
+// ---------- preferences that follow the user ----------
+// These five describe the PERSON, so they sync via users/{uid}/prefs/app and
+// show up on every device they sign in on. Deliberately excluded:
+// na-price-zoom and jp-gallery-cols (screen-size dependent — a phone value is
+// wrong on a desktop) and na-install-hint-dismissed (per device by nature).
+// localStorage stays the working copy: everything applies instantly and still
+// works offline; the cloud copy is written through.
+const SYNCED_PREFS = ['na-theme', 'na-clock-24', 'na-move-checked',
+                      'na-collapse-search', 'na-customer-sort'];
+let prefsLoaded = false;      // don't write back the values we just read in
+
+function collectLocalPrefs() {
+  const out = {};
+  // null means "not set" — cycling Theme back to Auto REMOVES the key, and
+  // that has to propagate, so store the null rather than dropping the field.
+  for (const k of SYNCED_PREFS) out[k] = localStorage.getItem(k);
+  return out;
+}
+function pushUserPrefs() {
+  if (!prefsLoaded) return;   // still applying the cloud copy
+  Storage.saveUserPrefs(collectLocalPrefs());
+}
+async function initUserPrefs() {
+  const cloud = await Storage.loadUserPrefs();
+  if (cloud) {
+    for (const k of SYNCED_PREFS) {
+      if (!(k in cloud)) continue;              // unknown/absent: leave local alone
+      const v = cloud[k];
+      if (v === null || v === undefined) localStorage.removeItem(k);
+      else localStorage.setItem(k, String(v));
+    }
+    // Re-apply everything the values feed, since they may have just changed.
+    applyTheme();
+    applyClockButton();
+    refreshSearchCollapse();
+    const mc = document.getElementById('setting-move-checked');
+    if (mc) mc.checked = getMoveCheckedToBottom();
+    const cs = document.getElementById('setting-collapse-search');
+    if (cs) cs.checked = getCollapseSearch();
+    prefsLoaded = true;
+  } else {
+    // First sign-in on this account: seed the cloud from whatever is already
+    // set here, so nobody loses the setup they've been using.
+    prefsLoaded = true;
+    pushUserPrefs();
+  }
+}
+
 // Customer sort is a per-device viewing preference (localStorage), NOT an org
 // setting: org settings are admin-writable only, so a bookkeeper's tap on A–Z
 // was rejected by the rules and snapped back. Local also means no Firestore
@@ -299,6 +347,7 @@ function getCustomerSort() {
 }
 async function setCustomerSort(v) {
   localStorage.setItem('na-customer-sort', v === 'recent' ? 'recent' : 'alpha');
+  pushUserPrefs();
 }
 
 let customerSearchTerm = '';
@@ -3475,12 +3524,51 @@ function renderCustomerNotesList(customerId) {
 }
 
 // ---------- editor save / back / delete ----------
+// Checkpoints. Enter and paste are rare and meaningful; a space would fire
+// every few characters and cost far more than the debounce it replaced.
+function wireSaveCheckpoints(el) {
+  if (!el) return;
+  el.addEventListener('keydown', (e) => { if (e.key === 'Enter') setTimeout(flushSave, 0); });
+  // Deferred a tick so the pasted text is actually in .value when we read it.
+  el.addEventListener('paste', () => setTimeout(flushSave, 0));
+}
+// Typing pauses used to commit after 400ms, so every glance away wrote a
+// document (and each write echoes back through our own listener as a billed
+// read). 1500ms cuts that several-fold. Saving on word boundaries would have
+// been far WORSE — a space every ~5 characters is a write per word.
+//
+// The exposure window widens from 0.4s to 1.5s of typing, and only for a
+// browser crash: blur, screen change, close, Enter, paste and backgrounding
+// all flush immediately.
+const SAVE_DEBOUNCE = 1500;
+const SAVE_CEILING = 10000;   // a long unbroken burst still checkpoints
+let lastCommitAt = 0;
 function scheduleSave() {
   if (!currentId) return;
   if (saveTimer) clearTimeout(saveTimer);
-  saveTimer = setTimeout(commitSave, 400);
+  if (!lastCommitAt) lastCommitAt = Date.now();
+  // Been typing without a break for a while? Commit now rather than deferring
+  // again — otherwise a fast, continuous typist is never saved at all.
+  if (Date.now() - lastCommitAt >= SAVE_CEILING) { saveTimer = null; commitSave(); return; }
+  saveTimer = setTimeout(commitSave, SAVE_DEBOUNCE);
 }
+// Immediate save for the moments worth checkpointing: end of a line, a pasted
+// block, leaving the app. Cancels the pending timer so nothing writes twice.
+function flushSave() {
+  if (!currentId) return;
+  if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
+  commitSave();
+}
+wireSaveCheckpoints(titleInput);
+wireSaveCheckpoints(bodyInput);
+// Backgrounding the app is where a mobile session usually ends — the tab may
+// never come back. visibilitychange is the last reliable moment to write.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') flushSave();
+});
+
 function commitSave() {
+  lastCommitAt = Date.now();   // the ceiling measures from the last real save
   if (!currentId) return;
   if (currentType === 'compiled') {
     saveCompiledEdits();
@@ -4733,6 +4821,23 @@ const linkinContinue = document.getElementById('linkin-continue');
 const linkinError = document.getElementById('linkin-error');
 const linkinNewLink = document.getElementById('linkin-newlink');
 
+// Shown between "credentials accepted" and "account ready". That gap is the
+// Firestore init and first snapshot, not the credential check — it can run for
+// seconds on a phone, and leaving the sign-in form up makes it look like
+// nothing happened.
+const loadingCard = document.getElementById('loading-card');
+function showLoadingCard(on) {
+  if (!loadingCard || !signinCard) return;
+  // The magic-link card has its own status text — don't fight it.
+  if (linkinCard && !linkinCard.hidden) { loadingCard.hidden = true; return; }
+  loadingCard.hidden = !on;
+  signinCard.hidden = on;
+  if (on) {
+    hideAllScreens();
+    signinView.classList.add('active');
+  }
+}
+
 function showLinkinCard(on) {
   if (!linkinCard || !signinCard) return;
   linkinCard.hidden = !on;
@@ -5386,6 +5491,7 @@ function cycleThemePref() {
   if (next === 'auto') localStorage.removeItem('na-theme');
   else localStorage.setItem('na-theme', next);
   applyTheme();
+  pushUserPrefs();
 }
 const themeCycleBtn = document.getElementById('theme-cycle-btn');
 if (themeCycleBtn) themeCycleBtn.addEventListener('click', cycleThemePref);
@@ -5411,6 +5517,7 @@ function cycleClockPref() {
   if (next === 'auto') localStorage.removeItem('na-clock-24');
   else localStorage.setItem('na-clock-24', next === '24' ? '1' : '0');
   applyClockButton();
+  pushUserPrefs();
   // Redraw whichever calendar view is showing so the change is immediate.
   if (calendarDayView && calendarDayView.classList.contains('active')) renderCalendarDay();
   else if (calendarView && calendarView.classList.contains('active')) renderCalendar();
@@ -5423,6 +5530,7 @@ const moveCheckedToggle = document.getElementById('setting-move-checked');
 if (moveCheckedToggle) {
   moveCheckedToggle.addEventListener('change', () => {
     localStorage.setItem('na-move-checked', moveCheckedToggle.checked ? '1' : '0');
+    pushUserPrefs();
   });
 }
 
@@ -5430,6 +5538,7 @@ const collapseSearchToggle = document.getElementById('setting-collapse-search');
 if (collapseSearchToggle) {
   collapseSearchToggle.addEventListener('change', () => {
     localStorage.setItem('na-collapse-search', collapseSearchToggle.checked ? '1' : '0');
+    pushUserPrefs();
     refreshSearchCollapse();
   });
 }
@@ -5475,11 +5584,14 @@ function rerenderCurrent() {
 let unsubStorage = null;
 onAuthStateChanged(auth, async (user) => {
   if (unsubStorage) { unsubStorage(); unsubStorage = null; }
+  if (user) showLoadingCard(true);     // before the awaits below, not after
   if (!user) {
+    showLoadingCard(false);            // signing out returns to the form
     // Give a pending magic-link sign-in a chance to complete before showing the sign-in screen.
     await emailLinkSigninReady;
     if (auth.currentUser) return; // link sign-in succeeded; a new auth event will follow
     Storage.signedOut();
+    prefsLoaded = false;     // don't write this account's prefs under the next
     showSignin();
     return;
   }
@@ -5497,6 +5609,7 @@ onAuthStateChanged(auth, async (user) => {
     await Storage.maybeMigrateFromOldPath(user.uid);
   } catch (err) {
     console.error('Account load failed:', err);
+    showLoadingCard(false);
     showInitError(user, err);
     return;
   }
@@ -5523,6 +5636,8 @@ onAuthStateChanged(auth, async (user) => {
     goHome();
     showEditorToast(`Your access level changed to ${ROLE_LABELS[newRole] || newRole}`);
   });
+  await initUserPrefs();     // before the first render, so the theme is right
+  showLoadingCard(false);
   showNotes();
   // Only after sign-in and the first snapshot: the picker needs the customer
   // list, and an unauthenticated user has nowhere to put a shared file.
