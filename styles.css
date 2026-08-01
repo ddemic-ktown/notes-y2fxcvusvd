@@ -707,7 +707,7 @@ body.dark-mode .price-best-badge { color: #4ade80; }
 .fab-menu {
   position: fixed;
   right: 18px;
-  bottom: 88px;
+  bottom: calc(88px + var(--kb-inset, 0px));
   z-index: 60;
   display: flex;
   flex-direction: column;
@@ -1917,7 +1917,10 @@ input[type="search"]::-webkit-search-cancel-button {
 .fab {
   position: fixed;
   right: 20px;
-  bottom: calc(24px + env(safe-area-inset-bottom, 0));
+  /* --kb-inset is how much of the LAYOUT viewport the keyboard covers.
+     `position: fixed` anchors to that viewport, which doesn't shrink for the
+     keyboard, so without this every FAB hides behind it. */
+  bottom: calc(24px + var(--kb-inset, 0px) + env(safe-area-inset-bottom, 0));
   width: 60px;
   height: 60px;
   border-radius: 50%;
@@ -2090,5 +2093,15 @@ input[type="search"]::-webkit-search-cancel-button {
   background: var(--danger);
   color: #fff;
   font-size: 26px;
-  bottom: calc(24px + var(--kb-inset, 0px) + env(safe-area-inset-bottom, 0));
+}
+
+/* Long-press gestures must not start a text selection. The browser begins
+   selecting (and on iOS shows the copy/paste callout) well before a 500ms
+   hold completes, which cancels the drag and leaves the row highlighted.
+   Applies to the row/column headers (drag to reorder) and the cells (hold
+   for price history). */
+.price-item, .price-vendor, .price-cell {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
 }

@@ -13,16 +13,16 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 10, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.07.31-2111', 'New note or customer opens with the cursor in the title and the keyboard up'],
+  ['v2026.07.31-2109', 'Customer search no longer jumps to the top of the job sheet — it moves only as far as it needs to'],
+  ['v2026.07.31-2104', 'Price table: holding a row, column or cell no longer starts selecting text'],
+  ['v2026.07.31-2101', 'Every + button now stays above the on-screen keyboard'],
   ['v2026.07.31-2053', 'New note/customer keeps its breadcrumb; Cancel is a red ✕ in the corner'],
   ['v2026.07.31-2049', 'Customer search in the job sheet now shows five matches instead of two'],
   ['v2026.07.31-2046', 'Calendar fades with a small nudge when you change month or day'],
   ['v2026.07.31-2043', 'Calendar day view: swipe left or right to change days, with tappable cues either side'],
   ['v2026.07.31-2040', 'Pull-to-refresh no longer reloads the app by accident; a ⟳ button on the home screen refreshes instead'],
   ['v2026.07.31-2036', 'Price table: long-press an item or vendor to drag it to a new position'],
-  ['v2026.07.31-2030', 'Theme and time format are single cycling buttons with an Auto option that follows your phone'],
-  ['v2026.07.31-2024', 'Settings: switch the calendar and timestamps between 12-hour and 24-hour time'],
-  ['v2026.07.31-1955', 'Job customer field suggests who you book most often before you type'],
-  ['v2026.07.31-1952', 'Customer search lifts to the top of the job form so matches are never behind the keyboard'],
 ];
 const APP_VERSION = CHANGELOG[0][0];
 
@@ -1038,10 +1038,22 @@ function liftCustomerField() {
   const panel = input && input.closest('.modal-panel');
   if (!panel) return;
   const r = input.getBoundingClientRect(), p = panel.getBoundingClientRect();
-  const delta = (r.top - p.top) - 8;
-  // Don't fight the panel: only ever scroll as far as it actually can.
-  const max = panel.scrollHeight - panel.clientHeight;
-  panel.scrollTop = Math.min(Math.max(0, panel.scrollTop + delta), Math.max(0, max));
+  const viewH = (window.visualViewport && window.visualViewport.height) || window.innerHeight;
+  // Scroll the MINIMUM needed, not all the way to the top. Pinning the field
+  // to the panel's edge threw away the context above it even when the matches
+  // already had somewhere to go.
+  const row = document.querySelector('#job-customer-list .member-item');
+  const want = ((row && row.getBoundingClientRect().height) || 58) * 5 + 16;
+  const have = (viewH - r.bottom);
+  const shortfall = Math.max(0, want - have);
+  // Never scroll the field past the panel's top edge.
+  const ceiling = (r.top - p.top) - 8;
+  const delta = Math.min(shortfall, Math.max(0, ceiling));
+  if (delta > 0) {
+    // Don't fight the panel: only ever scroll as far as it actually can.
+    const max = panel.scrollHeight - panel.clientHeight;
+    panel.scrollTop = Math.min(panel.scrollTop + delta, Math.max(0, max));
+  }
   const ul = document.getElementById('job-customer-list');
   if (ul && ul.children.length) {
     ul.style.maxHeight = customerListMaxHeight(input.getBoundingClientRect()) + 'px';
@@ -1561,8 +1573,14 @@ function wirePriceHeaderDrag(el, axis, id) {
   let timer = null, down = null, dragged = false;
   const cancel = () => { if (timer) { clearTimeout(timer); timer = null; } };
   priceLongPressCancels.add(cancel);
+  // Belt and braces with the CSS: Android can start a selection before the
+  // user-select rule takes effect, and this also kills the compatibility mouse
+  // events that seed a desktop selection. Scrolling is unaffected — that's
+  // touch-action, which isn't touched until the drag actually starts.
+  el.addEventListener('selectstart', (e) => { if (down || priceDrag) e.preventDefault(); });
   el.addEventListener('pointerdown', (e) => {
     if (pricePointerCount > 1 || pinchJustHappened()) return;
+    e.preventDefault();
     down = { x: e.clientX, y: e.clientY, id: e.pointerId };
     dragged = false;
     timer = setTimeout(() => {
@@ -1607,17 +1625,21 @@ function wirePriceTable(canEdit) {
   priceTableEl.querySelectorAll('.price-cell').forEach(cell => {
     let pressTimer = null;
     let longPressed = false;
+    let pressing = false;
     const key = cell.dataset.key;
     const startPress = (e) => {
       if (pricePointerCount > 1 || pinchJustHappened()) return;   // pinching
+      pressing = true;
       longPressed = false;
       pressTimer = setTimeout(() => { longPressed = true; openPriceHistory(key); }, 500);
     };
     const cancelPress = () => {
       if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
+      pressing = false;
       longPressed = false;
     };
     priceLongPressCancels.add(cancelPress);
+    cell.addEventListener('selectstart', (e) => { if (pressing) e.preventDefault(); });
     cell.addEventListener('pointerdown', startPress);
     cell.addEventListener('pointerup', cancelPress);
     cell.addEventListener('pointerleave', cancelPress);
@@ -3434,7 +3456,22 @@ function newGeneralNote() {
   showEditor(note, 'note');
   pendingNewRecord = { kind: 'note', id: note.id, noteId: note.id };
   updateCancelBtn();
+  focusNewTitle();
 }
+// Straight into typing on a brand-new record. MUST be called synchronously
+// from the tap handler: iOS only opens the keyboard for a programmatic focus
+// inside the user-gesture window, so an await or rAF anywhere between the tap
+// and this call silently breaks it. createNote/createCustomer and showEditor
+// are all synchronous today — keep it that way.
+function focusNewTitle() {
+  if (!titleInput || titleInput.readOnly) return;
+  titleInput.focus();
+  // The field is empty (the "Title" placeholder isn't real text), so this puts
+  // the caret at the start — it only matters if a value is ever pre-filled.
+  try { titleInput.setSelectionRange(titleInput.value.length, titleInput.value.length); }
+  catch (e) {}
+}
+
 fab.addEventListener('click', (e) => {
   if (!isAdminRole() || !fabMenu) { newGeneralNote(); return; }
   e.stopPropagation();
@@ -3452,6 +3489,7 @@ if (fabNewCustomer) fabNewCustomer.addEventListener('click', () => {
   // Started from HOME: going back should land on home, not the customers list
   pendingNewRecord = { kind: 'customer', id: customer.id, noteId: defaultNote.id, origin: 'home' };
   updateCancelBtn();
+  focusNewTitle();
 });
 document.addEventListener('click', (e) => {
   if (fabMenu && !fabMenu.hidden && !fabMenu.contains(e.target) && e.target !== fab) closeFabMenu();
@@ -3463,6 +3501,7 @@ customersFab.addEventListener('click', () => {
   showEditor(defaultNote, 'note');
   pendingNewRecord = { kind: 'customer', id: customer.id, noteId: defaultNote.id, origin: 'customers' };
   updateCancelBtn();
+  focusNewTitle();
 });
 customerNotesFab.addEventListener('click', () => {
   if (!activeCustomerId) return;
@@ -3471,6 +3510,7 @@ customerNotesFab.addEventListener('click', () => {
   showEditor(note, 'note');
   pendingNewRecord = { kind: 'note', id: note.id, noteId: note.id, customerId: activeCustomerId };
   updateCancelBtn();
+  focusNewTitle();
 });
 
 settingsBtn.addEventListener('click', showSettings);
