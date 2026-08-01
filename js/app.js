@@ -13,16 +13,16 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 10, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.07.31-1854', 'Fixed: pinch-zooming the price table no longer opens a cell when you let go'],
+  ['v2026.07.31-1851', 'Search bar on the price table filters items as you type'],
+  ['v2026.07.31-1848', 'Price table Layout button: reorder rows and columns, or tick several and send them to the top'],
+  ['v2026.07.31-1844', 'Price cells show availability and the quote date under the price'],
+  ['v2026.07.31-1842', 'Calendar groups jobs by crew — names shown once, not on every job'],
+  ['v2026.07.31-1837', 'Job editor: enter any two of start, end and hours — the third fills itself'],
   ['v2026.07.31-1832', 'Calendar day view is a timeline: drag jobs to a new time, drag the corner to resize'],
   ['v2026.07.31-1801', 'New Calendar: month grid, day view, jobs with employees, customer and address'],
   ['v2026.07.30-2050', 'Trash with 30-day undo, sync status, tap-to-call, backup, best-price mark, duplicate note'],
   ['v2026.07.30-2030', 'While adding, the header shows “New customer” so Cancel always fits'],
-  ['v2026.07.30-2013', 'Adding a customer from the home screen now goes back to the home screen'],
-  ['v2026.07.30-2011', 'Fixed: Cancel never appeared when adding a new customer'],
-  ['v2026.07.30-2007', 'Tutorial: general notes step now says they live on the home screen'],
-  ['v2026.07.30-1807', 'Delete moved from the bin icon into the ⋯ menu'],
-  ['v2026.07.30-1802', 'Two new tutorials: the price table, and installing the app on your phone'],
-  ['v2026.07.30-0211', 'Cancel always fits on small screens; the bin is hidden while it shows'],
 ];
 const APP_VERSION = CHANGELOG[0][0];
 
@@ -447,10 +447,41 @@ function employeeColour(name) {
   for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
   return EMP_COLOURS[h % EMP_COLOURS.length];
 }
+// A "crew" is a set of employees working a job. Several jobs often share the
+// same crew, and repeating the same names down a day (or a month cell) is
+// noise — so a crew is shown once and its jobs listed against it.
+function crewKey(job) {
+  return (job.employeeNames || []).slice().sort().join('|');
+}
+function crewLabel(job) {
+  const names = (job.employeeNames || []);
+  return names.length ? names.join(' + ') : 'Unassigned';
+}
+// One colour for a solo crew; a stripe of colours for a pair or more, so the
+// bar on a block matches the legend at a glance.
+function crewBarStyle(names) {
+  if (!names.length) return 'background: var(--ink-soft)';
+  const cols = names.slice(0, 3).map(employeeColour);
+  if (cols.length === 1) return `background:${cols[0]}`;
+  const step = 100 / cols.length;
+  const stops = cols.map((c, i) => `${c} ${i * step}%, ${c} ${(i + 1) * step}%`).join(', ');
+  return `background: linear-gradient(180deg, ${stops})`;
+}
+function groupByCrew(jobs) {
+  const map = new Map();
+  jobs.forEach(j => {
+    const k = crewKey(j);
+    if (!map.has(k)) map.set(k, { key: k, names: (j.employeeNames || []).slice(), jobs: [] });
+    map.get(k).jobs.push(j);
+  });
+  return [...map.values()];
+}
+
 const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 const MAX_CHIPS = 3; // then "+N"
 let calCursor = new Date();      // any date inside the displayed month
 let calSelectedDate = null;      // 'YYYY-MM-DD' for the day view
+let calCrewFocus = null;         // crew key to highlight in the day view
 
 function ymd(d) {
   const y = d.getFullYear();
@@ -509,15 +540,21 @@ function renderCalendar() {
     if (otherMonth) classes.push('cal-other');
     if (!jobs.length) classes.push('cal-empty');   // greyed when nobody is on
     if (s === todayStr) classes.push('cal-today');
-    const lines = jobs.slice(0, MAX_CHIPS).map(j => {
-      const names = (j.employeeNames || []);
-      const chips = names.length
-        ? names.map(n => `<span class="cal-chip" style="background:${employeeColour(n)}">${escapeHtml(n.split(/[\s(]+/)[0])}</span>`).join('')
+    // Group by crew so the same names aren't repeated for every job
+    const groups = groupByCrew(jobs);
+    let shown = 0;
+    const lines = groups.map(g => {
+      if (shown >= MAX_CHIPS) return '';
+      const chips = g.names.length
+        ? g.names.map(n => `<span class="cal-chip" style="background:${employeeColour(n)}">${escapeHtml(n.split(/[\s(]+/)[0])}</span>`).join('')
         : '<span class="cal-chip cal-chip-none">—</span>';
-      const who = j.customerName || (j.customerId ? customerCrumbLabel(j.customerId) : '');
-      return `<div class="cal-job">${chips}<span class="cal-job-who">${escapeHtml(who)}</span></div>`;
+      const room = MAX_CHIPS - shown;
+      const take = g.jobs.slice(0, room);
+      shown += take.length;
+      const whos = take.map(j => j.customerName || (j.customerId ? customerCrumbLabel(j.customerId) : '—'));
+      return `<div class="cal-job">${chips}<span class="cal-job-who">${escapeHtml(whos.join(', '))}</span></div>`;
     }).join('');
-    const more = jobs.length > MAX_CHIPS ? `<div class="cal-more">+${jobs.length - MAX_CHIPS}</div>` : '';
+    const more = jobs.length > shown ? `<div class="cal-more">+${jobs.length - shown}</div>` : '';
     return `<div class="${classes.join(' ')}" data-date="${s}">
       <div class="cal-daynum">${d.getDate()}</div>${lines}${more}
     </div>`;
@@ -535,6 +572,7 @@ function renderCalendar() {
 }
 
 function showCalendarDay(dateStr) {
+  if (calSelectedDate !== dateStr) calCrewFocus = null;
   calSelectedDate = dateStr;
   hideAllScreens();
   calendarDayView.classList.add('active');
@@ -617,6 +655,26 @@ function renderCalendarDay() {
     untimedWrap.innerHTML = '';
   }
 
+  // Crew legend: each distinct crew once, with its colour bar. Tapping one
+  // focuses that crew and dims the rest.
+  const crews = groupByCrew(timed);
+  const legend = document.getElementById('cal-day-legend');
+  if (legend) {
+    legend.hidden = crews.length === 0;
+    legend.innerHTML = crews.map(g => `
+      <button type="button" class="cal-crew${calCrewFocus === g.key ? ' cal-crew-active' : ''}" data-crew="${escapeHtml(g.key)}">
+        <span class="cal-crew-bar" style="${crewBarStyle(g.names)}"></span>
+        <span class="cal-crew-names">${escapeHtml(crewLabel({ employeeNames: g.names }))}</span>
+        <span class="cal-crew-count">${g.jobs.length}</span>
+      </button>`).join('');
+    legend.querySelectorAll('.cal-crew').forEach(btn => {
+      btn.addEventListener('click', () => {
+        calCrewFocus = calCrewFocus === btn.dataset.crew ? null : btn.dataset.crew;
+        renderCalendarDay();
+      });
+    });
+  }
+
   const spans = timed.map(jobSpan);
   const lanes = layoutLanes(spans);
   const hours = Array.from({ length: 24 }, (_, h) => `
@@ -631,13 +689,17 @@ function renderCalendarDay() {
     const width = `calc((100% - 52px) / ${n} - 4px)`;
     const left = `calc(52px + ((100% - 52px) / ${n}) * ${lane} + 2px)`;
     const who = j.customerName || (j.customerId ? customerCrumbLabel(j.customerId) : 'No customer');
-    const chips = (j.employeeNames || []).slice(0, 3).map(nm =>
-      `<span class="cal-chip" style="background:${employeeColour(nm)}">${escapeHtml(nm.split(/[\s(]+/)[0])}</span>`).join('');
+    const names = (j.employeeNames || []);
     const timeTxt = `${hhmmFromMinutes(start)}–${hhmmFromMinutes(end)}`;
-    return `<div class="cal-block" data-job="${j.id}" style="top:${top}px;height:${height}px;left:${left};width:${width}">
+    // The crew is identified by the coloured bar and the legend above, so the
+    // block itself doesn't repeat the names — that space goes to the job.
+    const key = crewKey(j);
+    const dim = calCrewFocus && calCrewFocus !== key ? ' cal-block-dim' : '';
+    return `<div class="cal-block${dim}" data-job="${j.id}" style="top:${top}px;height:${height}px;left:${left};width:${width}">
+      <span class="cal-block-bar" style="${crewBarStyle(names)}"></span>
       <div class="cal-block-time">${escapeHtml(timeTxt)}</div>
       <div class="cal-block-who">${escapeHtml(who)}</div>
-      <div class="cal-block-chips">${chips}</div>
+      ${j.address ? `<div class="cal-block-addr">${escapeHtml(j.address)}</div>` : ''}
       ${canEdit ? '<div class="cal-resize" aria-hidden="true"></div>' : ''}
     </div>`;
   }).join('');
@@ -797,6 +859,7 @@ function openJobModal(jobId, dateStr) {
   document.getElementById('job-date').value = (job && job.date) || dateStr || ymd(new Date());
   document.getElementById('job-start').value = (job && job.start) || '';
   document.getElementById('job-end').value = (job && job.end) || '';
+  syncDurationFromTimes();
   document.getElementById('job-desc').value = (job && job.description) || '';
   document.getElementById('job-address').value = (job && job.address) || '';
   jobChosenCustomer = job && job.customerId
@@ -870,6 +933,40 @@ function renderJobCustomer(filter) {
   });
 }
 
+// ---------- duration ⇄ start/end ----------
+// Duration is NOT stored — it's derived from start and end. Trades think in
+// hours ("2.5"), so that's the unit; everything is snapped to quarter hours to
+// match the timeline's drag behaviour.
+const jobStartEl = document.getElementById('job-start');
+const jobEndEl = document.getElementById('job-end');
+const jobDurEl = document.getElementById('job-duration');
+
+function durationFromTimes() {
+  const s = minutesFromHHMM(jobStartEl.value);
+  const e = minutesFromHHMM(jobEndEl.value);
+  if (s == null || e == null || e <= s) return null;
+  return (e - s) / 60;
+}
+function syncDurationFromTimes() {
+  const h = durationFromTimes();
+  jobDurEl.value = h == null ? '' : String(Math.round(h * 4) / 4);
+}
+function syncEndFromDuration() {
+  const s = minutesFromHHMM(jobStartEl.value);
+  const h = parseFloat(jobDurEl.value);
+  if (s == null || !Number.isFinite(h) || h <= 0) return;
+  jobEndEl.value = hhmmFromMinutes(s + snapMinutes(h * 60));
+}
+if (jobStartEl) jobStartEl.addEventListener('change', () => {
+  // Moving the start keeps the length and shifts the end — same as dragging a
+  // block on the timeline. With no duration set, just refresh it.
+  if (jobDurEl.value) syncEndFromDuration();
+  else syncDurationFromTimes();
+});
+if (jobEndEl) jobEndEl.addEventListener('change', syncDurationFromTimes);
+if (jobDurEl) jobDurEl.addEventListener('change', syncEndFromDuration);
+if (jobDurEl) jobDurEl.addEventListener('input', () => { if (jobDurEl.value) syncEndFromDuration(); });
+
 const jobCustomerSearch = document.getElementById('job-customer-search');
 if (jobCustomerSearch) jobCustomerSearch.addEventListener('input', () => renderJobCustomer(jobCustomerSearch.value));
 const jobClose = document.getElementById('job-close');
@@ -917,6 +1014,16 @@ if (calDayFabBtn) calDayFabBtn.addEventListener('click', () => openJobModal(null
 // full history. Data lives one doc per row (see storage.js).
 const priceView = document.getElementById('price-view');
 const priceTableEl = document.getElementById('price-table');
+// "Jul 20", with the year only when it isn't this one — keeps the column narrow
+function shortDate(iso) {
+  if (!iso) return '';
+  const d = parseYmd(iso);
+  if (Number.isNaN(d.getTime())) return String(iso);
+  const opts = d.getFullYear() === new Date().getFullYear()
+    ? { month: 'short', day: 'numeric' }
+    : { month: 'short', day: 'numeric', year: '2-digit' };
+  return d.toLocaleDateString([], opts);
+}
 const AVAIL_LABELS = { yes: 'Available', no: 'Not available', soon: 'Available in 2–3 days', later: 'Available in more than 3 days' };
 let priceZoom = parseFloat(localStorage.getItem('na-price-zoom') || '1') || 1;
 let openCellKey = null; // "itemId|vendorId" currently in edit mode
@@ -975,7 +1082,11 @@ function priceCellHtml(item, vendor, canEdit, isCheapest) {
     let cls = latest.avail === 'no' ? 'price-value price-unavailable' : 'price-value';
     if (isCheapest) cls += ' price-best';
     const badge = isCheapest ? '<span class="price-best-badge" title="Lowest price available">✓</span>' : '';
-    inner = `<span class="${cls}">${escapeHtml(priceTxt)}</span>${badge}<span class="avail-dot avail-${escapeHtml(latest.avail || 'yes')}" title="${escapeHtml(AVAIL_LABELS[latest.avail] || '')}"></span>`;
+    // Price on top; availability and the date it was quoted underneath, so the
+    // column stays narrow and the number is what you read first.
+    inner = `<div class="price-top"><span class="${cls}">${escapeHtml(priceTxt)}</span>${badge}</div>`
+      + `<div class="price-sub"><span class="avail-dot avail-${escapeHtml(latest.avail || 'yes')}" title="${escapeHtml(AVAIL_LABELS[latest.avail] || '')}"></span>`
+      + `<span class="price-date">${escapeHtml(shortDate(latest.date))}</span></div>`;
   }
   return `<td class="price-cell" data-key="${key}">${inner}</td>`;
 }
@@ -983,7 +1094,17 @@ function priceCellHtml(item, vendor, canEdit, isCheapest) {
 function renderPriceTable() {
   if (!priceTableEl) return;
   const cfg = Storage.getPriceConfig();
-  const items = Storage.listPriceItems();
+  const allItems = Storage.listPriceItems();
+  // Rows only: vendors are few and always visible, and filtering columns too
+  // would leave you comparing prices you can't see the context for.
+  const words = priceFilter.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const items = words.length
+    ? allItems.filter(i => words.every(w => (i.name || '').toLowerCase().includes(w)))
+    : allItems;
+  const filterCount = document.getElementById('price-filter-count');
+  if (filterCount) filterCount.textContent = words.length
+    ? `showing ${items.length} of ${allItems.length} items`
+    : '';
   const canEdit = Storage.canEditPriceTable();
   // Action buttons are admin/shared-employee only; Share is admin only
   const addItemBtn = document.getElementById('price-add-item');
@@ -1005,7 +1126,11 @@ function renderPriceTable() {
     moreWrap.style.display = anyVisible ? '' : 'none';
   }
 
-  if (!cfg.vendors.length && !items.length) {
+  if (words.length && !items.length) {
+    priceTableEl.innerHTML = `<tbody><tr><td class="price-empty-state">No items match “${escapeHtml(priceFilter)}”.</td></tr></tbody>`;
+    return;
+  }
+  if (!cfg.vendors.length && !allItems.length) {
     priceTableEl.innerHTML = `<tbody><tr><td class="price-empty-state">${canEdit
       ? 'Add a vendor and an item to start your price table.'
       : 'The price table is empty.'}</td></tr></tbody>`;
@@ -1014,17 +1139,22 @@ function renderPriceTable() {
   const vendors = cfg.vendors.slice().sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
   const reorder = priceReorderMode && canEdit;
   const head = `<thead><tr><th class="price-corner">Item</th>${
-    vendors.map((v, i) => `<th class="price-vendor" data-vendor="${v.id}">${escapeHtml(v.name)}${
+    vendors.map((v, i) => `<th class="price-vendor" data-vendor="${v.id}">${
+      reorder ? `<input type="checkbox" class="price-pick" data-pick-vendor="${v.id}" ${priceSelVendors.has(v.id) ? 'checked' : ''} aria-label="Select ${escapeHtml(v.name)}" />` : ''
+    }${escapeHtml(v.name)}${
       reorder ? `<span class="reorder-arrows"><button type="button" class="v-left" data-vendor="${v.id}" ${i === 0 ? 'disabled' : ''}>←</button><button type="button" class="v-right" data-vendor="${v.id}" ${i === vendors.length - 1 ? 'disabled' : ''}>→</button></span>` : ''
     }</th>`).join('')
   }</tr></thead>`;
   const body = `<tbody>${items.map((item, i) => `<tr>
-      <th class="price-item" data-item="${item.id}">${escapeHtml(item.name)}${
+      <th class="price-item" data-item="${item.id}">${
+        reorder ? `<input type="checkbox" class="price-pick" data-pick-item="${item.id}" ${priceSelItems.has(item.id) ? 'checked' : ''} aria-label="Select ${escapeHtml(item.name)}" />` : ''
+      }${escapeHtml(item.name)}${
         reorder ? `<span class="reorder-arrows"><button type="button" class="i-up" data-item="${item.id}" ${i === 0 ? 'disabled' : ''}>↑</button><button type="button" class="i-down" data-item="${item.id}" ${i === items.length - 1 ? 'disabled' : ''}>↓</button></span>` : ''
       }</th>
       ${(() => { const best = cheapestVendorId(item, vendors); return vendors.map(v => priceCellHtml(item, v, canEdit, v.id === best)).join(''); })()}
     </tr>`).join('')}</tbody>`;
   priceTableEl.innerHTML = head + body;
+  renderPriceSelectBar();
   priceTableEl.style.transform = `scale(${priceZoom})`;
   priceTableEl.style.transformOrigin = '0 0';
   wirePriceTable(canEdit);
@@ -1036,7 +1166,9 @@ function wirePriceTable(canEdit) {
     let pressTimer = null;
     let longPressed = false;
     const key = cell.dataset.key;
-    const startPress = () => {
+    const startPress = (e) => {
+      if (e && e.isPrimary === false) { cancelPress(); return; }  // second finger = pinch
+      if (pinchJustHappened()) return;
       longPressed = false;
       pressTimer = setTimeout(() => { longPressed = true; openPriceHistory(key); }, 500);
     };
@@ -1048,6 +1180,7 @@ function wirePriceTable(canEdit) {
     cell.addEventListener('contextmenu', (e) => { e.preventDefault(); cancelPress(); openPriceHistory(key); });
     cell.addEventListener('click', (e) => {
       if (longPressed) { longPressed = false; return; }
+      if (pinchJustHappened()) return;   // that was a zoom, not a tap
       if (!canEdit) return;
       if (e.target.closest('.price-cell-editing')) return; // already editing
       openCellKey = key;
@@ -1076,6 +1209,16 @@ function wirePriceTable(canEdit) {
   }
   // Reorder mode: arrows move rows/columns; taps don't rename
   if (priceReorderMode && canEdit) {
+    priceTableEl.querySelectorAll('.price-pick').forEach(cb => {
+      cb.addEventListener('click', (e) => e.stopPropagation());  // not a rename
+      cb.addEventListener('change', () => {
+        const set = cb.dataset.pickItem ? priceSelItems : priceSelVendors;
+        const id = cb.dataset.pickItem || cb.dataset.pickVendor;
+        if (cb.checked) set.add(id); else set.delete(id);
+        renderPriceSelectBar();
+      });
+    });
+    renderPriceSelectBar();
     priceTableEl.querySelectorAll('.i-up').forEach(b => b.addEventListener('click', (e) => { e.stopPropagation(); movePriceItem(b.dataset.item, -1); }));
     priceTableEl.querySelectorAll('.i-down').forEach(b => b.addEventListener('click', (e) => { e.stopPropagation(); movePriceItem(b.dataset.item, 1); }));
     priceTableEl.querySelectorAll('.v-left').forEach(b => b.addEventListener('click', (e) => { e.stopPropagation(); movePriceVendor(b.dataset.vendor, -1); }));
@@ -1219,6 +1362,11 @@ if (window.visualViewport) window.visualViewport.addEventListener('resize', upda
 // Two-finger pinch adjusts the same zoom the −/+ buttons use. One finger is
 // left alone so normal scrolling/panning still works.
 const priceScrollEl = document.getElementById('price-scroll');
+// Lifting a pinch used to land as a tap on whatever cell was under the finger,
+// opening its editor. Any multi-touch gesture now suppresses cell taps briefly
+// after the last finger leaves.
+let pinchSuppressUntil = 0;
+function pinchJustHappened() { return Date.now() < pinchSuppressUntil; }
 if (priceScrollEl) {
   const pts = new Map();
   let startDist = 0, startZoom = 1;
@@ -1228,17 +1376,26 @@ if (priceScrollEl) {
   };
   priceScrollEl.addEventListener('pointerdown', (e) => {
     pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
-    if (pts.size === 2) { startDist = dist(); startZoom = priceZoom; }
+    if (pts.size === 2) {
+      startDist = dist();
+      startZoom = priceZoom;
+      pinchSuppressUntil = Date.now() + 400;   // a pinch has begun
+    }
   });
   priceScrollEl.addEventListener('pointermove', (e) => {
     if (!pts.has(e.pointerId)) return;
     pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (pts.size === 2 && startDist > 0) {
       e.preventDefault();
+      pinchSuppressUntil = Date.now() + 400;
       setPriceZoom(startZoom * (dist() / startDist));
     }
   });
-  const dropPt = (e) => { pts.delete(e.pointerId); if (pts.size < 2) startDist = 0; };
+  const dropPt = (e) => {
+    if (pts.size >= 2) pinchSuppressUntil = Date.now() + 400;  // keep it live past the release
+    pts.delete(e.pointerId);
+    if (pts.size < 2) startDist = 0;
+  };
   priceScrollEl.addEventListener('pointerup', dropPt);
   priceScrollEl.addEventListener('pointercancel', dropPt);
   priceScrollEl.addEventListener('pointerleave', dropPt);
@@ -1259,16 +1416,77 @@ document.addEventListener('click', (e) => {
 });
 
 // ---------- price table: reorder mode ----------
+let priceFilter = '';
 let priceReorderMode = false;
+// Rows/columns ticked in layout mode, to be moved to the top/front in one go
+const priceSelItems = new Set();
+const priceSelVendors = new Set();
 const priceReorderBtn = document.getElementById('price-reorder');
 if (priceReorderBtn) priceReorderBtn.addEventListener('click', () => {
   priceReorderMode = !priceReorderMode;
   priceReorderBtn.setAttribute('aria-pressed', String(priceReorderMode));
-  priceReorderBtn.textContent = priceReorderMode ? 'Done reordering' : 'Reorder rows & columns';
-  // Make it obvious from the closed menu that reorder mode is on
-  if (priceMoreBtn) priceMoreBtn.classList.toggle('active', priceReorderMode);
+  priceReorderBtn.textContent = priceReorderMode ? 'Done' : 'Layout';
+  priceReorderBtn.classList.toggle('active', priceReorderMode);
+  if (priceReorderMode && priceFilter) {
+    // Reordering a filtered view would move rows relative to ones you can't
+    // see — clear the filter on the way in.
+    priceFilter = '';
+    if (priceSearchInput) priceSearchInput.value = '';
+    refreshSearchClears();
+  }
+  if (!priceReorderMode) { priceSelItems.clear(); priceSelVendors.clear(); }
   openCellKey = null;
   renderPriceTable();
+});
+
+function renderPriceSelectBar() {
+  const bar = document.getElementById('price-select-bar');
+  const count = document.getElementById('price-select-count');
+  if (!bar) return;
+  const n = priceSelItems.size + priceSelVendors.size;
+  bar.hidden = !(priceReorderMode && n > 0);
+  if (count) {
+    const parts = [];
+    if (priceSelItems.size) parts.push(`${priceSelItems.size} item${priceSelItems.size === 1 ? '' : 's'}`);
+    if (priceSelVendors.size) parts.push(`${priceSelVendors.size} vendor${priceSelVendors.size === 1 ? '' : 's'}`);
+    count.textContent = `${parts.join(' · ')} selected`;
+  }
+}
+// Selected rows go to the top / selected columns to the front, keeping their
+// relative order; everything else follows. Then every order value is
+// renumbered so the result is stable.
+async function movePriceSelectionFirst() {
+  if (priceSelItems.size) {
+    const items = Storage.listPriceItems();
+    const picked = items.filter(i => priceSelItems.has(i.id));
+    const rest = items.filter(i => !priceSelItems.has(i.id));
+    const ordered = [...picked, ...rest];
+    for (let i = 0; i < ordered.length; i++) {
+      if ((ordered[i].order ?? -1) !== i) await Storage.savePriceItem(ordered[i].id, { order: i });
+    }
+  }
+  if (priceSelVendors.size) {
+    const vendors = Storage.getPriceConfig().vendors.slice().sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+    const picked = vendors.filter(v => priceSelVendors.has(v.id));
+    const rest = vendors.filter(v => !priceSelVendors.has(v.id));
+    await Storage.savePriceConfig({ vendors: [...picked, ...rest].map((v, i) => ({ ...v, order: i })) });
+  }
+  priceSelItems.clear();
+  priceSelVendors.clear();
+  renderPriceTable();
+}
+const priceSearchInput = document.getElementById('price-search');
+if (priceSearchInput) priceSearchInput.addEventListener('input', () => {
+  priceFilter = priceSearchInput.value;
+  openCellKey = null;
+  renderPriceTable();
+});
+
+const priceMoveTopBtn = document.getElementById('price-move-top');
+if (priceMoveTopBtn) priceMoveTopBtn.addEventListener('click', movePriceSelectionFirst);
+const priceSelClearBtn = document.getElementById('price-select-clear');
+if (priceSelClearBtn) priceSelClearBtn.addEventListener('click', () => {
+  priceSelItems.clear(); priceSelVendors.clear(); renderPriceTable();
 });
 async function movePriceItem(itemId, dir) {
   const items = Storage.listPriceItems();
@@ -3888,7 +4106,7 @@ if (installHintClose) {
   });
 }
 // ---------- always-visible ✕ clear buttons on search fields ----------
-const SEARCH_CLEAR_IDS = ['home-search-input', 'customer-search', 'customer-notes-search', 'note-search-input', 'assign-customer-search'];
+const SEARCH_CLEAR_IDS = ['home-search-input', 'customer-search', 'customer-notes-search', 'note-search-input', 'assign-customer-search', 'price-search', 'job-customer-search'];
 
 // Empty every search field and its backing term (used by the tutorial: a
 // filtered list hides the cards its steps point at).
@@ -3900,6 +4118,9 @@ function clearAllSearches() {
   if (customerSearchInput) customerSearchInput.value = '';
   if (customerNotesSearchInput) customerNotesSearchInput.value = '';
   if (noteSearchInput) noteSearchInput.value = '';
+  priceFilter = '';
+  const ps = document.getElementById('price-search');
+  if (ps) ps.value = '';
   refreshSearchClears();
 }
 
@@ -3930,7 +4151,7 @@ SEARCH_CLEAR_IDS.forEach(id => {
 // ---------- collapsible search bars (per-device setting) ----------
 // When enabled, an EMPTY, unfocused search bar collapses to a 🔍 icon;
 // tapping the icon expands and focuses it. Bars with text stay expanded.
-const COLLAPSIBLE_SEARCH_IDS = ['home-search-input', 'customer-search', 'customer-notes-search', 'note-search-input'];
+const COLLAPSIBLE_SEARCH_IDS = ['home-search-input', 'customer-search', 'customer-notes-search', 'note-search-input', 'price-search'];
 
 function getCollapseSearch() { return localStorage.getItem('na-collapse-search') === '1'; }
 

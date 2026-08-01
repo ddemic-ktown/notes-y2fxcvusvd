@@ -220,6 +220,7 @@
       </div>
     </header>
     <main class="cal-day-main">
+      <div id="cal-day-legend" class="cal-legend" hidden></div>
       <div id="cal-day-untimed" class="cal-untimed" hidden></div>
       <div id="cal-day-scroll" class="cal-day-scroll">
         <div id="cal-day-timeline" class="cal-timeline"></div>
@@ -240,6 +241,7 @@
       <div class="job-time-row">
         <label class="setting-inline-label">Start <input id="job-start" class="signin-input" type="time" /></label>
         <label class="setting-inline-label">End <input id="job-end" class="signin-input" type="time" /></label>
+        <label class="setting-inline-label">Hours <input id="job-duration" class="signin-input" type="number" min="0" step="0.25" inputmode="decimal" placeholder="2.5" /></label>
       </div>
       <label class="setting-inline-label" for="job-desc">Description</label>
       <textarea id="job-desc" class="csv-textarea" rows="2" placeholder="Optional"></textarea>
@@ -278,10 +280,10 @@
       <div class="customers-header-bottom price-actions">
         <button id="price-add-item" class="icon-btn date-btn" type="button">+ Item</button>
         <button id="price-add-vendor" class="icon-btn date-btn" type="button">+ Vendor</button>
+        <button id="price-reorder" class="icon-btn date-btn" type="button" aria-pressed="false">Layout</button>
         <div class="editor-more-wrap">
           <button id="price-more-btn" class="icon-btn date-btn editor-more-btn" type="button" aria-label="More price table options">⋯</button>
           <div id="price-more-dropdown" class="editor-more-dropdown" hidden>
-            <button id="price-reorder" class="editor-more-item" type="button" aria-pressed="false">Reorder rows &amp; columns</button>
             <button id="price-export" class="editor-more-item" type="button">Export CSV</button>
             <button id="price-import" class="editor-more-item" type="button">Import CSV</button>
             <button id="price-share" class="editor-more-item" type="button">Share with employees</button>
@@ -290,6 +292,19 @@
       </div>
     </header>
     <main class="price-main">
+      <div class="price-search-row">
+        <div class="search-wrap" style="flex:1;">
+          <input id="price-search" class="search-input" type="search" placeholder="Search items…" autocomplete="off" />
+          <button class="search-clear" type="button" aria-label="Clear search" hidden>✕</button>
+          <button class="search-open icon-btn" type="button" aria-label="Open search">🔍</button>
+        </div>
+        <span id="price-filter-count" class="muted setting-hint" style="margin:0;"></span>
+      </div>
+      <div id="price-select-bar" class="price-select-bar" hidden>
+        <span id="price-select-count"></span>
+        <button id="price-move-top" class="icon-btn date-btn" type="button">Move to top</button>
+        <button id="price-select-clear" class="icon-btn date-btn" type="button">Clear</button>
+      </div>
       <div id="price-scroll" class="price-scroll">
         <table id="price-table" class="price-table"></table>
       </div>

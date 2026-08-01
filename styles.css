@@ -456,6 +456,31 @@ body.editor-open {
   background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius);
   cursor: pointer;
 }
+/* Crew legend — each set of people once, instead of repeating names per job */
+.cal-legend {
+  flex-shrink: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+}
+.cal-crew {
+  display: flex; align-items: center; gap: 6px;
+  border: 1px solid var(--line); border-radius: 999px;
+  background: var(--bg); color: var(--ink);
+  font-family: inherit; font-size: 12px; font-weight: 600;
+  padding: 4px 10px 4px 4px; cursor: pointer;
+}
+.cal-crew-active { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(37,99,235,0.18); }
+.cal-crew-bar { width: 10px; height: 18px; border-radius: 3px; flex-shrink: 0; }
+.cal-crew-names { max-width: 42vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cal-crew-count { color: var(--ink-soft); font-weight: 700; }
+.cal-block-bar { position: absolute; left: 0; top: 0; bottom: 0; width: 4px; border-radius: 6px 0 0 6px; }
+.cal-block-dim { opacity: 0.35; }
+.cal-block-addr { font-size: 10px; color: var(--ink-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 .cal-day-scroll { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; }
 .cal-timeline { position: relative; }
 .cal-hour {
@@ -468,6 +493,7 @@ body.editor-open {
 }
 .cal-block {
   position: absolute;
+  padding-left: 10px;   /* room for the crew bar */
   background: var(--surface);
   border: 1px solid var(--accent);
   border-left: 4px solid var(--accent);
@@ -490,8 +516,10 @@ body.editor-open {
   border-bottom-right-radius: 6px;
 }
 /* Job editor */
-.job-time-row { display: flex; gap: 8px; }
-.job-time-row label { flex: 1; display: flex; flex-direction: column; gap: 2px; }
+/* Start / End / Hours — wraps rather than squeezing on a narrow phone */
+.job-time-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.job-time-row label { flex: 1 1 30%; min-width: 92px; display: flex; flex-direction: column; gap: 2px; }
+.job-time-row input { width: 100%; }
 .job-address-choices { margin: 6px 0; display: flex; flex-direction: column; gap: 4px; }
 .job-address-pick {
   text-align: left; padding: 8px 10px; font-size: 14px; font-family: inherit;
@@ -527,6 +555,11 @@ body.editor-open {
 .price-table .price-corner { z-index: 3; }
 .price-vendor, .price-item { cursor: pointer; }
 .price-cell { cursor: pointer; min-width: 84px; }
+/* Price on the first line, availability + date beneath it */
+.price-top { display: flex; align-items: center; gap: 2px; }
+.price-sub { display: flex; align-items: center; gap: 4px; margin-top: 1px; }
+.price-sub .avail-dot { margin-left: 0; }
+.price-date { font-size: 11px; color: var(--ink-soft); white-space: nowrap; }
 .price-value { font-weight: 600; }
 .price-unavailable { text-decoration: line-through; color: var(--ink-soft); font-weight: 500; }
 .price-empty { color: var(--ink-soft); }
@@ -562,6 +595,20 @@ body.dark-mode .price-best-badge { color: #4ade80; }
   border: 1px solid var(--line); background: var(--surface); color: var(--ink); font-family: inherit;
 }
 .price-cell-actions .price-save { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
+/* Layout mode: pick rows/columns and send them to the top/front */
+.price-search-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 12px; border-bottom: 1px solid var(--line);
+  background: var(--surface);
+}
+.price-select-bar {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 8px 12px; border-bottom: 1px solid var(--line);
+  background: var(--surface); font-size: 13px; font-weight: 600;
+}
+.price-select-bar[hidden] { display: none; }
+.price-pick { margin-right: 6px; vertical-align: middle; }
+
 /* Reorder mode arrows on row/column headers */
 .reorder-arrows { display: inline-flex; gap: 2px; margin-left: 6px; }
 .reorder-arrows button {
