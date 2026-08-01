@@ -91,6 +91,20 @@ service cloud.firestore {
         allow write: if isAdmin();
       }
 
+      // ---- Calendar jobs ----
+      // Scheduled by Time Logger NAME (employeeNames), but permissions run on
+      // employeeUids — a name string means nothing to the server. The app
+      // derives uids from the name→account links in settings; a name with no
+      // linked account simply can't be filtered by, so that person sees no
+      // calendar (they schedule fine, they just aren't an app user).
+      match /jobs/{jobId} {
+        allow read: if isAdmin() || isBookkeeper();
+        allow read: if isEmployee() &&
+          ('employeeUids' in resource.data) &&
+          request.auth.uid in resource.data.employeeUids;
+        allow create, update, delete: if isAdmin();
+      }
+
       // ---- Price table ----
       // priceMeta/config holds the vendor columns and the share list.
       // Each row (item) is its own doc in priceItems, so a price edit rewrites

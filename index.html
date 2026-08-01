@@ -192,6 +192,73 @@
     <button id="install-hint-close" class="secondary" type="button">Got it</button>
   </div>
 
+  <!-- CALENDAR (MONTH) VIEW -->
+  <section id="calendar-view" class="screen">
+    <header class="app-header customers-header">
+      <div class="customers-header-top">
+        <button class="icon-btn date-btn app-back-btn" aria-label="Back">‹ Back</button>
+        <nav class="crumbs" id="crumbs-calendar" aria-label="Breadcrumb"></nav>
+        <div class="cal-nav" role="group" aria-label="Change month">
+          <button id="cal-prev" class="icon-btn" aria-label="Previous month">‹</button>
+          <button id="cal-today" class="icon-btn date-btn">Today</button>
+          <button id="cal-next" class="icon-btn" aria-label="Next month">›</button>
+        </div>
+      </div>
+    </header>
+    <main class="cal-main">
+      <div id="cal-grid" class="cal-grid"></div>
+    </main>
+    <button id="cal-fab" class="fab" aria-label="New job">+</button>
+  </section>
+
+  <!-- CALENDAR DAY VIEW -->
+  <section id="calendar-day-view" class="screen">
+    <header class="app-header customers-header">
+      <div class="customers-header-top">
+        <button class="icon-btn date-btn app-back-btn" aria-label="Back">‹ Back</button>
+        <nav class="crumbs" id="crumbs-calendar-day" aria-label="Breadcrumb"></nav>
+      </div>
+    </header>
+    <main id="cal-day-list" class="notes-list"></main>
+    <button id="cal-day-fab" class="fab" aria-label="New job">+</button>
+  </section>
+
+  <!-- JOB EDITOR MODAL -->
+  <div id="job-modal" class="modal-overlay" hidden>
+    <div class="modal-panel">
+      <div class="modal-header">
+        <h2 class="modal-title" id="job-modal-title">New job</h2>
+        <button id="job-close" class="icon-btn" aria-label="Close">✕</button>
+      </div>
+      <label class="setting-inline-label" for="job-date">Date</label>
+      <input id="job-date" class="signin-input" type="date" />
+      <div class="job-time-row">
+        <label class="setting-inline-label">Start <input id="job-start" class="signin-input" type="time" /></label>
+        <label class="setting-inline-label">End <input id="job-end" class="signin-input" type="time" /></label>
+      </div>
+      <label class="setting-inline-label" for="job-desc">Description</label>
+      <textarea id="job-desc" class="csv-textarea" rows="2" placeholder="Optional"></textarea>
+      <h4 class="setting-sub-title">Who's working</h4>
+      <ul id="job-employees" class="members-list"></ul>
+      <h4 class="setting-sub-title">Customer</h4>
+      <div class="search-wrap">
+        <input id="job-customer-search" class="search-input" type="search" placeholder="Search customers…" autocomplete="off" />
+        <button class="search-clear" type="button" aria-label="Clear search" hidden>✕</button>
+      </div>
+      <p id="job-customer-chosen" class="muted setting-hint"></p>
+      <ul id="job-customer-list" class="members-list"></ul>
+      <div id="job-address-wrap" hidden>
+        <label class="setting-inline-label" for="job-address">Address</label>
+        <input id="job-address" class="signin-input" type="text" placeholder="Optional" />
+        <div id="job-address-choices" class="job-address-choices" hidden></div>
+      </div>
+      <div class="setting-btn-col">
+        <button id="job-save" class="primary setting-wide-btn" type="button">Save job</button>
+        <button id="job-delete" class="secondary setting-wide-btn danger-item" type="button" hidden>Delete job</button>
+      </div>
+    </div>
+  </div>
+
   <!-- PRICE TABLE VIEW -->
   <section id="price-view" class="screen">
     <header class="app-header customers-header">

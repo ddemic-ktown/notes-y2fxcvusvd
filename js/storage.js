@@ -23,6 +23,7 @@ const _cache = {
   // per-document limit is unreachable.
   priceConfig: { vendors: [], sharedWith: [] },
   priceItems: [],
+  jobs: [],
 };
 const _listeners = new Set();
 let _onRoleChange = null;
@@ -63,6 +64,7 @@ function invitesCol()   { return collection(db, `orgs/${_orgId}/invites`); }
 function orgDoc()       { return doc(db, `orgs/${_orgId}`); }
 function priceConfigDoc(){ return doc(db, `orgs/${_orgId}/priceMeta/config`); }
 function priceItemsCol() { return collection(db, `orgs/${_orgId}/priceItems`); }
+function jobsCol()       { return collection(db, `orgs/${_orgId}/jobs`); }
 
 // ---------- listeners ----------
 function attachListeners() {
@@ -143,6 +145,21 @@ function attachListeners() {
       _cache.priceItems = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       emit();
     }, (err) => { console.warn('priceItems listener', err); }));
+  }
+  // Calendar jobs. Admin/bookkeeper see everything; an employee's query must be
+  // scoped to their own uid to match the rules (same reasoning as notes —
+  // Firestore rejects an unscoped listener when the rule depends on a
+  // per-document field). Customers get no calendar at all.
+  if (_role === 'admin' || _role === 'bookkeeper') {
+    _unsubs.push(onSnapshot(jobsCol(), (snap) => {
+      _cache.jobs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      emit();
+    }, (err) => { console.warn('jobs listener', err); }));
+  } else if (_role === 'employee') {
+    _unsubs.push(onSnapshot(query(jobsCol(), where('employeeUids', 'array-contains', _uid)), (snap) => {
+      _cache.jobs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      emit();
+    }, (err) => { console.warn('jobs listener', err); }));
   }
   // Only admins may read invites (firestore.rules) — skip the listener for other roles.
   if (_role === 'admin') {
@@ -248,6 +265,7 @@ export const Storage = {
     _cache.invites = [];
     _cache.priceConfig = { vendors: [], sharedWith: [] };
     _cache.priceItems = [];
+    _cache.jobs = [];
 
     const { orgId, role } = await resolveOrg(userId, userEmail);
     _orgId = orgId;
@@ -267,6 +285,7 @@ export const Storage = {
     _cache.members = []; _cache.invites = [];
     _cache.priceConfig = { vendors: [], sharedWith: [] };
     _cache.priceItems = [];
+    _cache.jobs = [];
     emit();
   },
 
@@ -635,6 +654,59 @@ export const Storage = {
     const cells = { ...item.cells };
     cells[vendorId] = cells[vendorId].filter(e => e.added !== added);
     await this.savePriceItem(itemId, { cells });
+  },
+
+  // ---------- Calendar jobs ----------
+  // Jobs are scheduled by Time Logger NAME (what you type and what the grid
+  // shows). employeeUids is derived from the optional name→account links in
+  // settings: rules and the employee's own query work on uids, because a name
+  // string means nothing to the server. A name with no linked account still
+  // schedules fine — that person just can't see their schedule in the app.
+  listJobs() {
+    return _cache.jobs.filter(j => !j.deletedAt);
+  },
+  listJobsByDate(dateStr) {
+    return this.listJobs()
+      .filter(j => j.date === dateStr)
+      .sort((a, b) => String(a.start || '').localeCompare(String(b.start || '')));
+  },
+  listJobsInRange(fromStr, toStr) {
+    return this.listJobs().filter(j => j.date >= fromStr && j.date <= toStr);
+  },
+  getJob(id) { return _cache.jobs.find(j => j.id === id && !j.deletedAt) || null; },
+  // settings.employeeLinks: { [employeeName]: uid }
+  employeeUidsFor(names) {
+    const links = _cache.settings.employeeLinks || {};
+    return [...new Set((names || []).map(n => links[n]).filter(Boolean))];
+  },
+  async saveJob(job) {
+    const id = job.id || uid();
+    const now = nowIso();
+    const existing = _cache.jobs.find(j => j.id === id);
+    const next = {
+      id,
+      date: job.date,
+      start: job.start || '',
+      end: job.end || '',
+      description: job.description || '',
+      employeeNames: Array.isArray(job.employeeNames) ? job.employeeNames : [],
+      employeeUids: this.employeeUidsFor(job.employeeNames),
+      customerId: job.customerId || null,
+      customerName: job.customerName || '',
+      address: job.address || '',
+      created: existing ? existing.created : now,
+      updated: now,
+    };
+    const i = _cache.jobs.findIndex(j => j.id === id);
+    if (i === -1) _cache.jobs.push(next); else _cache.jobs[i] = next;
+    emit();
+    await tracked(setDoc(doc(jobsCol(), id), stripId(next))).catch(err => console.warn("saveJob", err));
+    return next;
+  },
+  async deleteJob(id) {
+    _cache.jobs = _cache.jobs.filter(j => j.id !== id);
+    emit();
+    await tracked(deleteDoc(doc(jobsCol(), id))).catch(err => console.warn("deleteJob", err));
   },
 
   // ---------- Sample data ----------

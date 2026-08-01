@@ -13,6 +13,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 10, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.07.31-1801', 'New Calendar: month grid, day view, jobs with employees, customer and address'],
   ['v2026.07.30-2050', 'Trash with 30-day undo, sync status, tap-to-call, backup, best-price mark, duplicate note'],
   ['v2026.07.30-2030', 'While adding, the header shows “New customer” so Cancel always fits'],
   ['v2026.07.30-2013', 'Adding a customer from the home screen now goes back to the home screen'],
@@ -22,7 +23,6 @@ const CHANGELOG = [
   ['v2026.07.30-1802', 'Two new tutorials: the price table, and installing the app on your phone'],
   ['v2026.07.30-0211', 'Cancel always fits on small screens; the bin is hidden while it shows'],
   ['v2026.07.30-0200', 'Cancel button when adding a new customer or note discards it'],
-  ['v2026.07.30-0158', 'Fixed: the note toolbar could scroll out of view right after the app loaded'],
 ];
 const APP_VERSION = CHANGELOG[0][0];
 
@@ -157,16 +157,33 @@ function renderEmployeeList() {
     employeeListEl.innerHTML = '<li class="keyword-empty">No employees yet.</li>';
     return;
   }
+  // Optional link to an app account: the calendar schedules by NAME, but the
+  // server can only enforce "see your own jobs" with a uid. Linking a name to a
+  // member lets that person see their schedule; unlinked names still schedule.
+  const links = Storage.getSettings().employeeLinks || {};
+  const members = Storage.listMembers().filter(m => m.role === 'employee' || m.role === 'admin');
   employeeListEl.innerHTML = list.map(e => `
-    <li class="keyword-pill">
+    <li class="keyword-pill employee-pill">
       <span>${escapeHtml(e.name)}</span>
       <select class="employee-type-select" data-emp-type="${escapeHtml(e.name)}" aria-label="Classification for ${escapeHtml(e.name)}">
         <option value="journeyman" ${e.type === 'journeyman' ? 'selected' : ''}>Journeyman</option>
         <option value="apprentice" ${e.type === 'apprentice' ? 'selected' : ''}>Apprentice</option>
       </select>
+      <select class="employee-link-select" data-emp-link="${escapeHtml(e.name)}" aria-label="App account for ${escapeHtml(e.name)}">
+        <option value="">No app account</option>
+        ${members.map(m => `<option value="${m.uid}" ${links[e.name] === m.uid ? 'selected' : ''}>${escapeHtml(m.name || m.email || m.uid)}</option>`).join('')}
+      </select>
       <button data-emp="${escapeHtml(e.name)}" aria-label="Remove ${escapeHtml(e.name)}">×</button>
     </li>
   `).join('');
+  employeeListEl.querySelectorAll('select[data-emp-link]').forEach(sel => {
+    sel.addEventListener('change', async () => {
+      const next = { ...(Storage.getSettings().employeeLinks || {}) };
+      if (sel.value) next[sel.dataset.empLink] = sel.value;
+      else delete next[sel.dataset.empLink];
+      await Storage.setSetting('employeeLinks', next);
+    });
+  });
   employeeListEl.querySelectorAll('button[data-emp]').forEach(btn => {
     btn.addEventListener('click', async () => {
       await removeEmployee(btn.dataset.emp);
@@ -414,6 +431,314 @@ document.querySelectorAll('.app-back-btn').forEach(btn => {
   btn.addEventListener('click', () => { if (appHistoryDepth > 0) history.back(); });
 });
 updateAppBackButtons();
+
+// ---------- calendar ----------
+// Month grid built by hand (no library): one cell per day, one line per job,
+// employee names colour-coded. Jobs are scheduled by Time Logger NAME; uids
+// are derived from the Settings links so rules can filter an employee's view.
+const calendarView = document.getElementById('calendar-view');
+const calendarDayView = document.getElementById('calendar-day-view');
+const calGrid = document.getElementById('cal-grid');
+const calDayList = document.getElementById('cal-day-list');
+// Stable per-name colours from a fixed palette — no setup, and a person keeps
+// their colour as employees come and go.
+const EMP_COLOURS = ['#2563eb', '#16a34a', '#d97706', '#9333ea', '#db2777', '#0891b2', '#65a30d', '#dc2626'];
+function employeeColour(name) {
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
+  return EMP_COLOURS[h % EMP_COLOURS.length];
+}
+const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+const MAX_CHIPS = 3; // then "+N"
+let calCursor = new Date();      // any date inside the displayed month
+let calSelectedDate = null;      // 'YYYY-MM-DD' for the day view
+
+function ymd(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+function parseYmd(s) {
+  const [y, m, d] = String(s).split('-').map(Number);
+  return new Date(y, (m || 1) - 1, d || 1);
+}
+function prettyDate(s) {
+  const d = parseYmd(s);
+  return d.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+}
+// Days shown in the grid: the 1st back to Sunday, through the last day forward
+// to Saturday, so every week row is complete.
+function monthGridDays(cursor) {
+  const first = new Date(cursor.getFullYear(), cursor.getMonth(), 1);
+  const start = new Date(first);
+  start.setDate(first.getDate() - first.getDay());
+  const last = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 0);
+  const end = new Date(last);
+  end.setDate(last.getDate() + (6 - last.getDay()));
+  const days = [];
+  for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) days.push(new Date(d));
+  return days;
+}
+
+function showCalendar() {
+  hideAllScreens();
+  calendarView.classList.add('active');
+  renderCalendar();
+  if (!handlingPopstate) history.pushState({ screen: 'calendar' }, '');
+}
+
+function renderCalendar() {
+  if (!calGrid) return;
+  renderCrumbs('crumbs-calendar', [
+    { label: 'Home', go: 'home' },
+    { label: `${MONTH_NAMES[calCursor.getMonth()]} ${calCursor.getFullYear()}` },
+  ]);
+  const canEdit = isAdminRole();
+  const calFab = document.getElementById('cal-fab');
+  if (calFab) calFab.style.display = canEdit ? '' : 'none';
+
+  const days = monthGridDays(calCursor);
+  const todayStr = ymd(new Date());
+  const head = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']
+    .map(d => `<div class="cal-head">${d}</div>`).join('');
+  const cells = days.map(d => {
+    const s = ymd(d);
+    const jobs = Storage.listJobsByDate(s);
+    const otherMonth = d.getMonth() !== calCursor.getMonth();
+    const classes = ['cal-cell'];
+    if (otherMonth) classes.push('cal-other');
+    if (!jobs.length) classes.push('cal-empty');   // greyed when nobody is on
+    if (s === todayStr) classes.push('cal-today');
+    const lines = jobs.slice(0, MAX_CHIPS).map(j => {
+      const names = (j.employeeNames || []);
+      const chips = names.length
+        ? names.map(n => `<span class="cal-chip" style="background:${employeeColour(n)}">${escapeHtml(n.split(/[\s(]+/)[0])}</span>`).join('')
+        : '<span class="cal-chip cal-chip-none">—</span>';
+      const who = j.customerName || (j.customerId ? customerCrumbLabel(j.customerId) : '');
+      return `<div class="cal-job">${chips}<span class="cal-job-who">${escapeHtml(who)}</span></div>`;
+    }).join('');
+    const more = jobs.length > MAX_CHIPS ? `<div class="cal-more">+${jobs.length - MAX_CHIPS}</div>` : '';
+    return `<div class="${classes.join(' ')}" data-date="${s}">
+      <div class="cal-daynum">${d.getDate()}</div>${lines}${more}
+    </div>`;
+  }).join('');
+  calGrid.innerHTML = `<div class="cal-headrow">${head}</div><div class="cal-cells">${cells}</div>`;
+  calGrid.querySelectorAll('.cal-cell').forEach(cell => {
+    cell.addEventListener('click', () => {
+      const date = cell.dataset.date;
+      const jobs = Storage.listJobsByDate(date);
+      // Spec: tapping an EMPTY day goes straight to the new-job screen
+      if (!jobs.length && isAdminRole()) openJobModal(null, date);
+      else showCalendarDay(date);
+    });
+  });
+}
+
+function showCalendarDay(dateStr) {
+  calSelectedDate = dateStr;
+  hideAllScreens();
+  calendarDayView.classList.add('active');
+  renderCalendarDay();
+  if (!handlingPopstate) history.pushState({ screen: 'calendar-day', date: dateStr }, '');
+}
+
+function renderCalendarDay() {
+  if (!calDayList || !calSelectedDate) return;
+  renderCrumbs('crumbs-calendar-day', [
+    { label: 'Home', go: 'home' },
+    { label: 'Calendar', go: 'calendar' },
+    { label: prettyDate(calSelectedDate) },
+  ]);
+  const canEdit = isAdminRole();
+  const dayFab = document.getElementById('cal-day-fab');
+  if (dayFab) dayFab.style.display = canEdit ? '' : 'none';
+  const jobs = Storage.listJobsByDate(calSelectedDate);
+  if (!jobs.length) {
+    calDayList.innerHTML = `<p class="empty-state">Nothing scheduled${canEdit ? ' — tap + to add a job.' : '.'}</p>`;
+    return;
+  }
+  calDayList.innerHTML = jobs.map(j => {
+    const time = [j.start, j.end].filter(Boolean).join(' – ') || 'Any time';
+    const names = (j.employeeNames || []);
+    const chips = names.length
+      ? names.map(n => `<span class="cal-chip" style="background:${employeeColour(n)}">${escapeHtml(n)}</span>`).join('')
+      : '<span class="cal-chip cal-chip-none">No one assigned</span>';
+    const who = j.customerName || (j.customerId ? customerCrumbLabel(j.customerId) : 'No customer');
+    return `<article class="note-card cal-day-card" data-job="${j.id}">
+      <div class="note-head"><p class="note-title">${escapeHtml(who)}</p><span class="note-date">${escapeHtml(time)}</span></div>
+      <div class="cal-day-chips">${chips}</div>
+      ${j.address ? `<p class="note-preview">${escapeHtml(j.address)}</p>` : ''}
+      ${j.description ? `<p class="note-preview">${escapeHtml(j.description)}</p>` : ''}
+    </article>`;
+  }).join('');
+  if (canEdit) {
+    calDayList.querySelectorAll('.cal-day-card').forEach(card => {
+      card.addEventListener('click', () => openJobModal(card.dataset.job, calSelectedDate));
+    });
+  }
+}
+
+const calPrev = document.getElementById('cal-prev');
+const calNext = document.getElementById('cal-next');
+const calToday = document.getElementById('cal-today');
+if (calPrev) calPrev.addEventListener('click', () => { calCursor = new Date(calCursor.getFullYear(), calCursor.getMonth() - 1, 1); renderCalendar(); });
+if (calNext) calNext.addEventListener('click', () => { calCursor = new Date(calCursor.getFullYear(), calCursor.getMonth() + 1, 1); renderCalendar(); });
+if (calToday) calToday.addEventListener('click', () => { calCursor = new Date(); renderCalendar(); });
+// Swipe left/right on the grid to change month
+if (calGrid) {
+  let sx = 0, sy = 0, tracking = false;
+  calGrid.addEventListener('touchstart', (e) => {
+    if (e.touches.length !== 1) return;
+    sx = e.touches[0].clientX; sy = e.touches[0].clientY; tracking = true;
+  }, { passive: true });
+  calGrid.addEventListener('touchend', (e) => {
+    if (!tracking) return;
+    tracking = false;
+    const t = e.changedTouches[0];
+    const dx = t.clientX - sx, dy = t.clientY - sy;
+    if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.5) {
+      calCursor = new Date(calCursor.getFullYear(), calCursor.getMonth() + (dx < 0 ? 1 : -1), 1);
+      renderCalendar();
+    }
+  });
+}
+
+// ---------- job editor ----------
+const jobModal = document.getElementById('job-modal');
+let jobEditingId = null;
+let jobChosenCustomer = null; // { id, name, addresses: [] }
+
+// Address candidates from the customer's default note: skip the name line and
+// anything that looks like a phone or email; keep lines with both digits and
+// letters (street lines). None → leave blank, one → auto-fill, several → ask.
+function addressCandidates(customerId) {
+  const def = customerId ? Storage.getDefaultNoteForCustomer(customerId) : null;
+  if (!def) return [];
+  const lines = (def.body || '').split('\n').slice(1);
+  return lines.map(l => l.trim()).filter(l => {
+    if (!l) return false;
+    if (EMAIL_RE.test(l)) { EMAIL_RE.lastIndex = 0; return false; }
+    const digits = l.replace(/\D/g, '');
+    if (digits.length >= 10 && !/[a-z]{3}/i.test(l.replace(/[^a-z]/gi, ''))) return false; // bare phone
+    return /\d/.test(l) && /[a-z]{3}/i.test(l);
+  });
+}
+
+function openJobModal(jobId, dateStr) {
+  if (!jobModal || !isAdminRole()) return;
+  jobEditingId = jobId || null;
+  const job = jobId ? Storage.getJob(jobId) : null;
+  document.getElementById('job-modal-title').textContent = job ? 'Edit job' : 'New job';
+  document.getElementById('job-date').value = (job && job.date) || dateStr || ymd(new Date());
+  document.getElementById('job-start').value = (job && job.start) || '';
+  document.getElementById('job-end').value = (job && job.end) || '';
+  document.getElementById('job-desc').value = (job && job.description) || '';
+  document.getElementById('job-address').value = (job && job.address) || '';
+  jobChosenCustomer = job && job.customerId
+    ? { id: job.customerId, name: job.customerName || customerCrumbLabel(job.customerId) }
+    : null;
+  renderJobEmployees(job ? (job.employeeNames || []) : []);
+  renderJobCustomer('');
+  document.getElementById('job-address-wrap').hidden = !jobChosenCustomer && !(job && job.address);
+  const delBtn = document.getElementById('job-delete');
+  if (delBtn) delBtn.hidden = !job;
+  jobModal.hidden = false;
+}
+
+function renderJobEmployees(selected) {
+  const ul = document.getElementById('job-employees');
+  if (!ul) return;
+  const names = getEmployeeNames();
+  ul.innerHTML = names.length
+    ? names.map(n => `<li class="member-item">
+        <label style="display:flex;align-items:center;gap:8px;flex:1;min-width:0;cursor:pointer;">
+          <input type="checkbox" data-emp-name="${escapeHtml(n)}" ${selected.includes(n) ? 'checked' : ''} />
+          <span class="cal-chip" style="background:${employeeColour(n)}">${escapeHtml(n)}</span>
+        </label>
+      </li>`).join('')
+    : '<li class="member-item">Add employees in Settings → Time Logger first.</li>';
+}
+
+function renderJobCustomer(filter) {
+  const ul = document.getElementById('job-customer-list');
+  const chosen = document.getElementById('job-customer-chosen');
+  if (!ul) return;
+  chosen.textContent = jobChosenCustomer ? `Selected: ${jobChosenCustomer.name}` : '';
+  const words = (filter || '').trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const customers = Storage.listCustomers().filter(c => {
+    if (!words.length) return false; // only show results while searching
+    const def = Storage.getDefaultNoteForCustomer(c.id);
+    const hay = (def ? def.body : '').toLowerCase();
+    return words.every(w => hay.includes(w));
+  }).slice(0, 8);
+  ul.innerHTML = customers.map(c => `<li class="member-item job-customer-item" data-id="${c.id}">
+      <span class="member-email">${escapeHtml(customerCrumbLabel(c.id))}</span>
+    </li>`).join('');
+  ul.querySelectorAll('.job-customer-item').forEach(li => {
+    li.addEventListener('click', () => {
+      jobChosenCustomer = { id: li.dataset.id, name: customerCrumbLabel(li.dataset.id) };
+      document.getElementById('job-customer-search').value = '';
+      const cands = addressCandidates(li.dataset.id);
+      const wrap = document.getElementById('job-address-wrap');
+      const choices = document.getElementById('job-address-choices');
+      const input = document.getElementById('job-address');
+      wrap.hidden = false;
+      if (cands.length === 1) { input.value = cands[0]; choices.hidden = true; }
+      else if (cands.length > 1) {
+        input.value = '';
+        choices.innerHTML = '<p class="muted setting-hint">Which address?</p>' +
+          cands.map(a => `<button type="button" class="job-address-pick">${escapeHtml(a)}</button>`).join('');
+        choices.hidden = false;
+        choices.querySelectorAll('.job-address-pick').forEach(b => {
+          b.addEventListener('click', () => { input.value = b.textContent; choices.hidden = true; });
+        });
+      } else { input.value = ''; choices.hidden = true; }
+      renderJobCustomer('');
+    });
+  });
+}
+
+const jobCustomerSearch = document.getElementById('job-customer-search');
+if (jobCustomerSearch) jobCustomerSearch.addEventListener('input', () => renderJobCustomer(jobCustomerSearch.value));
+const jobClose = document.getElementById('job-close');
+if (jobClose) jobClose.addEventListener('click', () => { jobModal.hidden = true; });
+if (jobModal) jobModal.addEventListener('click', (e) => { if (e.target === jobModal) jobModal.hidden = true; });
+
+const jobSave = document.getElementById('job-save');
+if (jobSave) jobSave.addEventListener('click', async () => {
+  const date = document.getElementById('job-date').value;
+  if (!date) { alert('A job needs a date.'); return; }
+  const names = [...document.querySelectorAll('#job-employees input[data-emp-name]:checked')]
+    .map(cb => cb.dataset.empName);
+  await Storage.saveJob({
+    id: jobEditingId,
+    date,
+    start: document.getElementById('job-start').value,
+    end: document.getElementById('job-end').value,
+    description: document.getElementById('job-desc').value,
+    employeeNames: names,
+    customerId: jobChosenCustomer ? jobChosenCustomer.id : null,
+    customerName: jobChosenCustomer ? jobChosenCustomer.name : '',
+    address: document.getElementById('job-address').value,
+  });
+  jobModal.hidden = true;
+  calCursor = parseYmd(date);
+  if (calendarDayView.classList.contains('active')) { calSelectedDate = date; renderCalendarDay(); }
+  else renderCalendar();
+});
+const jobDelete = document.getElementById('job-delete');
+if (jobDelete) jobDelete.addEventListener('click', async () => {
+  if (!jobEditingId) return;
+  if (!confirm('Delete this job?')) return;
+  await Storage.deleteJob(jobEditingId);
+  jobModal.hidden = true;
+  if (calendarDayView.classList.contains('active')) renderCalendarDay(); else renderCalendar();
+});
+const calFabBtn = document.getElementById('cal-fab');
+if (calFabBtn) calFabBtn.addEventListener('click', () => openJobModal(null, ymd(calCursor)));
+const calDayFabBtn = document.getElementById('cal-day-fab');
+if (calDayFabBtn) calDayFabBtn.addEventListener('click', () => openJobModal(null, calSelectedDate || ymd(new Date())));
 
 // ---------- price table ----------
 // Rows = items, columns = vendors. A cell shows the newest entry's price and
@@ -975,6 +1300,7 @@ function renderCrumbs(containerId, crumbs) {
       else if (go === 'customers') showCustomers();
       else if (go === 'customer' && btn.dataset.id) showCustomerNotes(btn.dataset.id);
       else if (go === 'section' && btn.dataset.id) showSection(btn.dataset.id);
+      else if (go === 'calendar') showCalendar();
     });
   });
 }
@@ -998,6 +1324,8 @@ function activeScreenKey() {
   if (sectionView && sectionView.classList.contains('active')) return 'section:' + activeSectionKey;
   if (orphanView && orphanView.classList.contains('active')) return 'orphans';
   if (priceView && priceView.classList.contains('active')) return 'price';
+  if (calendarView && calendarView.classList.contains('active')) return 'calendar';
+  if (calendarDayView && calendarDayView.classList.contains('active')) return 'calendar-day:' + calSelectedDate;
   return null;
 }
 function rememberScroll() {
@@ -1031,6 +1359,10 @@ function hideAllScreens() {
   if (sectionView) sectionView.classList.remove('active');
   if (orphanView) orphanView.classList.remove('active');
   if (priceView) priceView.classList.remove('active');
+  if (calendarView) calendarView.classList.remove('active');
+  if (calendarDayView) calendarDayView.classList.remove('active');
+  const jm = document.getElementById('job-modal');
+  if (jm) jm.hidden = true;
   editorView.classList.remove('active');
   if (signinView) signinView.classList.remove('active');
   // Body class controls page-level scroll lock for editor screen
@@ -1819,6 +2151,19 @@ function renderNotesList() {
   // Price table card — admins/bookkeepers always, employees only when shared
   const priceItemCount = Storage.listPriceItems().length;
   const priceVendorCount = Storage.getPriceConfig().vendors.length;
+  // Calendar card — everyone except the read-only customer role
+  const calendarCard = (isAdminRole() || isBookkeeperRole() || Storage.getRole() === 'employee') ? `
+    <article class="note-card nav-card" data-nav="calendar">
+      <div class="note-head">
+        <p class="note-title">Calendar</p>
+        <span class="note-chevron">›</span>
+      </div>
+      <p class="note-preview">${(() => {
+        const upcoming = Storage.listJobs().filter(j => j.date >= ymd(new Date())).length;
+        return `${upcoming} upcoming job${upcoming === 1 ? '' : 's'}`;
+      })()}</p>
+    </article>
+  ` : '';
   const priceCard = Storage.canViewPriceTable() ? `
     <article class="note-card nav-card" data-nav="price">
       <div class="note-head">
@@ -1941,7 +2286,8 @@ function renderNotesList() {
       <p class="note-preview">${orphanCount > 0 ? 'Tap to review notes with no customer' : 'No orphaned notes'}</p>
     </article>`;
   // Customers and Price Table sit side by side at the top of the home screen
-  const navRow = `<div class="nav-card-row">${customersCard}${priceCard}</div>`;
+  const navRow = `<div class="nav-card-row">${customersCard}${priceCard}</div>`
+    + (calendarCard ? `<div class="nav-card-row">${calendarCard}</div>` : '');
   notesList.innerHTML = navRow + pinnedBlock + olderHtml + orphanCard;
 
   applyLayoutMode();
@@ -1984,6 +2330,7 @@ function renderNotesList() {
       }
       else if (card.dataset.keyword) showAggregator(card.dataset.keyword);
       else if (card.dataset.nav === 'price') showPriceTable();
+      else if (card.dataset.nav === 'calendar') showCalendar();
       else if (card.dataset.nav === 'orphans') {
         const count = Storage.listOrphanedNotes().length;
         if (count > 0) showOrphanNotes();
@@ -2930,6 +3277,8 @@ window.addEventListener('popstate', (e) => {
   if (screen === 'aggregator') { showAggregator(e.state.keyword); handlingPopstate = false; return; }
   if (screen === 'orphans') { showOrphanNotes(); handlingPopstate = false; return; }
   if (screen === 'price') { showPriceTable(); handlingPopstate = false; return; }
+  if (screen === 'calendar') { showCalendar(); handlingPopstate = false; return; }
+  if (screen === 'calendar-day') { showCalendarDay(e.state.date); handlingPopstate = false; return; }
   if (screen === 'section') { showSection(e.state.key); handlingPopstate = false; return; }
   if (screen === 'settings') { showSettings(); handlingPopstate = false; return; }
   showNotes();
@@ -3943,6 +4292,10 @@ function rerenderCurrent() {
   else if (customersView.classList.contains('active')) renderCustomersList();
   else if (customerNotesView.classList.contains('active') && activeCustomerId) {
     showCustomerNotes(activeCustomerId, customerNotesReturnTo);
+  } else if (calendarView && calendarView.classList.contains('active')) {
+    renderCalendar();
+  } else if (calendarDayView && calendarDayView.classList.contains('active')) {
+    renderCalendarDay();
   } else if (priceView && priceView.classList.contains('active')) {
     renderPriceTable();
   } else if (orphanView && orphanView.classList.contains('active')) {

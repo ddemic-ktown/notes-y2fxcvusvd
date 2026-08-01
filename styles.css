@@ -403,6 +403,59 @@ body.editor-open {
   .nav-card-row { flex-direction: column; gap: 0; }
 }
 
+/* ---- Calendar ---- */
+.cal-main { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.cal-grid { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 6px; }
+.cal-nav { display: flex; align-items: center; gap: 2px; flex-shrink: 0; }
+.cal-headrow, .cal-cells { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
+.cal-head {
+  text-align: center; font-size: 11px; font-weight: 700; color: var(--ink-soft);
+  text-transform: uppercase; letter-spacing: 0.04em; padding: 4px 0;
+}
+.cal-cells { flex: 1; min-height: 0; grid-auto-rows: minmax(64px, 1fr); overflow-y: auto; }
+.cal-cell {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 3px 4px;
+  overflow: hidden;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.cal-cell.cal-empty { background: var(--bg); }          /* nobody scheduled */
+.cal-cell.cal-other { opacity: 0.45; }                   /* spill from next/prev month */
+.cal-cell.cal-today { border-color: var(--accent); border-width: 2px; }
+.cal-daynum { font-size: 11px; font-weight: 700; color: var(--ink-soft); }
+.cal-cell.cal-today .cal-daynum { color: var(--accent); }
+.cal-job { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; min-width: 0; }
+.cal-chip {
+  color: #fff; font-size: 9px; font-weight: 700; line-height: 1.4;
+  padding: 1px 5px; border-radius: 999px; white-space: nowrap;
+  max-width: 100%; overflow: hidden; text-overflow: ellipsis;
+}
+.cal-chip-none { background: var(--ink-soft); }
+.cal-job-who { font-size: 10px; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cal-more { font-size: 10px; color: var(--ink-soft); font-weight: 600; }
+.cal-day-card .cal-day-chips { display: flex; flex-wrap: wrap; gap: 4px; margin: 4px 0; }
+.cal-day-card .cal-chip { font-size: 11px; padding: 2px 8px; }
+/* Job editor */
+.job-time-row { display: flex; gap: 8px; }
+.job-time-row label { flex: 1; display: flex; flex-direction: column; gap: 2px; }
+.job-address-choices { margin: 6px 0; display: flex; flex-direction: column; gap: 4px; }
+.job-address-pick {
+  text-align: left; padding: 8px 10px; font-size: 14px; font-family: inherit;
+  border: 1px solid var(--line); border-radius: var(--radius);
+  background: var(--bg); color: var(--ink); cursor: pointer;
+}
+.job-customer-item { cursor: pointer; }
+.employee-pill { flex-wrap: wrap; }
+.employee-link-select {
+  padding: 4px 6px; border: 1px solid var(--line); border-radius: 6px;
+  background: var(--bg); color: var(--ink); font-size: 12px; max-width: 45%;
+}
+
 /* ---- Price table ---- */
 .price-main { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .price-scroll { flex: 1; overflow: auto; -webkit-overflow-scrolling: touch; padding: 8px; }
