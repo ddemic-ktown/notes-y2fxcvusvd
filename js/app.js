@@ -13,6 +13,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 10, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.08.01-0207', 'Calendar day view: long-press to move a job works on the phone again'],
   ['v2026.08.01-0155', 'Android: share photos, files or links into JobPilot and pick a customer'],
   ['v2026.08.01-0147', 'Settings buttons follow dark mode instead of staying bright white'],
   ['v2026.08.01-0145', 'Calendar toolbar arrows removed; the mouse wheel changes months on desktop'],
@@ -22,7 +23,6 @@ const CHANGELOG = [
   ['v2026.07.31-2122', 'Price table: dragging a column no longer scrolls the table instead of moving it'],
   ['v2026.07.31-2111', 'New note or customer opens with the cursor in the title and the keyboard up'],
   ['v2026.07.31-2109', 'Customer search no longer jumps to the top of the job sheet — it moves only as far as it needs to'],
-  ['v2026.07.31-2104', 'Price table: holding a row, column or cell no longer starts selecting text'],
 ];
 const APP_VERSION = CHANGELOG[0][0];
 
@@ -602,6 +602,14 @@ function showCalendarDay(dateStr) {
 // positioned by start time and sized by duration. Long-press a block to drag
 // it to a new time; drag the corner handle to change its length. Jobs with no
 // times can't be placed on a timeline, so they sit in a strip above it.
+// While a block is being dragged or resized, swallow the scroll the browser
+// would otherwise do. Only effective because a long-press involves no movement
+// — once a scroll is under way, touchmove stops being cancelable.
+let calTouchOwned = false;
+function blockCalDragScroll(e) {
+  if (calTouchOwned && e.cancelable) e.preventDefault();
+}
+
 const HOUR_PX = 56;          // one hour of timeline
 const SNAP_MIN = 15;         // dragging snaps to quarter hours
 const DEFAULT_LEN = 60;      // a job with a start but no end draws as an hour
@@ -793,6 +801,14 @@ function wireDayInteractions(canEdit) {
     let pressTimer = null, dragging = false, resizing = false;
     let startY = 0, origTop = 0, origH = 0, moved = false;
     let downX = 0, downY = 0;   // where the finger landed, to tell scroll from press
+    const takeOverCalTouch = () => {
+      calTouchOwned = true;
+      document.addEventListener('touchmove', blockCalDragScroll, { passive: false });
+    };
+    const releaseCalTouch = () => {
+      calTouchOwned = false;
+      document.removeEventListener('touchmove', blockCalDragScroll, { passive: false });
+    };
 
     const beginDrag = (y) => {
       dragging = true;
@@ -801,10 +817,13 @@ function wireDayInteractions(canEdit) {
       origTop = parseFloat(block.style.top);
       origH = parseFloat(block.style.height);
       block.classList.add('cal-block-dragging');
-      // Take the gesture over ONLY now — until this moment the block is
-      // `touch-action: pan-y` so the day can be scrolled with a finger that
-      // happens to start on a card.
-      block.style.touchAction = 'none';
+      // The block stays `touch-action: pan-y` in CSS so the day can still be
+      // scrolled with a finger that happens to land on a card. Setting
+      // touch-action here would do NOTHING — the browser latched it when the
+      // finger landed. What does work: a true long-press means the finger
+      // hasn't moved, so no scroll has started and touchmove is still
+      // cancelable. preventDefault on it holds the gesture.
+      takeOverCalTouch();
       if (navigator.vibrate) navigator.vibrate(10); // "it lifted" feedback
     };
 
@@ -817,6 +836,7 @@ function wireDayInteractions(canEdit) {
         origH = parseFloat(block.style.height);
         block.setPointerCapture(e.pointerId);
         e.preventDefault();
+        takeOverCalTouch();
         return;
       }
       downX = e.clientX; downY = e.clientY;
@@ -850,7 +870,7 @@ function wireDayInteractions(canEdit) {
       const wasDragging = dragging, wasResizing = resizing;
       dragging = resizing = false;
       block.classList.remove('cal-block-dragging');
-      block.style.touchAction = '';   // hand scrolling back to the browser
+      releaseCalTouch();              // hand scrolling back to the browser
       if (!moved) { renderCalendarDay(); return; }
       const job = Storage.getJob(jobId);
       if (!job) return;
