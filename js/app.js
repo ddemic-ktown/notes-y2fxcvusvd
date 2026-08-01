@@ -16,6 +16,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 10, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.08.01-0802', 'Hours chart: searchable drop lists for employee and customer, note line pinned on top'],
   ['v2026.08.01-0707', 'Hours chart now looks and edits like the price table — every field editable'],
   ['v2026.08.01-0401', 'Opening the app with an active session no longer flashes the sign-in screen'],
   ['v2026.08.01-0346', 'Calendar loads only nearby months, fetching older ones as you scroll to them'],
@@ -25,7 +26,6 @@ const CHANGELOG = [
   ['v2026.08.01-0207', 'Calendar day view: long-press to move a job works on the phone again'],
   ['v2026.08.01-0155', 'Android: share photos, files or links into JobPilot and pick a customer'],
   ['v2026.08.01-0147', 'Settings buttons follow dark mode instead of staying bright white'],
-  ['v2026.08.01-0145', 'Calendar toolbar arrows removed; the mouse wheel changes months on desktop'],
 ];
 const APP_VERSION = CHANGELOG[0][0];
 
@@ -5953,6 +5953,7 @@ const iifModalClose = document.getElementById('iif-modal-close');
 const iifStatus = document.getElementById('iif-status');
 const iifGrid = document.getElementById('iif-grid');
 const iifScroll = document.getElementById('iif-scroll');
+const iifSrcBar = document.getElementById('iif-src-bar');
 const iifDownloadBtn = document.getElementById('iif-download-btn');
 const iifReviewNote = document.getElementById('iif-review-note');
 const editorIifBtn = document.getElementById('editor-iif-btn');
@@ -6058,15 +6059,28 @@ function iifCellHtml(row, col) {
     return `<td class="price-cell iif-date" ${cellAttrs}>${escapeHtml(e.dateFormatted || '—')}</td>`;
   }
   if (col === 'employee') {
+    if (open) {
+      return `<td class="price-cell price-cell-editing" ${cellAttrs}>
+        <input class="iif-edit-emp" type="text" list="iif-emp-list" placeholder="Employee"
+               autocomplete="off" value="${escapeHtml(emp)}" />
+        ${iifCellActionsHtml()}
+        <span class="iif-cell-hint" hidden></span></td>`;
+    }
     const cls = emp ? '' : ' iif-empty-emp';
     const shown = emp || 'Nobody';
     const issue = (first && e.issue) ? `<span class="iif-issue">⚠ ${escapeHtml(e.issue)}</span>` : '';
-    return `<td class="price-cell${open ? ' price-cell-editing' : ''}" ${cellAttrs}>
+    return `<td class="price-cell" ${cellAttrs}>
       <span class="iif-pick-value${cls}">${escapeHtml(shown)}</span>${issue}</td>`;
   }
   if (col === 'customer') {
     const name = e.customerMatched || '';
-    return `<td class="price-cell${open ? ' price-cell-editing' : ''}" ${cellAttrs}>
+    if (open) {
+      return `<td class="price-cell price-cell-editing" ${cellAttrs}>
+        <input class="iif-edit-cust" type="text" list="iif-cust-list" placeholder="Customer"
+               autocomplete="off" value="${escapeHtml(name)}" />
+        ${iifCellActionsHtml()}</td>`;
+    }
+    return `<td class="price-cell" ${cellAttrs}>
       <span class="iif-pick-value">${escapeHtml(name || 'Choose…')}</span></td>`;
   }
   if (col === 'hours') {
@@ -6099,14 +6113,8 @@ function renderIIFEntries(entries) {
 
   const body = iifGridRows().map(row => {
     const { e, idx, emp, empIdx } = row;
-    const key = iifRowKey(idx, empIdx);
     const excluded = !!(e._excludedEmps && e._excludedEmps[emp]);
-    // The note line this row was read from, shown ABOVE the row while you edit
-    // it — you're correcting what the parser saw, so it has to be in view.
-    const srcRow = (openIifCell && openIifCell.startsWith(`${key}|`))
-      ? `<tr class="iif-src-row"><td class="iif-src" colspan="6"><span class="iif-src-label">Note line:</span> ${escapeHtml(e.raw || '(blank)')}</td></tr>`
-      : '';
-    return srcRow + `<tr class="${e.needsReview ? 'iif-needs-review' : ''}">
+    return `<tr class="${e.needsReview ? 'iif-needs-review' : ''}">
       <td class="iif-check"><input type="checkbox" class="iif-row-check" data-idx="${idx}" data-emp="${escapeHtml(emp)}" ${excluded ? '' : 'checked'} /></td>
       ${iifCellHtml(row, 'date')}
       ${iifCellHtml(row, 'employee')}
@@ -6118,23 +6126,55 @@ function renderIIFEntries(entries) {
 
   iifGrid.innerHTML = head + `<tbody>${body}</tbody>`;
   applyIifZoomVar();
+  renderIifSrcBar();
   wireIifGrid();
+}
+
+// The note line for whichever row is open, pinned above the grid.
+function renderIifSrcBar() {
+  if (!iifSrcBar) return;
+  if (!openIifCell) { iifSrcBar.hidden = true; iifSrcBar.innerHTML = ''; return; }
+  const idx = parseInt(openIifCell.split('|')[0].split(':')[0], 10);
+  const e = iifParsedEntries[idx];
+  if (!e) { iifSrcBar.hidden = true; return; }
+  const issue = e.issue ? ` <span class="iif-issue">⚠ ${escapeHtml(e.issue)}</span>` : '';
+  iifSrcBar.innerHTML = `<span class="iif-src-label">Note line:</span> ${escapeHtml(e.raw || '(blank)')}${issue}`;
+  iifSrcBar.hidden = false;
+}
+
+// Both drop lists are rebuilt when the modal opens: employees and customers can
+// change between sessions, and a stale list would offer names that no longer
+// exist.
+function refreshIifDatalists() {
+  const empList = document.getElementById('iif-emp-list');
+  if (empList) {
+    empList.innerHTML = getEmployeeNames()
+      .map(n => `<option value="${escapeHtml(n)}"></option>`).join('');
+  }
+  const custList = document.getElementById('iif-cust-list');
+  if (custList) {
+    const names = Storage.listCustomers()
+      .map(c => ({ label: customerCrumbLabel(c.id), addr: addressCandidates(c.id)[0] || '' }))
+      .filter(c => c.label)
+      .sort((a, b) => a.label.localeCompare(b.label));
+    // The address rides along as the option's LABEL so two Smiths can be told
+    // apart; only the value is typed back into the cell.
+    custList.innerHTML = names
+      .map(c => `<option value="${escapeHtml(c.label)}"${c.addr ? ` label="${escapeHtml(c.label)} — ${escapeHtml(c.addr)}"` : ''}></option>`)
+      .join('');
+  }
 }
 
 function closeIifCell(rerender = true) {
   iifOutsideTap.detach();
   openIifCell = null;
   if (rerender) renderIIFEntries(iifParsedEntries);
+  else renderIifSrcBar();     // no re-render: retire the pinned note line here
 }
 
 function openIifCellAt(cellKey) {
   openIifCell = cellKey;
   renderIIFEntries(iifParsedEntries);
-  const col = cellKey.split('|')[1];
-  if (col === 'employee' || col === 'customer') {
-    openIifPicker(col, cellKey);
-    return;
-  }
   focusOpenIifCell();
   setTimeout(() => iifOutsideTap.attach(), 0);
 }
@@ -6163,10 +6203,8 @@ const iifOutsideTap = makeOutsideTapWatcher({
   isOpen: () => !!openIifCell,
   // The include tick counts as "inside": tapping it with a cell open should
   // toggle the row, not close the editor and swallow the tap.
-  editingSelector: '.price-cell-editing, .iif-picker, .iif-check',
+  editingSelector: '.price-cell-editing, .iif-check',
   cellSelector: '.iif-grid .price-cell',
-  // While the picker is up it owns the screen; taps in it aren't "outside".
-  guard: () => !!(iifPicker && !iifPicker.hidden),
   onCell: (other) => {
     if (!other.dataset.cellkey) return false;
     openIifCellAt(other.dataset.cellkey);
@@ -6191,6 +6229,18 @@ function commitIifHours(idx, text) {
   if (hours === null) return;
   e.hours = Math.round(hours * 100) / 100;
   e.hoursFormatted = formatDuration(e.hours);
+}
+// QuickBooks matches employees by exact name, and the apprentice/journeyman
+// item mapping is keyed on it too — a typo here produces an IIF that fails to
+// import. So a typed name is snapped to the configured spelling, and anything
+// that doesn't match at all is rejected rather than saved.
+function resolveEmployeeName(typed) {
+  const want = String(typed || '').trim().toLowerCase();
+  if (!want) return null;
+  const names = getEmployeeNames();
+  return names.find(n => n.toLowerCase() === want)
+      || names.find(n => n.toLowerCase().startsWith(want))
+      || null;
 }
 function commitIifEmployee(idx, empIdx, name) {
   const e = iifParsedEntries[idx];
@@ -6234,10 +6284,32 @@ function wireIifGrid() {
   const editing = iifGrid.querySelector('.price-cell-editing');
   if (!editing) return;
   const idx = parseInt(editing.dataset.idx, 10);
+  const empIdx = parseInt(editing.dataset.empidx, 10);
   const col = (editing.dataset.cellkey || '').split('|')[1];
   const save = () => {
-    if (col === 'date') commitIifDate(idx, editing.querySelector('.iif-edit-date').value);
-    else if (col === 'hours') commitIifHours(idx, editing.querySelector('.iif-edit-hours').value);
+    if (col === 'date') {
+      commitIifDate(idx, editing.querySelector('.iif-edit-date').value);
+    } else if (col === 'hours') {
+      commitIifHours(idx, editing.querySelector('.iif-edit-hours').value);
+    } else if (col === 'employee') {
+      const typed = editing.querySelector('.iif-edit-emp').value;
+      const match = resolveEmployeeName(typed);
+      if (!match) {
+        // Stay open with the cursor where it is — silently dropping the value
+        // would look like it saved.
+        const hint = editing.querySelector('.iif-cell-hint');
+        if (hint) {
+          hint.textContent = typed.trim()
+            ? `No employee called “${typed.trim()}”. Pick one from the list.`
+            : 'Pick an employee from the list.';
+          hint.hidden = false;
+        }
+        return;
+      }
+      commitIifEmployee(idx, empIdx, match);
+    } else if (col === 'customer') {
+      commitIifCustomer(idx, editing.querySelector('.iif-edit-cust').value.trim());
+    }
     closeIifCell();
   };
   const saveBtn = editing.querySelector('.iif-save');
@@ -6252,84 +6324,6 @@ function wireIifGrid() {
   });
 }
 
-// ---- employee / customer picker ----
-const iifPicker = document.getElementById('iif-picker');
-const iifPickerTitle = document.getElementById('iif-picker-title');
-const iifPickerSearch = document.getElementById('iif-picker-search');
-const iifPickerList = document.getElementById('iif-picker-list');
-let iifPickerKind = null;     // 'employee' | 'customer'
-let iifPickerCellKey = null;
-
-function renderIifPickerList(filter) {
-  if (!iifPickerList) return;
-  const words = (filter || '').trim().toLowerCase().split(/\s+/).filter(Boolean);
-  let html = '';
-  if (iifPickerKind === 'employee') {
-    const names = getEmployeeNames().filter(n => !words.length || words.every(w => n.toLowerCase().includes(w)));
-    html = names.length
-      ? names.map(n => `<li class="member-item iif-pick-item" data-value="${escapeHtml(n)}">
-          <span class="cal-chip" style="background:${employeeColour(n)}">${escapeHtml(n)}</span></li>`).join('')
-      : '<li class="member-item">No matching employees. Add them in Settings → Time Logger.</li>';
-  } else {
-    const customers = Storage.listCustomers().filter(c => {
-      if (!words.length) return true;
-      const def = Storage.getDefaultNoteForCustomer(c.id);
-      return words.every(w => (def ? def.body : '').toLowerCase().includes(w));
-    }).slice(0, 40);
-    html = customers.map(c => {
-      const label = customerCrumbLabel(c.id);
-      const addr = addressCandidates(c.id)[0] || '';
-      return `<li class="member-item iif-pick-item" data-value="${escapeHtml(label)}">
-        <span class="member-email">${escapeHtml(label)}${addr ? `<em class="setting-check-hint">${escapeHtml(addr)}</em>` : ''}</span>
-      </li>`;
-    }).join('');
-    // The parser can name a customer who isn't on file yet, and QuickBooks may
-    // know them under a name this app doesn't — so free text stays possible.
-    const typed = (filter || '').trim();
-    if (typed) {
-      html = `<li class="member-item iif-pick-item" data-value="${escapeHtml(typed)}">
-        <span class="member-email">Use “${escapeHtml(typed)}”<em class="setting-check-hint">not a customer on file</em></span></li>` + html;
-    }
-    if (!html) html = '<li class="member-item">No customers yet.</li>';
-  }
-  iifPickerList.innerHTML = html;
-  iifPickerList.querySelectorAll('.iif-pick-item').forEach(li => {
-    li.addEventListener('click', () => {
-      const [rowKey] = (iifPickerCellKey || '').split('|');
-      const [idxStr, empIdxStr] = rowKey.split(':');
-      const idx = parseInt(idxStr, 10);
-      if (iifPickerKind === 'employee') commitIifEmployee(idx, parseInt(empIdxStr, 10), li.dataset.value);
-      else commitIifCustomer(idx, li.dataset.value);
-      closeIifPicker();
-      closeIifCell();
-    });
-  });
-}
-
-function openIifPicker(kind, cellKey) {
-  if (!iifPicker) return;
-  iifPickerKind = kind;
-  iifPickerCellKey = cellKey;
-  if (iifPickerTitle) iifPickerTitle.textContent = kind === 'employee' ? 'Which employee?' : 'Which customer?';
-  if (iifPickerSearch) {
-    iifPickerSearch.value = '';
-    iifPickerSearch.placeholder = kind === 'employee' ? 'Search employees…' : 'Search customers…';
-    iifPickerSearch.hidden = kind === 'employee' && getEmployeeNames().length <= 8;
-  }
-  renderIifPickerList('');
-  iifPicker.hidden = false;
-}
-function closeIifPicker() {
-  if (iifPicker) iifPicker.hidden = true;
-  iifPickerKind = null;
-  iifPickerCellKey = null;
-}
-if (iifPickerSearch) iifPickerSearch.addEventListener('input', () => renderIifPickerList(iifPickerSearch.value));
-const iifPickerClose = document.getElementById('iif-picker-close');
-if (iifPickerClose) iifPickerClose.addEventListener('click', () => { closeIifPicker(); closeIifCell(); });
-if (iifPicker) iifPicker.addEventListener('click', (e) => {
-  if (e.target === iifPicker) { closeIifPicker(); closeIifCell(); }
-});
 const iifZoomIn = document.getElementById('iif-zoom-in');
 const iifZoomOut = document.getElementById('iif-zoom-out');
 if (iifZoomIn) iifZoomIn.addEventListener('click', () => nudgeIifZoom(0.1));
@@ -6387,13 +6381,13 @@ function openIIFModal() {
 
   iifModal.hidden = false;
   applyIifZoomVar();
+  refreshIifDatalists();
   runIIFParse();
 }
 
 // Leaving the modal must drop the open cell and its document-level tap
 // listener, or the next open starts with a stale editor and a live watcher.
 function closeIIFModal() {
-  closeIifPicker();
   closeIifCell(false);
   if (iifModal) iifModal.hidden = true;
 }

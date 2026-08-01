@@ -663,6 +663,11 @@
         <button id="iif-modal-close" class="icon-btn" aria-label="Close">✕</button>
       </div>
       <div id="iif-status" class="iif-status"></div>
+      <!-- The note line the open row was read from. PINNED here rather than
+           sitting in the table: you're correcting what the parser read, so it
+           has to stay in view while the keyboard and the drop list cover the
+           bottom of the screen. -->
+      <div id="iif-src-bar" class="iif-src-bar" hidden></div>
       <div id="iif-scroll" class="price-scroll iif-scroll">
         <table id="iif-grid" class="price-table iif-grid"></table>
       </div>
@@ -673,19 +678,12 @@
     </div>
   </div>
 
-  <!-- Employee / customer picker for the hours grid. A second overlay above
-       the modal rather than an inline dropdown: a dropdown inside a scrolling
-       table gets clipped by the scroll container on a phone. -->
-  <div id="iif-picker" class="modal-overlay iif-picker" hidden>
-    <div class="modal-panel iif-picker-panel">
-      <div class="modal-header">
-        <h2 class="modal-title" id="iif-picker-title">Choose</h2>
-        <button id="iif-picker-close" class="icon-btn" type="button" aria-label="Close">✕</button>
-      </div>
-      <input id="iif-picker-search" class="signin-input" type="search" placeholder="Search…" autocomplete="off" />
-      <ul id="iif-picker-list" class="members-list iif-picker-list"></ul>
-    </div>
-  </div>
+  <!-- Drop lists for the hours grid's employee and customer cells. A datalist
+       gives BOTH a drop list and type-ahead filtering, which a native <select>
+       can't do — and the customer list is long enough that searching it
+       matters. Filled by refreshIifDatalists() when the modal opens. -->
+  <datalist id="iif-emp-list"></datalist>
+  <datalist id="iif-cust-list"></datalist>
 
   <!-- Tutorial Overlay -->
   <div id="tutorial-overlay" class="tutorial-overlay" hidden>

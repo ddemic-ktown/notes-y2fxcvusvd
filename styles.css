@@ -1315,26 +1315,29 @@ body.dark-mode .compiled-action.danger-soft { color: #f87171; border-color: #b91
 .iif-grid thead .iif-date { z-index: 4; }
 .iif-grid tbody tr.iif-needs-review td { background: #fff7ed; }
 body.dark-mode .iif-grid tbody tr.iif-needs-review td { background: #2d1a00; }
-/* The source line from the note, shown ABOVE the row being edited — you are
-   correcting what the parser read, so the evidence belongs in front of you,
-   not under the keyboard. */
-.iif-grid td.iif-src {
-  white-space: normal;
+/* The source line from the note, pinned above the grid while a cell is open.
+   It is NOT a table row: inside the scroller it drifted off the top as soon as
+   you scrolled, and it has to survive the keyboard and an open drop list. */
+.iif-src-bar {
+  flex-shrink: 0;
+  margin-bottom: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--accent);
+  border-radius: 6px;
   background: var(--surface);
-  font-size: calc(12px * var(--price-scale));
   color: var(--ink-soft);
-  position: sticky; left: 0;
+  font-size: 13px;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
+.iif-src-bar[hidden] { display: none; }
 .iif-src-label { font-weight: 600; color: var(--ink); margin-right: 4px; }
+.iif-cell-hint { display: block; margin-top: 4px; font-size: 12px; color: #d97706; }
 .iif-issue { display: block; font-size: calc(10px * var(--price-scale)); color: #d97706; }
 .iif-pick-value { border-bottom: 1px dashed var(--ink-soft); }
 .iif-empty-emp { color: #dc2626; }
 .iif-score { font-size: calc(12px * var(--price-scale)); font-weight: 700; }
-/* Picker sits above the hours modal (both are .modal-overlay, z-index 100) */
-.iif-picker { z-index: 120; }
-.iif-picker-panel { max-width: 520px; width: 95vw; max-height: 80vh; display: flex; flex-direction: column; }
-.iif-picker-list { flex: 1; overflow-y: auto; margin-top: 10px; }
-.iif-picker-list .member-item { cursor: pointer; }
 .iif-footer { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
 .iif-review-note { flex: 1; font-size: 12px; color: #d97706; }
 .iif-download-btn { padding: 10px 20px; border: none; border-radius: var(--radius); font-weight: 600; font-size: 14px; cursor: pointer; background: var(--accent); color: var(--accent-ink); white-space: nowrap; }
