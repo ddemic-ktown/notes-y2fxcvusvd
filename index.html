@@ -376,6 +376,47 @@
     </div>
   </div>
 
+  <!-- PROCESS / ENTER HOURS VIEW
+       The parsed hours note as an editable grid. A full SCREEN, not a modal:
+       it's a working surface you correct row by row, and a sheet on top of the
+       app left no room for the note line, the range and the chart at once.
+       It deliberately wears the PRICE TABLE's classes (price-main,
+       price-scroll, price-table, price-cell, price-cell-editing) so the two
+       charts look and behave identically: sticky headers, zoom, one cell open
+       at a time, the editor stacked inside the cell. Only what's genuinely
+       different gets its own class — see .iif-* in styles.css. -->
+  <section id="hours-view" class="screen">
+    <header class="app-header customers-header">
+      <div class="customers-header-top">
+        <button class="icon-btn date-btn app-back-btn" aria-label="Back">‹ Back</button>
+        <nav class="crumbs" id="crumbs-hours" aria-label="Breadcrumb"></nav>
+        <div class="price-zoom" role="group" aria-label="Zoom">
+          <button id="iif-zoom-out" class="icon-btn" type="button" aria-label="Zoom out">−</button>
+          <button id="iif-zoom-in" class="icon-btn" type="button" aria-label="Zoom in">+</button>
+        </div>
+      </div>
+      <div class="customers-header-bottom hours-actions">
+        <label class="iif-range-label">From <input id="iif-from-date" type="date" class="iif-date-input" /></label>
+        <label class="iif-range-label">To <input id="iif-to-date" type="date" class="iif-date-input" /></label>
+      </div>
+    </header>
+    <main class="price-main hours-main">
+      <div id="iif-status" class="iif-status"></div>
+      <!-- The note line the open row was read from. PINNED here rather than
+           sitting in the table: you're correcting what the parser read, so it
+           has to stay in view while the keyboard and the drop list cover the
+           bottom of the screen. -->
+      <div id="iif-src-bar" class="iif-src-bar" hidden></div>
+      <div id="iif-scroll" class="price-scroll iif-scroll">
+        <table id="iif-grid" class="price-table iif-grid"></table>
+      </div>
+      <div class="iif-footer">
+        <span id="iif-review-note" class="iif-review-note"></span>
+        <button id="iif-download-btn" class="primary iif-download-btn" hidden>Download .iif</button>
+      </div>
+    </main>
+  </section>
+
   <!-- SECTION DETAIL VIEW -->
   <section id="section-view" class="screen">
     <header class="app-header customers-header">
@@ -472,11 +513,7 @@
 
         <div data-role-iif>
           <h4 class="setting-sub-title">Export</h4>
-          <p class="muted setting-hint">Parses your "hours" note between these dates into an editable chart you can correct before exporting a .iif file for QuickBooks Desktop. Leave empty to parse everything.</p>
-          <div class="iif-range-row">
-            <label class="iif-range-label">From <input id="iif-from-date" type="date" class="iif-date-input" /></label>
-            <label class="iif-range-label">To <input id="iif-to-date" type="date" class="iif-date-input" /></label>
-          </div>
+          <p class="muted setting-hint">Reads your "hours" note into an editable chart you can correct, then export as a .iif file for QuickBooks Desktop. The date range lives on that screen.</p>
           <button id="iif-btn" class="secondary setting-wide-btn">Process/enter hours</button>
         </div>
       </div>
@@ -646,42 +683,10 @@
     </div>
   </div>
 
-  <!-- Process/enter hours — the parsed hours note as an editable grid.
-       It deliberately wears the PRICE TABLE's classes (price-scroll,
-       price-table, price-cell, price-cell-editing) so the two charts look and
-       behave identically: sticky headers, one cell open at a time, the editor
-       stacked inside the cell. Only what's genuinely different gets its own
-       class — see .iif-* in styles.css. -->
-  <div id="iif-modal" class="modal-overlay" hidden>
-    <div class="modal-panel iif-modal-panel">
-      <div class="modal-header">
-        <h2 class="modal-title">Process/enter hours</h2>
-        <div class="price-zoom" role="group" aria-label="Zoom">
-          <button id="iif-zoom-out" class="icon-btn" type="button" aria-label="Zoom out">−</button>
-          <button id="iif-zoom-in" class="icon-btn" type="button" aria-label="Zoom in">+</button>
-        </div>
-        <button id="iif-modal-close" class="icon-btn" aria-label="Close">✕</button>
-      </div>
-      <div id="iif-status" class="iif-status"></div>
-      <!-- The note line the open row was read from. PINNED here rather than
-           sitting in the table: you're correcting what the parser read, so it
-           has to stay in view while the keyboard and the drop list cover the
-           bottom of the screen. -->
-      <div id="iif-src-bar" class="iif-src-bar" hidden></div>
-      <div id="iif-scroll" class="price-scroll iif-scroll">
-        <table id="iif-grid" class="price-table iif-grid"></table>
-      </div>
-      <div class="iif-footer">
-        <span id="iif-review-note" class="iif-review-note"></span>
-        <button id="iif-download-btn" class="primary iif-download-btn" hidden>Download .iif</button>
-      </div>
-    </div>
-  </div>
-
   <!-- Drop lists for the hours grid's employee and customer cells. A datalist
        gives BOTH a drop list and type-ahead filtering, which a native <select>
        can't do — and the customer list is long enough that searching it
-       matters. Filled by refreshIifDatalists() when the modal opens. -->
+       matters. Filled by refreshIifDatalists() when the screen opens. -->
   <datalist id="iif-emp-list"></datalist>
   <datalist id="iif-cust-list"></datalist>
 

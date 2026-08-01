@@ -1287,16 +1287,11 @@ body.dark-mode .compiled-action.danger-soft { color: #f87171; border-color: #b91
    .price-scroll / .price-table / .price-cell / .price-cell-editing, so borders,
    sticky headers, zoom and the in-cell editor are shared, not copied. Only the
    genuinely different bits live here. */
-.iif-modal-panel { max-width: 620px; width: 95vw; max-height: 88vh; display: flex; flex-direction: column; }
-#iif-modal { --price-scale: 1; }
-.iif-status { font-size: 13px; color: var(--ink-soft); margin-bottom: 10px; flex-shrink: 0; }
-/* .price-scroll is `flex: 1` inside a full-height screen; in a modal it needs a
-   ceiling of its own or the panel grows past the sheet. */
-.iif-scroll {
-  flex: 1; min-height: 120px;
-  border: 1px solid var(--line); border-radius: 8px;
-  margin-bottom: 12px; padding: 0;
-}
+#hours-view { --price-scale: 1; }
+.hours-main { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.hours-actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.iif-status { font-size: 13px; color: var(--ink-soft); padding: 8px 12px 0; flex-shrink: 0; }
+.iif-scroll { flex: 1; min-height: 120px; padding: 8px 12px; }
 .iif-grid { width: 100%; }
 /* Two sticky columns: the include tick, then the date. The tick has a fixed
    width so the date column knows where to start — `left` can't be `auto`. */
@@ -1320,7 +1315,7 @@ body.dark-mode .iif-grid tbody tr.iif-needs-review td { background: #2d1a00; }
    you scrolled, and it has to survive the keyboard and an open drop list. */
 .iif-src-bar {
   flex-shrink: 0;
-  margin-bottom: 8px;
+  margin: 8px 12px 0;
   padding: 8px 10px;
   border: 1px solid var(--line);
   border-left: 3px solid var(--accent);
@@ -1338,7 +1333,12 @@ body.dark-mode .iif-grid tbody tr.iif-needs-review td { background: #2d1a00; }
 .iif-pick-value { border-bottom: 1px dashed var(--ink-soft); }
 .iif-empty-emp { color: #dc2626; }
 .iif-score { font-size: calc(12px * var(--price-scale)); font-weight: 700; }
-.iif-footer { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+.iif-footer {
+  display: flex; align-items: center; gap: 10px; flex-shrink: 0;
+  padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
+  border-top: 1px solid var(--line);
+  background: var(--surface);
+}
 .iif-review-note { flex: 1; font-size: 12px; color: #d97706; }
 .iif-download-btn { padding: 10px 20px; border: none; border-radius: var(--radius); font-weight: 600; font-size: 14px; cursor: pointer; background: var(--accent); color: var(--accent-ink); white-space: nowrap; }
 
@@ -1898,7 +1898,9 @@ input[type="search"]::-webkit-search-cancel-button {
   .invite-form input[type="email"] { flex: 1 1 100%; min-width: 0; }
   .invite-form select { flex: 1 1 auto; }
   .invite-form .primary { flex: 0 0 auto; }
-  .iif-range-label { flex: 1 1 100%; }
+  /* From/To live in the hours screen header now — keep them side by side so
+     the chart doesn't lose a second row of height on a narrow phone. */
+  .iif-range-label { flex: 1 1 45%; min-width: 0; }
   .member-item select { max-width: 38%; font-size: 13px; padding: 6px 8px; }
 }
 

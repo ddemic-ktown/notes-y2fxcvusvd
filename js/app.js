@@ -16,6 +16,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 10, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.08.01-0902', 'Process/enter hours is now its own screen like the Price Table, with the date range on it'],
   ['v2026.08.01-0802', 'Hours chart: searchable drop lists for employee and customer, note line pinned on top'],
   ['v2026.08.01-0707', 'Hours chart now looks and edits like the price table — every field editable'],
   ['v2026.08.01-0401', 'Opening the app with an active session no longer flashes the sign-in screen'],
@@ -25,7 +26,6 @@ const CHANGELOG = [
   ['v2026.08.01-0306', 'Signing in shows a loading card instead of leaving the sign-in form on screen'],
   ['v2026.08.01-0207', 'Calendar day view: long-press to move a job works on the phone again'],
   ['v2026.08.01-0155', 'Android: share photos, files or links into JobPilot and pick a customer'],
-  ['v2026.08.01-0147', 'Settings buttons follow dark mode instead of staying bright white'],
 ];
 const APP_VERSION = CHANGELOG[0][0];
 
@@ -41,6 +41,10 @@ const sectionView = document.getElementById('section-view');
 const sectionViewList = document.getElementById('section-view-list');
 const sectionViewControls = document.getElementById('section-view-controls');
 const editorView = document.getElementById('editor-view');
+// Declared up here with the other screens, not down in the hours section:
+// hideAllScreens() reads it, and a screen ref must never be in the temporal
+// dead zone when navigation runs.
+const hoursView = document.getElementById('hours-view');
 const signinView = document.getElementById('signin-view');
 const signinBtn = document.getElementById('signin-btn');
 const signinError = document.getElementById('signin-error');
@@ -2375,6 +2379,7 @@ function activeScreenKey() {
   if (sectionView && sectionView.classList.contains('active')) return 'section:' + activeSectionKey;
   if (orphanView && orphanView.classList.contains('active')) return 'orphans';
   if (priceView && priceView.classList.contains('active')) return 'price';
+  if (hoursView && hoursView.classList.contains('active')) return 'hours';
   if (calendarView && calendarView.classList.contains('active')) return 'calendar';
   if (calendarDayView && calendarDayView.classList.contains('active')) return 'calendar-day:' + calSelectedDate;
   return null;
@@ -2411,6 +2416,14 @@ function hideAllScreens() {
   if (sectionView) sectionView.classList.remove('active');
   if (orphanView) orphanView.classList.remove('active');
   if (priceView) priceView.classList.remove('active');
+  if (hoursView) {
+    // Only when it was actually up: closeIifCell reaches into state declared
+    // further down the file, and the guard also keeps it off the hot path.
+    // Same reasoning as detachOutsidePriceTap above — leaving with a cell open
+    // would strand its document-level pointer listener.
+    if (hoursView.classList.contains('active')) closeIifCell(false);
+    hoursView.classList.remove('active');
+  }
   if (calendarView) calendarView.classList.remove('active');
   if (calendarDayView) calendarDayView.classList.remove('active');
   const jm = document.getElementById('job-modal');
@@ -4388,6 +4401,7 @@ window.addEventListener('popstate', (e) => {
   if (screen === 'aggregator') { showAggregator(e.state.keyword); handlingPopstate = false; return; }
   if (screen === 'orphans') { showOrphanNotes(); handlingPopstate = false; return; }
   if (screen === 'price') { showPriceTable(); handlingPopstate = false; return; }
+  if (screen === 'hours') { showHoursView(); handlingPopstate = false; return; }
   if (screen === 'calendar') { showCalendar(); handlingPopstate = false; return; }
   if (screen === 'calendar-day') { showCalendarDay(e.state.date); handlingPopstate = false; return; }
   if (screen === 'section') { showSection(e.state.key); handlingPopstate = false; return; }
@@ -5948,8 +5962,6 @@ if (changelogList) {
 // table's single cell renderer. Nothing here is persisted: edits live in
 // iifParsedEntries until you export.
 const iifBtn = document.getElementById('iif-btn');
-const iifModal = document.getElementById('iif-modal');
-const iifModalClose = document.getElementById('iif-modal-close');
 const iifStatus = document.getElementById('iif-status');
 const iifGrid = document.getElementById('iif-grid');
 const iifScroll = document.getElementById('iif-scroll');
@@ -5998,7 +6010,7 @@ function confidenceColor(score) {
 // ---- zoom (its own key: resizing the hours chart shouldn't resize prices) ----
 let iifZoom = parseFloat(localStorage.getItem('na-hours-zoom') || '1') || 1;
 function applyIifZoomVar() {
-  if (iifModal) iifModal.style.setProperty('--price-scale', String(iifZoom));
+  if (hoursView) hoursView.style.setProperty('--price-scale', String(iifZoom));
 }
 function nudgeIifZoom(delta) {
   iifZoom = Math.min(1.8, Math.max(0.7, Math.round((iifZoom + delta) * 10) / 10));
@@ -6363,7 +6375,22 @@ function runIIFParse() {
   }, 30);
 }
 
-function openIIFModal() {
+// A SCREEN, not a sheet: you navigate to it, and the system back button (or
+// ‹ Back) leaves it like any other screen. Entered fresh every time — the note
+// is re-read and re-parsed, so in-progress corrections do not survive leaving.
+function showHoursView() {
+  if (!hoursView) return;
+  // Same gate as the Settings card: admin writes, bookkeeper reads.
+  if (!isAdminRole() && !isBookkeeperRole()) return;
+  hideAllScreens();
+  hoursView.classList.add('active');
+  renderCrumbs('crumbs-hours', [
+    { label: 'Home', go: 'home' },
+    { label: 'Process/enter hours' },
+  ]);
+  applyIifZoomVar();
+  if (!handlingPopstate) history.pushState({ screen: 'hours' }, '');
+
   const note = findHoursNote();
   if (!note) {
     iifStatus.textContent = 'No note titled "hours" found. Create a general note with the title "hours" and add your work notes there.';
@@ -6371,32 +6398,28 @@ function openIIFModal() {
     if (iifGrid) iifGrid.innerHTML = '';
     if (iifDownloadBtn) iifDownloadBtn.hidden = true;
     if (iifReviewNote) iifReviewNote.textContent = '';
-    iifModal.hidden = false;
     return;
   }
 
-  // Cache the note body and customer list for re-parses while the modal is open
+  // Cache the note body and customer list for re-parses while the screen is up
   iifNoteBody = splitTitleAndBody(note.body).body;
   iifCustomerNames = getCustomerNamesList();
 
-  iifModal.hidden = false;
-  applyIifZoomVar();
   refreshIifDatalists();
   runIIFParse();
 }
 
-// Leaving the modal must drop the open cell and its document-level tap
-// listener, or the next open starts with a stale editor and a live watcher.
-function closeIIFModal() {
-  closeIifCell(false);
-  if (iifModal) iifModal.hidden = true;
-}
-
-if (iifBtn) iifBtn.addEventListener('click', openIIFModal);
-
-if (iifModalClose) iifModalClose.addEventListener('click', closeIIFModal);
-if (iifModal) iifModal.addEventListener('click', e => { if (e.target === iifModal) closeIIFModal(); });
-if (editorIifBtn) editorIifBtn.addEventListener('click', openIIFModal);
+if (iifBtn) iifBtn.addEventListener('click', showHoursView);
+// From the editor's ⋯ menu: flush the open note first, exactly as the
+// breadcrumb links do, or an unsaved edit to the hours note is parsed stale.
+if (editorIifBtn) editorIifBtn.addEventListener('click', () => {
+  if (editorView.classList.contains('active')) commitAndCleanupEditor();
+  showHoursView();
+});
+// The range now lives on this screen, so changing it re-reads straight away
+// instead of sending you back to Settings.
+if (iifFromDate) iifFromDate.addEventListener('change', () => { if (iifNoteBody !== null) runIIFParse(); });
+if (iifToDate) iifToDate.addEventListener('change', () => { if (iifNoteBody !== null) runIIFParse(); });
 
 if (iifDownloadBtn) iifDownloadBtn.addEventListener('click', () => {
   // Only include checked rows (per entry+employee)
