@@ -407,6 +407,26 @@ body.editor-open {
 .cal-main { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
 .cal-grid { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 6px; }
 .cal-nav { display: flex; align-items: center; gap: 2px; flex-shrink: 0; }
+/* Cues that there's a month above and below — named, and tappable */
+.cal-cue {
+  display: block;
+  width: 100%;
+  border: 0;
+  background: none;
+  color: var(--ink-soft);
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 4px 0;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.cal-cue:active { color: var(--accent); }
+.cal-cue-up { border-bottom: 1px dashed var(--line); }
+.cal-cue-down { border-top: 1px dashed var(--line); }
+
 .cal-headrow, .cal-cells { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
 .cal-head {
   text-align: center; font-size: 11px; font-weight: 700; color: var(--ink-soft);
@@ -536,30 +556,42 @@ body.editor-open {
 /* ---- Price table ---- */
 .price-main { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .price-scroll { flex: 1; overflow: auto; -webkit-overflow-scrolling: touch; padding: 8px; }
+/* --price-scale drives zoom by scaling LAYOUT (type + spacing). It must not be
+   a transform: a transformed ancestor creates a containing block and disables
+   position: sticky, which made the item column wander while scrolling. */
+#price-view { --price-scale: 1; }
 .price-table { border-collapse: separate; border-spacing: 0; background: var(--surface); }
 .price-table th, .price-table td {
   border-bottom: 1px solid var(--line);
   border-right: 1px solid var(--line);
-  padding: 8px 10px;
-  font-size: 14px;
+  padding: calc(8px * var(--price-scale)) calc(10px * var(--price-scale));
+  font-size: calc(14px * var(--price-scale));
   text-align: left;
   white-space: nowrap;
   background: var(--surface);
 }
 /* Sticky header row and item column so you never lose your place */
-.price-table thead th { position: sticky; top: 0; z-index: 2; background: var(--bg); font-size: 13px; }
-.price-table .price-item, .price-table .price-corner {
-  position: sticky; left: 0; z-index: 1; background: var(--bg); font-weight: 600; max-width: 40vw;
-  overflow: hidden; text-overflow: ellipsis;
+.price-table thead th {
+  position: sticky; top: 0; z-index: 2;
+  background: var(--bg); font-size: calc(13px * var(--price-scale));
 }
-.price-table .price-corner { z-index: 3; }
+.price-table .price-item, .price-table .price-corner {
+  position: sticky; left: 0; z-index: 3;
+  background: var(--bg);        /* opaque, or scrolled cells show through */
+  font-weight: 600;
+  max-width: 40vw;
+  overflow: hidden; text-overflow: ellipsis;
+  box-shadow: 1px 0 0 var(--line);
+}
+/* The corner is sticky in BOTH directions, so it must sit above both */
+.price-table .price-corner { z-index: 4; }
 .price-vendor, .price-item { cursor: pointer; }
-.price-cell { cursor: pointer; min-width: 84px; }
+.price-cell { cursor: pointer; min-width: calc(84px * var(--price-scale)); }
 /* Price on the first line, availability + date beneath it */
 .price-top { display: flex; align-items: center; gap: 2px; }
 .price-sub { display: flex; align-items: center; gap: 4px; margin-top: 1px; }
 .price-sub .avail-dot { margin-left: 0; }
-.price-date { font-size: 11px; color: var(--ink-soft); white-space: nowrap; }
+.price-date { font-size: calc(11px * var(--price-scale)); color: var(--ink-soft); white-space: nowrap; }
 .price-value { font-weight: 600; }
 .price-unavailable { text-decoration: line-through; color: var(--ink-soft); font-weight: 500; }
 .price-empty { color: var(--ink-soft); }
@@ -571,7 +603,9 @@ body.dark-mode .price-best-badge { color: #4ade80; }
 .price-legend .price-best-badge { margin-left: 12px; }
 .price-empty-state { color: var(--ink-soft); font-style: italic; padding: 24px 12px; white-space: normal; }
 .avail-dot {
-  display: inline-block; width: 9px; height: 9px; border-radius: 50%;
+  display: inline-block;
+  width: calc(9px * var(--price-scale, 1)); height: calc(9px * var(--price-scale, 1));
+  border-radius: 50%;
   margin-left: 6px; vertical-align: middle; flex-shrink: 0;
 }
 .avail-yes { background: #16a34a; }
@@ -584,10 +618,27 @@ body.dark-mode .price-best-badge { color: #4ade80; }
 .price-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .price-zoom { display: flex; gap: 2px; flex-shrink: 0; }
 /* Inline cell entry */
-.price-cell-editing { white-space: normal; min-width: 160px; }
-.price-cell-editing input, .price-cell-editing select {
-  width: 100%; margin-bottom: 4px; padding: 6px 8px; font-size: 14px;
-  border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--ink);
+/* NOTE the `td.` — `.price-table th, .price-table td { white-space: nowrap }`
+   outranks a bare `.price-cell-editing`, which kept the price, date and
+   availability fields on one line however wide they were told to be. Same
+   trap as the `[hidden]` bug: a more specific rule elsewhere quietly wins. */
+.price-table td.price-cell-editing {
+  white-space: normal;
+  min-width: 170px;
+  width: 170px;
+  vertical-align: top;
+}
+.price-table td.price-cell-editing input,
+.price-table td.price-cell-editing select {
+  display: block;           /* stack, don't sit inline beside each other */
+  width: 100%;
+  margin-bottom: 4px;
+  padding: 6px 8px;
+  font-size: 14px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--ink);
 }
 .price-cell-actions { display: flex; gap: 6px; }
 .price-cell-actions button {

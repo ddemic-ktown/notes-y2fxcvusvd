@@ -13,16 +13,16 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 10, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.07.31-1928', 'Fixed: the item column now stays locked while scrolling the price table sideways'],
+  ['v2026.07.31-1908', 'Calendar months change by swiping up and down, with the next months named'],
+  ['v2026.07.31-1905', 'Fixed: price, date and availability now stack when entering a price'],
+  ['v2026.07.31-1901', 'Tapping away from a price you are entering cancels it, like the Cancel button'],
   ['v2026.07.31-1854', 'Fixed: pinch-zooming the price table no longer opens a cell when you let go'],
   ['v2026.07.31-1851', 'Search bar on the price table filters items as you type'],
   ['v2026.07.31-1848', 'Price table Layout button: reorder rows and columns, or tick several and send them to the top'],
   ['v2026.07.31-1844', 'Price cells show availability and the quote date under the price'],
   ['v2026.07.31-1842', 'Calendar groups jobs by crew — names shown once, not on every job'],
   ['v2026.07.31-1837', 'Job editor: enter any two of start, end and hours — the third fills itself'],
-  ['v2026.07.31-1832', 'Calendar day view is a timeline: drag jobs to a new time, drag the corner to resize'],
-  ['v2026.07.31-1801', 'New Calendar: month grid, day view, jobs with employees, customer and address'],
-  ['v2026.07.30-2050', 'Trash with 30-day undo, sync status, tap-to-call, backup, best-price mark, duplicate note'],
-  ['v2026.07.30-2030', 'While adding, the header shows “New customer” so Cancel always fits'],
 ];
 const APP_VERSION = CHANGELOG[0][0];
 
@@ -559,7 +559,16 @@ function renderCalendar() {
       <div class="cal-daynum">${d.getDate()}</div>${lines}${more}
     </div>`;
   }).join('');
-  calGrid.innerHTML = `<div class="cal-headrow">${head}</div><div class="cal-cells">${cells}</div>`;
+  // Cues so it's obvious there's more above and below — naming the month beats
+  // a bare arrow, and both are tappable for people who'd rather not swipe.
+  const prevMonth = new Date(calCursor.getFullYear(), calCursor.getMonth() - 1, 1);
+  const nextMonth = new Date(calCursor.getFullYear(), calCursor.getMonth() + 1, 1);
+  const cueUp = `<button type="button" class="cal-cue cal-cue-up" data-shift="-1">∧ ${escapeHtml(MONTH_NAMES[prevMonth.getMonth()])}</button>`;
+  const cueDown = `<button type="button" class="cal-cue cal-cue-down" data-shift="1">∨ ${escapeHtml(MONTH_NAMES[nextMonth.getMonth()])}</button>`;
+  calGrid.innerHTML = cueUp + `<div class="cal-headrow">${head}</div><div class="cal-cells">${cells}</div>` + cueDown;
+  calGrid.querySelectorAll('.cal-cue').forEach(btn => {
+    btn.addEventListener('click', () => calShiftMonth(parseInt(btn.dataset.shift, 10)));
+  });
   calGrid.querySelectorAll('.cal-cell').forEach(cell => {
     cell.addEventListener('click', () => {
       const date = cell.dataset.date;
@@ -808,10 +817,15 @@ function wireDayInteractions(canEdit) {
 const calPrev = document.getElementById('cal-prev');
 const calNext = document.getElementById('cal-next');
 const calToday = document.getElementById('cal-today');
-if (calPrev) calPrev.addEventListener('click', () => { calCursor = new Date(calCursor.getFullYear(), calCursor.getMonth() - 1, 1); renderCalendar(); });
-if (calNext) calNext.addEventListener('click', () => { calCursor = new Date(calCursor.getFullYear(), calCursor.getMonth() + 1, 1); renderCalendar(); });
+if (calPrev) calPrev.addEventListener('click', () => calShiftMonth(-1));
+if (calNext) calNext.addEventListener('click', () => calShiftMonth(1));
 if (calToday) calToday.addEventListener('click', () => { calCursor = new Date(); renderCalendar(); });
-// Swipe left/right on the grid to change month
+// Swipe UP for the next month, DOWN for the previous — the grid moves the way
+// your finger does, as if scrolling forward through a continuous calendar.
+function calShiftMonth(delta) {
+  calCursor = new Date(calCursor.getFullYear(), calCursor.getMonth() + delta, 1);
+  renderCalendar();
+}
 if (calGrid) {
   let sx = 0, sy = 0, tracking = false;
   calGrid.addEventListener('touchstart', (e) => {
@@ -823,9 +837,8 @@ if (calGrid) {
     tracking = false;
     const t = e.changedTouches[0];
     const dx = t.clientX - sx, dy = t.clientY - sy;
-    if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.5) {
-      calCursor = new Date(calCursor.getFullYear(), calCursor.getMonth() + (dx < 0 ? 1 : -1), 1);
-      renderCalendar();
+    if (Math.abs(dy) > 60 && Math.abs(dy) > Math.abs(dx) * 1.5) {
+      calShiftMonth(dy < 0 ? 1 : -1);
     }
   });
 }
@@ -1091,6 +1104,32 @@ function priceCellHtml(item, vendor, canEdit, isCheapest) {
   return `<td class="price-cell" data-key="${key}">${inner}</td>`;
 }
 
+// Close the open price cell without saving — used by Cancel, Escape, and a tap
+// outside the cell.
+function cancelPriceEdit() {
+  document.removeEventListener('pointerdown', outsidePriceTap, true);
+  openCellKey = null;
+  renderPriceTable();
+}
+function outsidePriceTap(e) {
+  if (!openCellKey) { document.removeEventListener('pointerdown', outsidePriceTap, true); return; }
+  if (pinchJustHappened()) return;                 // zooming, not tapping away
+  if (e.target.closest && e.target.closest('.price-cell-editing')) return;  // inside the cell
+  // Tapping a DIFFERENT cell should move there in one tap. Re-rendering
+  // replaces the DOM, so the follow-up click would never land — open the new
+  // cell here instead of waiting for it.
+  const other = e.target.closest ? e.target.closest('.price-cell') : null;
+  if (other && other.dataset.key && Storage.canEditPriceTable()) {
+    document.removeEventListener('pointerdown', outsidePriceTap, true);
+    openCellKey = other.dataset.key;
+    renderPriceTable();
+    const input = priceTableEl.querySelector('.price-cell-editing .price-input');
+    if (input) input.focus();
+    return;
+  }
+  cancelPriceEdit();
+}
+
 function renderPriceTable() {
   if (!priceTableEl) return;
   const cfg = Storage.getPriceConfig();
@@ -1155,8 +1194,7 @@ function renderPriceTable() {
     </tr>`).join('')}</tbody>`;
   priceTableEl.innerHTML = head + body;
   renderPriceSelectBar();
-  priceTableEl.style.transform = `scale(${priceZoom})`;
-  priceTableEl.style.transformOrigin = '0 0';
+  applyPriceZoomVar();
   wirePriceTable(canEdit);
 }
 
@@ -1193,6 +1231,7 @@ function wirePriceTable(canEdit) {
   if (editing) {
     const [itemId, vendorId] = editing.dataset.key.split('|');
     const save = async () => {
+      document.removeEventListener('pointerdown', outsidePriceTap, true);
       const price = editing.querySelector('.price-input').value;
       const date = editing.querySelector('.price-date').value;
       const avail = editing.querySelector('.price-avail').value;
@@ -1201,10 +1240,16 @@ function wirePriceTable(canEdit) {
       renderPriceTable();
     };
     editing.querySelector('.price-save').addEventListener('click', save);
-    editing.querySelector('.price-cancel').addEventListener('click', () => { openCellKey = null; renderPriceTable(); });
+    editing.querySelector('.price-cancel').addEventListener('click', cancelPriceEdit);
+    // Tapping anywhere outside the open cell is the same as Cancel. Registered
+    // on the NEXT tick so the tap that opened the cell doesn't close it, and
+    // ignored during a pinch so zooming doesn't discard what you typed.
+    setTimeout(() => {
+      document.addEventListener('pointerdown', outsidePriceTap, true);
+    }, 0);
     editing.querySelector('.price-input').addEventListener('keydown', (e) => {
       if (e.key === 'Enter') { e.preventDefault(); save(); }
-      if (e.key === 'Escape') { openCellKey = null; renderPriceTable(); }
+      if (e.key === 'Escape') { cancelPriceEdit(); }
     });
   }
   // Reorder mode: arrows move rows/columns; taps don't rename
@@ -1314,10 +1359,20 @@ if (priceAddVendorBtn) priceAddVendorBtn.addEventListener('click', async () => {
   const name = prompt('New vendor name:');
   if (name && name.trim()) { await Storage.addPriceVendor(name.trim()); renderPriceTable(); }
 });
+// Zoom by scaling type and spacing rather than transforming the table: a
+// CSS transform on an ancestor establishes a containing block, which stops
+// `position: sticky` working — that's what made the item column drift while
+// scrolling sideways. Scaling the layout keeps sticky intact and the text
+// crisp at every level.
+function applyPriceZoomVar() {
+  const view = document.getElementById('price-view');
+  if (view) view.style.setProperty('--price-scale', String(priceZoom));
+}
+
 function setPriceZoom(z) {
   priceZoom = Math.max(0.5, Math.min(2, Math.round(z * 10) / 10));
   localStorage.setItem('na-price-zoom', String(priceZoom));
-  if (priceTableEl) priceTableEl.style.transform = `scale(${priceZoom})`;
+  applyPriceZoomVar();
 }
 if (priceZoomIn) priceZoomIn.addEventListener('click', () => setPriceZoom(priceZoom + 0.1));
 if (priceZoomOut) priceZoomOut.addEventListener('click', () => setPriceZoom(priceZoom - 0.1));
@@ -1741,6 +1796,7 @@ function hideAllScreens() {
   if (fm) fm.hidden = true;
   const pm = document.getElementById('price-more-dropdown');
   if (pm) pm.hidden = true;
+  document.removeEventListener('pointerdown', outsidePriceTap, true);
   listView.classList.remove('active');
   customersView.classList.remove('active');
   customerNotesView.classList.remove('active');
