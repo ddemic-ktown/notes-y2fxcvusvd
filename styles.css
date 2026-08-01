@@ -45,6 +45,12 @@ html, body {
   color: var(--ink);
   font: 16px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   -webkit-text-size-adjust: 100%;
+  /* Kill the browser's pull-to-refresh. Screens like the calendar month grid
+     don't scroll, so a vertical drag reached the browser and reloaded the app
+     mid-gesture — which dumped you back on the home screen. Refresh is a
+     button in the home header instead. `contain`, not `none`, so inner
+     scrollers still behave normally. */
+  overscroll-behavior-y: contain;
 }
 body { min-height: 100vh; }
 body.editor-open {
@@ -432,7 +438,7 @@ body.editor-open {
   text-align: center; font-size: 11px; font-weight: 700; color: var(--ink-soft);
   text-transform: uppercase; letter-spacing: 0.04em; padding: 4px 0;
 }
-.cal-cells { flex: 1; min-height: 0; grid-auto-rows: minmax(64px, 1fr); overflow-y: auto; }
+.cal-cells { flex: 1; min-height: 0; grid-auto-rows: minmax(64px, 1fr); overflow-y: auto; overscroll-behavior-y: contain; }
 .cal-cell {
   background: var(--surface);
   border: 1px solid var(--line);
@@ -570,7 +576,7 @@ body.editor-open {
 
 /* ---- Price table ---- */
 .price-main { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-.price-scroll { flex: 1; overflow: auto; -webkit-overflow-scrolling: touch; padding: 8px; }
+.price-scroll { flex: 1; overflow: auto; -webkit-overflow-scrolling: touch; padding: 8px; position: relative; }
 /* --price-scale drives zoom by scaling LAYOUT (type + spacing). It must not be
    a transform: a transformed ancestor creates a containing block and disables
    position: sticky, which made the item column wander while scrolling. */
@@ -2032,4 +2038,57 @@ input[type="search"]::-webkit-search-cancel-button {
   position: relative;
   background: transparent;
   caret-color: var(--ink);
+}
+
+/* One button that steps through its states. Wider than a paired button since
+   the label carries the current value ("Auto · Dark") instead of a fixed word. */
+.cycle-btn { min-width: 132px; }
+
+/* Long-press to move a price-table row or column */
+.price-dragging {
+  opacity: 0.75;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+  transform: scale(1.02);
+  z-index: 6;
+}
+.price-drop-line { position: absolute; background: #2563eb; pointer-events: none; z-index: 7; border-radius: 2px; }
+.price-drop-h { height: 3px; }
+.price-drop-v { width: 3px; }
+
+/* Manual refresh button (home header) */
+#refresh-btn { font-size: 18px; line-height: 1; }
+#refresh-btn.spinning { animation: refresh-spin 0.6s linear infinite; }
+@keyframes refresh-spin { to { transform: rotate(360deg); } }
+
+/* Day view: swipe cues, mirroring the month view's ∧/∨ pair */
+.cal-day-cues { display: flex; justify-content: space-between; align-items: center; padding: 0 8px; flex-shrink: 0; border-bottom: 1px dashed var(--line); }
+.cal-cue-side { width: auto; padding: 5px 4px; }
+
+/* Calendar change-view animation: fade with a 5px nudge in the direction you
+   moved. Opacity is composited; the tiny translate is cheap enough not to
+   stutter on low-end phones the way a full slide can. */
+@keyframes cal-enter-up    { from { opacity: 0; transform: translateY(5px); }  to { opacity: 1; transform: none; } }
+@keyframes cal-enter-down  { from { opacity: 0; transform: translateY(-5px); } to { opacity: 1; transform: none; } }
+@keyframes cal-enter-left  { from { opacity: 0; transform: translateX(5px); }  to { opacity: 1; transform: none; } }
+@keyframes cal-enter-right { from { opacity: 0; transform: translateX(-5px); } to { opacity: 1; transform: none; } }
+.cal-enter-up    { animation: cal-enter-up    160ms ease-out; }
+.cal-enter-down  { animation: cal-enter-down  160ms ease-out; }
+.cal-enter-left  { animation: cal-enter-left  160ms ease-out; }
+.cal-enter-right { animation: cal-enter-right 160ms ease-out; }
+@media (prefers-reduced-motion: reduce) {
+  .cal-enter-up, .cal-enter-down, .cal-enter-left, .cal-enter-right { animation: none; }
+}
+
+/* Job sheet grows to the visible viewport while the customer field has focus,
+   so the match list has somewhere to go above the keyboard. */
+.modal-panel.modal-panel-tall { height: calc(var(--app-vh, 80vh) - 24px); }
+
+/* Cancel a just-created note/customer: a red ✕ where the + normally sits.
+   Moving it out of the header row leaves that row to the breadcrumb, which
+   is what crowded it out before. */
+.fab-cancel {
+  background: var(--danger);
+  color: #fff;
+  font-size: 26px;
+  bottom: calc(24px + var(--kb-inset, 0px) + env(safe-area-inset-bottom, 0));
 }

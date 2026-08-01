@@ -627,6 +627,40 @@ export const Storage = {
     await setDoc(doc(priceItemsCol(), itemId), stripId(next)).catch(err => console.warn("savePriceItem", err));
     return next;
   },
+  // Drop `itemId` immediately before `beforeItemId` (null = drop at the end).
+  // Uses a midpoint order so a drag costs ONE document write instead of
+  // renumbering every row it passed. Orders are plain numbers, so fractions
+  // are free — but they halve each time, so renormalize when the gap gets too
+  // small to split reliably.
+  async reorderPriceItem(itemId, beforeItemId) {
+    if (itemId === beforeItemId) return null;
+    let items = this.listPriceItems();
+    const moving = items.find(i => i.id === itemId);
+    if (!moving) return null;
+    const place = async () => {
+      const rest = items.filter(i => i.id !== itemId);
+      const at = beforeItemId ? rest.findIndex(i => i.id === beforeItemId) : rest.length;
+      if (beforeItemId && at === -1) return null;
+      const prev = at > 0 ? (rest[at - 1].order ?? 0) : null;
+      const next = at < rest.length ? (rest[at].order ?? 0) : null;
+      let order;
+      if (prev == null && next == null) order = 0;
+      else if (prev == null) order = next - 1;
+      else if (next == null) order = prev + 1;
+      else {
+        if (next - prev < 1e-6) return false;      // out of room — renormalize
+        order = (prev + next) / 2;
+      }
+      return this.savePriceItem(itemId, { order });
+    };
+    const done = await place();
+    if (done !== false) return done;
+    for (let i = 0; i < items.length; i++) {
+      if ((items[i].order ?? 0) !== i) await this.savePriceItem(items[i].id, { order: i });
+    }
+    items = this.listPriceItems();
+    return place();
+  },
   async removePriceItem(itemId) {
     _cache.priceItems = _cache.priceItems.filter(n => n.id !== itemId);
     emit();

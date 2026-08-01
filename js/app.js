@@ -13,16 +13,16 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 10, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.07.31-2053', 'New note/customer keeps its breadcrumb; Cancel is a red ✕ in the corner'],
+  ['v2026.07.31-2049', 'Customer search in the job sheet now shows five matches instead of two'],
+  ['v2026.07.31-2046', 'Calendar fades with a small nudge when you change month or day'],
+  ['v2026.07.31-2043', 'Calendar day view: swipe left or right to change days, with tappable cues either side'],
+  ['v2026.07.31-2040', 'Pull-to-refresh no longer reloads the app by accident; a ⟳ button on the home screen refreshes instead'],
+  ['v2026.07.31-2036', 'Price table: long-press an item or vendor to drag it to a new position'],
+  ['v2026.07.31-2030', 'Theme and time format are single cycling buttons with an Auto option that follows your phone'],
+  ['v2026.07.31-2024', 'Settings: switch the calendar and timestamps between 12-hour and 24-hour time'],
   ['v2026.07.31-1955', 'Job customer field suggests who you book most often before you type'],
   ['v2026.07.31-1952', 'Customer search lifts to the top of the job form so matches are never behind the keyboard'],
-  ['v2026.07.31-1948', 'Customer matches appear above the search box when there is more room there'],
-  ['v2026.07.31-1943', 'Fixed: customer search results are reachable with the keyboard up'],
-  ['v2026.07.31-1940', 'Fixed: the day view scrolls again when you drag starting on a job card'],
-  ['v2026.07.31-1938', 'Opening a price scrolls it into view, and you can still drag the table around'],
-  ['v2026.07.31-1936', 'Pinch zoom on the price table no longer opens cells at all'],
-  ['v2026.07.31-1928', 'Fixed: the item column now stays locked while scrolling the price table sideways'],
-  ['v2026.07.31-1908', 'Calendar months change by swiping up and down, with the next months named'],
-  ['v2026.07.31-1905', 'Fixed: price, date and availability now stack when entering a price'],
 ];
 const APP_VERSION = CHANGELOG[0][0];
 
@@ -368,7 +368,7 @@ function formatDate(iso) {
   const sameDay = d.toDateString() === now.toDateString();
   const weekday = d.toLocaleDateString([], { weekday: 'short' });
   if (sameDay) {
-    const time = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    const time = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: !getClock24() });
     return `${weekday}, ${time}`;
   }
   const sameYear = d.getFullYear() === now.getFullYear();
@@ -380,7 +380,7 @@ function formatDateTime(iso) {
   const d = new Date(iso);
   const now = new Date();
   const sameYear = d.getFullYear() === now.getFullYear();
-  const time = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' });
+  const time = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: !getClock24() });
   const date = d.toLocaleDateString([], sameYear
     ? { weekday: 'short', month: 'short', day: 'numeric' }
     : { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
@@ -493,6 +493,14 @@ function parseYmd(s) {
   const [y, m, d] = String(s).split('-').map(Number);
   return new Date(y, (m || 1) - 1, d || 1);
 }
+function shiftYmd(s, days) {
+  const d = parseYmd(s);
+  d.setDate(d.getDate() + days);      // rolls months and years, DST-safe
+  return ymd(d);
+}
+function shortDay(s) {
+  return parseYmd(s).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
+}
 function prettyDate(s) {
   const d = parseYmd(s);
   return d.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
@@ -598,6 +606,39 @@ const HOUR_PX = 56;          // one hour of timeline
 const SNAP_MIN = 15;         // dragging snaps to quarter hours
 const DEFAULT_LEN = 60;      // a job with a start but no end draws as an hour
 
+// ---------- clock format ----------
+// Display only. Times are ALWAYS stored as 24h "HH:MM" (see hhmmFromMinutes) —
+// this just controls how they're drawn, so switching the setting can never
+// change or corrupt saved jobs. Unset follows whatever the device's locale
+// does, which is right for most people without them touching anything.
+function getClockPref() {
+  const v = localStorage.getItem('na-clock-24');
+  if (v === '1') return '24';
+  if (v === '0') return '12';
+  return 'auto';                 // absence of the key IS the auto state
+}
+function getClock24() {
+  const p = getClockPref();
+  if (p !== 'auto') return p === '24';
+  try { return Intl.DateTimeFormat().resolvedOptions().hour12 === false; }
+  catch { return false; }
+}
+function fmtClock(min) {
+  const clamped = Math.max(0, Math.min(24 * 60 - 1, Math.round(min)));
+  const h = Math.floor(clamped / 60), mi = clamped % 60;
+  if (getClock24()) return `${String(h).padStart(2, '0')}:${String(mi).padStart(2, '0')}`;
+  // 0 is 12 AM and 12 is 12 PM — the modulo alone gets both wrong.
+  const h12 = h % 12 === 0 ? 12 : h % 12;
+  return `${h12}:${String(mi).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}`;
+}
+// The hour rail is narrow, so drop the ":00" in 12h mode — "8 AM" is what a
+// paper day-planner prints.
+function fmtHourLabel(h) {
+  if (getClock24()) return `${String(h).padStart(2, '0')}:00`;
+  const h12 = h % 12 === 0 ? 12 : h % 12;
+  return `${h12} ${h < 12 ? 'AM' : 'PM'}`;
+}
+
 function minutesFromHHMM(t) {
   const m = /^(\d{1,2}):(\d{2})$/.exec(String(t || ''));
   if (!m) return null;
@@ -642,6 +683,13 @@ function renderCalendarDay() {
     { label: 'Calendar', go: 'calendar' },
     { label: prettyDate(calSelectedDate) },
   ]);
+  // Swipe cues, same idea as the month view's ∧/∨ — naming the day beats a bare
+  // arrow, and both are tappable for anyone who'd rather not swipe.
+  const prevBtn = document.getElementById('cal-day-prev');
+  const nextBtn = document.getElementById('cal-day-next');
+  if (prevBtn) prevBtn.textContent = `‹ ${shortDay(shiftYmd(calSelectedDate, -1))}`;
+  if (nextBtn) nextBtn.textContent = `${shortDay(shiftYmd(calSelectedDate, 1))} ›`;
+
   const canEdit = isAdminRole();
   const dayFab = document.getElementById('cal-day-fab');
   if (dayFab) dayFab.style.display = canEdit ? '' : 'none';
@@ -688,7 +736,7 @@ function renderCalendarDay() {
   const lanes = layoutLanes(spans);
   const hours = Array.from({ length: 24 }, (_, h) => `
     <div class="cal-hour" style="top:${h * HOUR_PX}px">
-      <span class="cal-hour-label">${String(h).padStart(2, '0')}:00</span>
+      <span class="cal-hour-label">${fmtHourLabel(h)}</span>
     </div>`).join('');
   const blocks = timed.map((j, i) => {
     const { start, end } = spans[i];
@@ -699,7 +747,7 @@ function renderCalendarDay() {
     const left = `calc(52px + ((100% - 52px) / ${n}) * ${lane} + 2px)`;
     const who = j.customerName || (j.customerId ? customerCrumbLabel(j.customerId) : 'No customer');
     const names = (j.employeeNames || []);
-    const timeTxt = `${hhmmFromMinutes(start)}–${hhmmFromMinutes(end)}`;
+    const timeTxt = `${fmtClock(start)}–${fmtClock(end)}`;
     // The crew is identified by the coloured bar and the legend above, so the
     // block itself doesn't repeat the names — that space goes to the job.
     const key = crewKey(j);
@@ -835,9 +883,24 @@ if (calNext) calNext.addEventListener('click', () => calShiftMonth(1));
 if (calToday) calToday.addEventListener('click', () => { calCursor = new Date(); renderCalendar(); });
 // Swipe UP for the next month, DOWN for the previous — the grid moves the way
 // your finger does, as if scrolling forward through a continuous calendar.
+// A fade with a 5px nudge in the direction you moved: enough to read as
+// forward or back, but no big transform to stutter on a cheap phone. Only
+// fires on a deliberate shift — saving a job shouldn't make the day slide.
+function calSlide(el, dir) {
+  if (!el || !dir) return;
+  try { if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return; }
+  catch (e) {}
+  const cls = `cal-enter-${dir}`;
+  el.classList.remove('cal-enter-up', 'cal-enter-down', 'cal-enter-left', 'cal-enter-right');
+  void el.offsetWidth;                 // restart the animation if it's replayed
+  el.classList.add(cls);
+  el.addEventListener('animationend', () => el.classList.remove(cls), { once: true });
+}
 function calShiftMonth(delta) {
   calCursor = new Date(calCursor.getFullYear(), calCursor.getMonth() + delta, 1);
   renderCalendar();
+  // renderCalendar rebuilds .cal-cells, so grab it after the render
+  calSlide(calGrid && calGrid.querySelector('.cal-cells'), delta > 0 ? 'up' : 'down');
 }
 if (calGrid) {
   let sx = 0, sy = 0, tracking = false;
@@ -852,6 +915,43 @@ if (calGrid) {
     const dx = t.clientX - sx, dy = t.clientY - sy;
     if (Math.abs(dy) > 60 && Math.abs(dy) > Math.abs(dx) * 1.5) {
       calShiftMonth(dy < 0 ? 1 : -1);
+    }
+  });
+}
+
+// Swipe left/right to change the day. Re-renders in place rather than calling
+// showCalendarDay, which would push a history entry per swipe and bury the
+// back button under a stack of days.
+function calShiftDay(delta) {
+  if (!calSelectedDate) return;
+  calSelectedDate = shiftYmd(calSelectedDate, delta);
+  calCrewFocus = null;                    // a new day's crews are different
+  renderCalendarDay();
+  const dir = delta > 0 ? 'left' : 'right';
+  calSlide(document.getElementById('cal-day-scroll'), dir);
+  const untimed = document.getElementById('cal-day-untimed');
+  if (untimed && !untimed.hidden) calSlide(untimed, dir);
+}
+const calDayMain = document.querySelector('.cal-day-main');
+if (calDayMain) {
+  calDayMain.querySelectorAll('.cal-cue-side').forEach(btn => {
+    btn.addEventListener('click', () => calShiftDay(parseInt(btn.dataset.shift, 10)));
+  });
+  let sx = 0, sy = 0, tracking = false;
+  calDayMain.addEventListener('touchstart', (e) => {
+    if (e.touches.length !== 1) return;
+    // A finger that lands on a job block belongs to the drag/resize gesture.
+    if (e.target.closest('.cal-block, .cal-resize')) { tracking = false; return; }
+    sx = e.touches[0].clientX; sy = e.touches[0].clientY; tracking = true;
+  }, { passive: true });
+  calDayMain.addEventListener('touchend', (e) => {
+    if (!tracking) return;
+    tracking = false;
+    const t = e.changedTouches[0];
+    const dx = t.clientX - sx, dy = t.clientY - sy;
+    // Clearly horizontal only — the timeline scrolls vertically.
+    if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.5) {
+      calShiftDay(dx < 0 ? 1 : -1);       // swipe left = next day
     }
   });
 }
@@ -919,7 +1019,14 @@ function renderJobEmployees(selected) {
 // Floor of 120px so it's never a useless sliver on a very short screen.
 function customerListMaxHeight(inputRect) {
   const viewH = (window.visualViewport && window.visualViewport.height) || window.innerHeight;
-  return Math.max(120, (viewH - inputRect.bottom) - 90);
+  // A row with an address wraps to two lines, so measure a real one rather
+  // than guessing. Aim for five visible matches.
+  const row = document.querySelector('#job-customer-list .member-item');
+  const rowH = (row && row.getBoundingClientRect().height) || 58;
+  const room = (viewH - inputRect.bottom) - 16;   // 16px of breathing room only
+  // Five rows when there's space; never taller than the room available; and a
+  // floor so a very short screen still shows something usable (it scrolls).
+  return Math.max(120, Math.min(rowH * 5, room));
 }
 
 // Scroll the modal panel so the customer field sits just under the panel's top
@@ -991,8 +1098,13 @@ function renderJobCustomer(filter) {
     requestAnimationFrame(() => {
       const input = document.getElementById('job-customer-search');
       if (!input) return;
+      // Lift once, when a result set first appears — re-lifting on every
+      // keystroke would make the panel jump while you type.
+      if (!ul.dataset.lifted) { ul.dataset.lifted = '1'; liftCustomerField(); }
       ul.style.maxHeight = customerListMaxHeight(input.getBoundingClientRect()) + 'px';
     });
+  } else {
+    delete ul.dataset.lifted;
   }
   ul.querySelectorAll('.job-customer-item').forEach(li => {
     li.addEventListener('click', () => {
@@ -1060,7 +1172,23 @@ if (jobCustomerSearch) {
   // visualViewport resize that follows is the one that gets it right, so we
   // listen to both — debounced, since it fires on every frame of the keyboard
   // animation.
-  jobCustomerSearch.addEventListener('focus', () => requestAnimationFrame(liftCustomerField));
+  jobCustomerSearch.addEventListener('focus', () => {
+    // Grow the sheet to the full visible viewport while you're picking, so the
+    // matches have room. It shrinks back to fit its content on blur.
+    const panel = jobCustomerSearch.closest('.modal-panel');
+    if (panel) panel.classList.add('modal-panel-tall');
+    requestAnimationFrame(liftCustomerField);
+  });
+  jobCustomerSearch.addEventListener('blur', () => {
+    const panel = jobCustomerSearch.closest('.modal-panel');
+    // Delayed: a tap on a result blurs the field before the click lands, and
+    // resizing the panel mid-tap would move the row out from under the finger.
+    setTimeout(() => {
+      if (document.activeElement !== jobCustomerSearch && panel) {
+        panel.classList.remove('modal-panel-tall');
+      }
+    }, 150);
+  });
   if (window.visualViewport) {
     let liftTimer = null;
     window.visualViewport.addEventListener('resize', () => {
@@ -1328,8 +1456,153 @@ function renderPriceTable() {
   wirePriceTable(canEdit);
 }
 
+// ---------- price table: long-press to drag a row or column ----------
+// Long-press a row or column header to pick it up, drag, release to drop.
+// A drop indicator shows where it will land; nothing is reordered live,
+// because moving a COLUMN live means touching a cell in every row. One code
+// path serves both axes.
+let priceDrag = null;
+function priceDropLine() {
+  let el = document.getElementById('price-drop-line');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'price-drop-line';
+    el.className = 'price-drop-line';
+    (priceScrollEl || document.body).appendChild(el);
+  }
+  return el;
+}
+function clearPriceDrag() {
+  if (priceDrag && priceDrag.el) priceDrag.el.classList.remove('price-dragging');
+  // touch-action is set ONLY for the duration of a drag — leaving it on kills
+  // scrolling, which is exactly how the day view broke once.
+  if (priceScrollEl) priceScrollEl.style.touchAction = '';
+  const line = document.getElementById('price-drop-line');
+  if (line) line.remove();
+  priceDrag = null;
+}
+// Which row/column is under the pointer, and do we drop before or after it?
+function priceDragTarget(x, y) {
+  if (!priceDrag) return null;
+  const el = document.elementFromPoint(x, y);
+  if (!el) return null;
+  if (priceDrag.axis === 'y') {
+    const tr = el.closest('tr');
+    const th = tr && tr.querySelector('.price-item');
+    if (!th || !priceTableEl.contains(tr)) return null;
+    const r = tr.getBoundingClientRect();
+    return { id: th.dataset.item, after: y > r.top + r.height / 2, rect: r };
+  }
+  const cell = el.closest('th[data-vendor], td[data-key]');
+  if (!cell || !priceTableEl.contains(cell)) return null;
+  const id = cell.dataset.vendor || (cell.dataset.key || '').split('|')[1];
+  if (!id) return null;
+  const head = priceTableEl.querySelector(`th[data-vendor="${id}"]`);
+  if (!head) return null;
+  const r = head.getBoundingClientRect();
+  return { id, after: x > r.left + r.width / 2, rect: r };
+}
+function drawPriceDropLine(t) {
+  if (!priceScrollEl || !t) return;
+  const line = priceDropLine();
+  const box = priceScrollEl.getBoundingClientRect();
+  if (priceDrag.axis === 'y') {
+    line.className = 'price-drop-line price-drop-h';
+    line.style.top = (t.rect[t.after ? 'bottom' : 'top'] - box.top + priceScrollEl.scrollTop) + 'px';
+    line.style.left = priceScrollEl.scrollLeft + 'px';
+    line.style.width = box.width + 'px';
+    line.style.height = '';
+  } else {
+    line.className = 'price-drop-line price-drop-v';
+    line.style.left = (t.rect[t.after ? 'right' : 'left'] - box.left + priceScrollEl.scrollLeft) + 'px';
+    line.style.top = priceScrollEl.scrollTop + 'px';
+    line.style.height = box.height + 'px';
+    line.style.width = '';
+  }
+}
+// The table is bigger than the screen, so drag near an edge to keep moving.
+function priceDragAutoScroll(x, y) {
+  if (!priceScrollEl) return;
+  const b = priceScrollEl.getBoundingClientRect(), EDGE = 40, STEP = 12;
+  if (priceDrag.axis === 'y') {
+    if (y < b.top + EDGE) priceScrollEl.scrollTop -= STEP;
+    else if (y > b.bottom - EDGE) priceScrollEl.scrollTop += STEP;
+  } else {
+    if (x < b.left + EDGE) priceScrollEl.scrollLeft -= STEP;
+    else if (x > b.right - EDGE) priceScrollEl.scrollLeft += STEP;
+  }
+}
+async function finishPriceDrag() {
+  if (!priceDrag) return;
+  const { axis, id, target } = priceDrag;
+  clearPriceDrag();
+  if (!target || target.id === id) return;          // dropped where it started
+  if (axis === 'y') {
+    const items = Storage.listPriceItems();
+    const at = items.findIndex(i => i.id === target.id);
+    const beforeIdx = target.after ? at + 1 : at;
+    const before = items[beforeIdx] && items[beforeIdx].id === id
+      ? (items[beforeIdx + 1] || null) : (items[beforeIdx] || null);
+    await Storage.reorderPriceItem(id, before ? before.id : null);
+  } else {
+    const vendors = Storage.getPriceConfig().vendors.slice().sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+    const from = vendors.findIndex(v => v.id === id);
+    if (from === -1) return;
+    const [moved] = vendors.splice(from, 1);
+    let at = vendors.findIndex(v => v.id === target.id);
+    if (at === -1) return;
+    vendors.splice(target.after ? at + 1 : at, 0, moved);
+    await Storage.savePriceConfig({ vendors: vendors.map((v, i) => ({ ...v, order: i })) });
+  }
+  renderPriceTable();
+}
+// Long-press wiring shared by both header types.
+function wirePriceHeaderDrag(el, axis, id) {
+  let timer = null, down = null, dragged = false;
+  const cancel = () => { if (timer) { clearTimeout(timer); timer = null; } };
+  priceLongPressCancels.add(cancel);
+  el.addEventListener('pointerdown', (e) => {
+    if (pricePointerCount > 1 || pinchJustHappened()) return;
+    down = { x: e.clientX, y: e.clientY, id: e.pointerId };
+    dragged = false;
+    timer = setTimeout(() => {
+      timer = null;
+      priceDrag = { el, axis, id, target: null };
+      el.classList.add('price-dragging');
+      if (priceScrollEl) priceScrollEl.style.touchAction = 'none';
+      try { el.setPointerCapture(down.id); } catch (err) {}
+      if (navigator.vibrate) navigator.vibrate(10);
+    }, 500);
+  });
+  el.addEventListener('pointermove', (e) => {
+    if (!down) return;
+    if (!priceDrag) {
+      // Moved before the hold completed — that was a scroll, not a press.
+      if (Math.hypot(e.clientX - down.x, e.clientY - down.y) > 8) { cancel(); down = null; }
+      return;
+    }
+    dragged = true;
+    e.preventDefault();
+    priceDragAutoScroll(e.clientX, e.clientY);
+    const t = priceDragTarget(e.clientX, e.clientY);
+    if (t) { priceDrag.target = t; drawPriceDropLine(t); }
+  });
+  const end = () => {
+    cancel();
+    down = null;
+    if (priceDrag) finishPriceDrag();
+  };
+  el.addEventListener('pointerup', end);
+  el.addEventListener('pointercancel', () => { cancel(); down = null; clearPriceDrag(); });
+  // Without this every drag would end in the rename prompt.
+  el.addEventListener('click', (e) => {
+    if (dragged) { dragged = false; e.stopPropagation(); e.preventDefault(); }
+  }, true);
+}
+
 function wirePriceTable(canEdit) {
   priceLongPressCancels.clear();   // stale closures from the previous render
+  clearPriceDrag();                // a re-render orphans any in-flight drag
   // Long-press (or right-click) opens history; a plain tap opens inline entry
   priceTableEl.querySelectorAll('.price-cell').forEach(cell => {
     let pressTimer = null;
@@ -1402,8 +1675,10 @@ function wirePriceTable(canEdit) {
     priceTableEl.querySelectorAll('.v-right').forEach(b => b.addEventListener('click', (e) => { e.stopPropagation(); movePriceVendor(b.dataset.vendor, 1); }));
     return;
   }
-  // Rename / remove a row or column (edit rights only)
+  // Rename / remove a row or column (edit rights only), plus long-press to move
   if (canEdit) {
+    priceTableEl.querySelectorAll('.price-item').forEach(th => wirePriceHeaderDrag(th, 'y', th.dataset.item));
+    priceTableEl.querySelectorAll('.price-vendor').forEach(th => wirePriceHeaderDrag(th, 'x', th.dataset.vendor));
     priceTableEl.querySelectorAll('.price-item').forEach(th => {
       th.addEventListener('click', async () => {
         const item = Storage.listPriceItems().find(i => i.id === th.dataset.item);
@@ -1541,8 +1816,15 @@ function updateAppVh() {
   // visualViewport shrinks when the on-screen keyboard appears; innerHeight
   // does not. Modals sized in vh therefore ran under the keyboard, hiding
   // whatever sat at the bottom (e.g. customer search results).
-  const h = (window.visualViewport && window.visualViewport.height) || window.innerHeight;
+  const vv = window.visualViewport;
+  const h = (vv && vv.height) || window.innerHeight;
   document.documentElement.style.setProperty('--app-vh', h + 'px');
+  // How much of the layout viewport the keyboard covers. `position: fixed`
+  // anchors to the LAYOUT viewport, so a bottom-anchored button sits behind
+  // the keyboard without this offset — which is exactly when the editor's
+  // Cancel ✕ needs to be reachable.
+  const inset = vv ? Math.max(0, window.innerHeight - (vv.height + vv.offsetTop)) : 0;
+  document.documentElement.style.setProperty('--kb-inset', inset + 'px');
 }
 updateAppVh();
 window.addEventListener('resize', updateAppVh);
@@ -2425,13 +2707,14 @@ function showSettings() {
   if (accountEmailEl && auth.currentUser) accountEmailEl.textContent = auth.currentUser.email || '';
   refreshSeedButtons();
   renderTrashList();
+  applyClockButton();
   const moveCheckedInput = document.getElementById('setting-move-checked');
   if (moveCheckedInput) moveCheckedInput.checked = getMoveCheckedToBottom();
   const collapseSearchInput = document.getElementById('setting-collapse-search');
   if (collapseSearchInput) collapseSearchInput.checked = getCollapseSearch();
   settingsView.classList.add('active');
   if (!handlingPopstate) history.pushState({ screen: 'settings' }, '');
-  applyTheme(localStorage.getItem('na-theme') || 'dark');
+  applyTheme();
   renderMembersList();
 }
 
@@ -3898,6 +4181,22 @@ window.addEventListener('popstate', (e) => {
 
 // ---------- Cancel (discard a just-created note/customer) ----------
 const editorCancelBtn = document.getElementById('editor-cancel-btn');
+// Where a just-created record sits, for the breadcrumb. Crumb links already
+// run commitAndCleanupEditor(), which discards an empty new record — so
+// tapping Home mid-create behaves the same as Cancel.
+function newRecordCrumbs(rec) {
+  const crumbs = [{ label: 'Home', go: 'home' }];
+  if (rec.kind === 'customer') {
+    if (rec.origin === 'customers') crumbs.push({ label: 'Customers', go: 'customers' });
+    crumbs.push({ label: 'New customer' });
+  } else {
+    if (rec.customerId && canViewAllRole()) {
+      crumbs.push({ label: customerCrumbLabel(rec.customerId), go: 'customer', id: rec.customerId });
+    }
+    crumbs.push({ label: 'New note' });
+  }
+  return crumbs;
+}
 function updateCancelBtn() {
   if (!editorCancelBtn) return;
   const show = !!pendingNewRecord && currentType === 'note' && currentId === pendingNewRecord.noteId;
@@ -3906,16 +4205,11 @@ function updateCancelBtn() {
   // (showEditor sets delete per role/note type; this only overrides while a
   // brand-new record is open.)
   if (show && deleteBtn) deleteBtn.style.display = 'none';
-  // While creating, the breadcrumb has nothing useful to say — you just tapped
-  // + — and on a phone it crowded Cancel off the row. Swap it for a plain
-  // title; showEditor restores the real trail next time.
-  if (show) {
-    const el = document.getElementById('crumbs-editor');
-    if (el) {
-      const label = pendingNewRecord.kind === 'customer' ? 'New customer' : 'New note';
-      el.innerHTML = `<span class="crumb crumb-current">${escapeHtml(label)}</span>`;
-    }
-  }
+  // A real trail while creating, so you can still see (and use) where you came
+  // from. Cancel used to live on this row and crowded it out on a phone; it's
+  // a red ✕ in the corner now, so the row is free. The customer's own name is
+  // skipped for notes — the trail has to stay short.
+  if (show) renderCrumbs('crumbs-editor', newRecordCrumbs(pendingNewRecord));
 }
 if (editorCancelBtn) editorCancelBtn.addEventListener('click', () => {
   const rec = pendingNewRecord;
@@ -4843,16 +5137,74 @@ if (inviteBtn) {
 }
 
 // ---------- theme (light / dark) ----------
-function applyTheme(theme) {
-  document.body.classList.toggle('dark-mode', theme === 'dark');
-  const lightBtn = document.getElementById('theme-light-btn');
-  const darkBtn = document.getElementById('theme-dark-btn');
-  if (lightBtn) lightBtn.classList.toggle('active', theme !== 'dark');
-  if (darkBtn) darkBtn.classList.toggle('active', theme === 'dark');
+// ---------- theme ----------
+// Three states, one button. 'auto' is stored as the ABSENCE of the key so an
+// existing install keeps whatever it already chose; only a fresh one gets auto.
+function getThemePref() {
+  const v = localStorage.getItem('na-theme');
+  return (v === 'light' || v === 'dark') ? v : 'auto';
 }
+function systemPrefersDark() {
+  try { return window.matchMedia('(prefers-color-scheme: dark)').matches; }
+  catch { return true; }   // dark is this app's default — outdoor trade use
+}
+function resolvedTheme() {
+  const p = getThemePref();
+  return p === 'auto' ? (systemPrefersDark() ? 'dark' : 'light') : p;
+}
+function applyTheme() {
+  const theme = resolvedTheme();
+  document.body.classList.toggle('dark-mode', theme === 'dark');
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.setAttribute('content', theme === 'dark' ? '#1f2937' : '#ffffff');
+  const btn = document.getElementById('theme-cycle-btn');
+  if (btn) {
+    const p = getThemePref();
+    // Auto alone says nothing about what you're looking at, so show what it
+    // currently resolves to.
+    const label = p === 'auto' ? `Auto · ${theme === 'dark' ? 'Dark' : 'Light'}`
+      : (p === 'dark' ? 'Dark' : 'Light');
+    btn.textContent = label;
+    btn.setAttribute('aria-label', `Theme: ${label}. Tap to change.`);
+  }
+}
+function cycleThemePref() {
+  const next = { light: 'dark', dark: 'auto', auto: 'light' }[getThemePref()];
+  if (next === 'auto') localStorage.removeItem('na-theme');
+  else localStorage.setItem('na-theme', next);
+  applyTheme();
+}
+const themeCycleBtn = document.getElementById('theme-cycle-btn');
+if (themeCycleBtn) themeCycleBtn.addEventListener('click', cycleThemePref);
+// Follow the phone live while on auto — no reload needed at sunset.
+try {
+  window.matchMedia('(prefers-color-scheme: dark)')
+    .addEventListener('change', () => { if (getThemePref() === 'auto') applyTheme(); });
+} catch { /* older browsers: auto still resolves on load */ }
+applyTheme();
 
-const savedTheme = localStorage.getItem('na-theme') || 'dark';
-applyTheme(savedTheme);
+// ---------- clock format button ----------
+function applyClockButton() {
+  const btn = document.getElementById('clock-cycle-btn');
+  if (!btn) return;
+  const p = getClockPref();
+  const label = p === 'auto' ? `Auto · ${getClock24() ? '24-hour' : '12-hour'}`
+    : (p === '24' ? '24-hour' : '12-hour');
+  btn.textContent = label;
+  btn.setAttribute('aria-label', `Time format: ${label}. Tap to change.`);
+}
+function cycleClockPref() {
+  const next = { '12': '24', '24': 'auto', 'auto': '12' }[getClockPref()];
+  if (next === 'auto') localStorage.removeItem('na-clock-24');
+  else localStorage.setItem('na-clock-24', next === '24' ? '1' : '0');
+  applyClockButton();
+  // Redraw whichever calendar view is showing so the change is immediate.
+  if (calendarDayView && calendarDayView.classList.contains('active')) renderCalendarDay();
+  else if (calendarView && calendarView.classList.contains('active')) renderCalendar();
+}
+const clockCycleBtn = document.getElementById('clock-cycle-btn');
+if (clockCycleBtn) clockCycleBtn.addEventListener('click', cycleClockPref);
+applyClockButton();
 
 const moveCheckedToggle = document.getElementById('setting-move-checked');
 if (moveCheckedToggle) {
@@ -4866,21 +5218,6 @@ if (collapseSearchToggle) {
   collapseSearchToggle.addEventListener('change', () => {
     localStorage.setItem('na-collapse-search', collapseSearchToggle.checked ? '1' : '0');
     refreshSearchCollapse();
-  });
-}
-
-const themeLightBtn = document.getElementById('theme-light-btn');
-const themeDarkBtn = document.getElementById('theme-dark-btn');
-if (themeLightBtn) {
-  themeLightBtn.addEventListener('click', () => {
-    localStorage.setItem('na-theme', 'light');
-    applyTheme('light');
-  });
-}
-if (themeDarkBtn) {
-  themeDarkBtn.addEventListener('click', () => {
-    localStorage.setItem('na-theme', 'dark');
-    applyTheme('dark');
   });
 }
 
@@ -6153,6 +6490,20 @@ function applyWaitingUpdate() {
   if (swReg && swReg.waiting) {
     swReg.waiting.postMessage('SKIP_WAITING');
   }
+}
+
+// Manual refresh — replaces the browser's pull-to-refresh, which fired by
+// accident on non-scrolling screens. Checks for a new app version first: if
+// one is waiting, the SW takes over and reloads by itself, so we only force a
+// reload when nothing turned up.
+const refreshBtn = document.getElementById('refresh-btn');
+if (refreshBtn) {
+  refreshBtn.addEventListener('click', async () => {
+    if (refreshBtn.classList.contains('spinning')) return;
+    refreshBtn.classList.add('spinning');
+    try { if (swReg) await swReg.update(); } catch (e) {}
+    setTimeout(() => window.location.reload(), 400);
+  });
 }
 
 if ('serviceWorker' in navigator) {

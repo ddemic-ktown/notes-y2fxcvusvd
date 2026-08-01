@@ -80,6 +80,7 @@
         <h1>JobPilot</h1>
         <span id="app-version" class="app-version"></span>
         <span id="sync-status" class="sync-status" role="status" hidden></span>
+        <button id="refresh-btn" class="icon-btn" type="button" aria-label="Refresh">⟳</button>
         <button id="layout-btn" class="icon-btn date-btn" type="button" aria-pressed="false" aria-label="Change home screen layout">Layout</button>
         <button id="settings-btn" class="icon-btn" aria-label="Settings">⚙</button>
       </div>
@@ -220,6 +221,10 @@
       </div>
     </header>
     <main class="cal-day-main">
+      <div class="cal-day-cues">
+        <button type="button" id="cal-day-prev" class="cal-cue cal-cue-side" data-shift="-1"></button>
+        <button type="button" id="cal-day-next" class="cal-cue cal-cue-side" data-shift="1"></button>
+      </div>
       <div id="cal-day-legend" class="cal-legend" hidden></div>
       <div id="cal-day-untimed" class="cal-untimed" hidden></div>
       <div id="cal-day-scroll" class="cal-day-scroll">
@@ -405,9 +410,14 @@
         <h3 class="setting-list-title">Appearance &amp; editing</h3>
         <label class="setting-inline-label">Theme</label>
         <div class="setting-btn-row">
-          <button id="theme-light-btn" class="theme-btn secondary">Light</button>
-          <button id="theme-dark-btn" class="theme-btn secondary">Dark</button>
+          <button id="theme-cycle-btn" class="theme-btn secondary cycle-btn">Dark</button>
         </div>
+        <p class="setting-check-hint">Tap to cycle: Light, Dark, or Auto (follows your phone).</p>
+        <label class="setting-inline-label">Time format</label>
+        <div class="setting-btn-row">
+          <button id="clock-cycle-btn" class="theme-btn secondary cycle-btn">12-hour</button>
+        </div>
+        <p class="setting-check-hint">Tap to cycle: 12-hour, 24-hour, or Auto (follows your phone). This device only. The start and end time pickers in the job editor follow your phone's own setting and can't be changed here.</p>
         <label class="setting-check" data-editor-pref>
           <input id="setting-move-checked" type="checkbox" />
           <span>
@@ -550,7 +560,6 @@
         <button class="icon-btn date-btn app-back-btn" aria-label="Back">‹ Back</button>
         <nav class="crumbs" id="crumbs-editor" aria-label="Breadcrumb"></nav>
         <span id="editor-shared-badge" class="shared-badge" title="Shared with assigned users" hidden>Shared</span>
-        <button id="editor-cancel-btn" class="icon-btn date-btn" type="button" hidden>Cancel</button>
         <div class="editor-more-wrap">
           <button id="editor-more-btn" class="icon-btn date-btn editor-more-btn" aria-label="More options">⋯</button>
           <div id="editor-more-dropdown" class="editor-more-dropdown" hidden>
@@ -586,6 +595,7 @@
         <textarea id="editor-body" class="editor-body editor-body-input" placeholder="Start typing…" autocomplete="off" autocorrect="on" spellcheck="true"></textarea>
       </div>
     </main>
+    <button id="editor-cancel-btn" class="fab fab-cancel" type="button" aria-label="Discard and cancel" hidden>✕</button>
   </section>
 
   <!-- First-run welcome (empty org, admin only) -->
