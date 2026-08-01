@@ -5,7 +5,10 @@ import {
   sendSignInLinkToEmail, isSignInWithEmailLink, signInWithEmailLink,
   signInWithEmailAndPassword, updatePassword,
 } from "./firebase-init.js";
-import { parseHoursNote, generateIIF, fuzzyMatchCustomer } from "./iif.js";
+// formatDate is aliased: app.js already has its own formatDate(iso) for note
+// timestamps, and iif.js's returns the MM/DD/YYYY that QuickBooks expects.
+import { parseHoursNote, generateIIF, fuzzyMatchCustomer,
+         formatDate as iifFormatDate, formatDuration } from "./iif.js";
 import { LocalFiles } from "./files.js";
 
 // Version format: vYYYY.MM.DD-HHMM (Pacific time).
@@ -13,6 +16,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 10, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.08.01-0707', 'Hours chart now looks and edits like the price table — every field editable'],
   ['v2026.08.01-0401', 'Opening the app with an active session no longer flashes the sign-in screen'],
   ['v2026.08.01-0346', 'Calendar loads only nearby months, fetching older ones as you scroll to them'],
   ['v2026.08.01-0321', 'Fewer database writes while typing; saves on Enter, paste and leaving the app'],
@@ -22,7 +26,6 @@ const CHANGELOG = [
   ['v2026.08.01-0155', 'Android: share photos, files or links into JobPilot and pick a customer'],
   ['v2026.08.01-0147', 'Settings buttons follow dark mode instead of staying bright white'],
   ['v2026.08.01-0145', 'Calendar toolbar arrows removed; the mouse wheel changes months on desktop'],
-  ['v2026.08.01-0141', 'Fixes + buttons drifting up the screen or disappearing when no keyboard was open'],
 ];
 const APP_VERSION = CHANGELOG[0][0];
 
@@ -1437,43 +1440,61 @@ function cancelPriceEdit() {
 // the moment a finger touched, it counted as "tapped outside". Judge on
 // RELEASE instead — a tap is a short press that barely moved; anything longer
 // or further is a scroll and leaves the editor alone.
+//
+// Shared with the hours grid (v2026.08.01-0707): both are tables where one cell
+// is open at a time, and getting "was that a tap or a scroll?" right on a phone
+// took enough tuning that a second copy would only rot. The differences are
+// passed in, not branched on.
 const TAP_SLOP_PX = 8;
 const TAP_MAX_MS = 500;
-let tapStart = null;
-function outsidePriceDown(e) {
-  tapStart = { x: e.clientX, y: e.clientY, t: Date.now() };
+function makeOutsideTapWatcher({ isOpen, editingSelector, cellSelector, guard, onCell, onOutside }) {
+  let start = null;
+  const down = (e) => { start = { x: e.clientX, y: e.clientY, t: Date.now() }; };
+  const up = (e) => {
+    if (!isOpen()) { api.detach(); return; }
+    if (guard && guard()) { start = null; return; }
+    const s = start;
+    start = null;
+    if (!s) return;
+    const moved = Math.hypot(e.clientX - s.x, e.clientY - s.y);
+    if (moved > TAP_SLOP_PX || Date.now() - s.t > TAP_MAX_MS) return;   // a drag
+    if (e.target.closest && e.target.closest(editingSelector)) return;  // inside the cell
+    // Tapping a DIFFERENT cell should move there in one tap. Re-rendering
+    // replaces the DOM, so the follow-up click would never land — open the new
+    // cell here instead of waiting for it.
+    const other = e.target.closest ? e.target.closest(cellSelector) : null;
+    if (other && onCell && onCell(other)) { api.detach(); return; }
+    onOutside();
+  };
+  const api = {
+    attach() {
+      document.addEventListener('pointerdown', down, true);
+      document.addEventListener('pointerup', up, true);
+    },
+    detach() {
+      document.removeEventListener('pointerdown', down, true);
+      document.removeEventListener('pointerup', up, true);
+      start = null;
+    },
+  };
+  return api;
 }
-function outsidePriceTap(e) {
-  if (!openCellKey) { detachOutsidePriceTap(); return; }
-  if (pinchJustHappened()) { tapStart = null; return; }
-  const start = tapStart;
-  tapStart = null;
-  if (!start) return;
-  const moved = Math.hypot(e.clientX - start.x, e.clientY - start.y);
-  if (moved > TAP_SLOP_PX || Date.now() - start.t > TAP_MAX_MS) return;  // a drag
-  if (e.target.closest && e.target.closest('.price-cell-editing')) return;  // inside the cell
-  // Tapping a DIFFERENT cell should move there in one tap. Re-rendering
-  // replaces the DOM, so the follow-up click would never land — open the new
-  // cell here instead of waiting for it.
-  const other = e.target.closest ? e.target.closest('.price-cell') : null;
-  if (other && other.dataset.key && Storage.canEditPriceTable()) {
-    detachOutsidePriceTap();
+const priceOutsideTap = makeOutsideTapWatcher({
+  isOpen: () => !!openCellKey,
+  editingSelector: '.price-cell-editing',
+  cellSelector: '.price-cell',
+  guard: () => pinchJustHappened(),
+  onCell: (other) => {
+    if (!other.dataset.key || !Storage.canEditPriceTable()) return false;
     openCellKey = other.dataset.key;
     renderPriceTable();
     focusOpenPriceCell();
-    return;
-  }
-  cancelPriceEdit();
-}
-function attachOutsidePriceTap() {
-  document.addEventListener('pointerdown', outsidePriceDown, true);
-  document.addEventListener('pointerup', outsidePriceTap, true);
-}
-function detachOutsidePriceTap() {
-  document.removeEventListener('pointerdown', outsidePriceDown, true);
-  document.removeEventListener('pointerup', outsidePriceTap, true);
-  tapStart = null;
-}
+    return true;
+  },
+  onOutside: () => cancelPriceEdit(),
+});
+function attachOutsidePriceTap() { priceOutsideTap.attach(); }
+function detachOutsidePriceTap() { priceOutsideTap.detach(); }
 
 // --- A: bring the open cell (and its stacked fields) to the top, clear of the
 // keyboard, instead of leaving it wherever it happened to be.
@@ -5917,12 +5938,21 @@ if (changelogList) {
   `).join('');
 }
 
-// ---------- IIF generator ----------
+// ---------- Process/enter hours ----------
+// The parsed hours note rendered as an EDITABLE GRID that borrows the price
+// table's chrome (see index.html and styles.css). Same interaction: one cell
+// open at a time, the editor stacked inside the cell, tap elsewhere to move or
+// close. What's different is that the columns hold different KINDS of thing —
+// a date, a name from the employee list, a name from the customer list, a
+// number — so each column gets its own small editor instead of the price
+// table's single cell renderer. Nothing here is persisted: edits live in
+// iifParsedEntries until you export.
 const iifBtn = document.getElementById('iif-btn');
 const iifModal = document.getElementById('iif-modal');
 const iifModalClose = document.getElementById('iif-modal-close');
 const iifStatus = document.getElementById('iif-status');
-const iifTableBody = document.getElementById('iif-table-body');
+const iifGrid = document.getElementById('iif-grid');
+const iifScroll = document.getElementById('iif-scroll');
 const iifDownloadBtn = document.getElementById('iif-download-btn');
 const iifReviewNote = document.getElementById('iif-review-note');
 const editorIifBtn = document.getElementById('editor-iif-btn');
@@ -5964,79 +5994,346 @@ function confidenceColor(score) {
   return '#dc2626';
 }
 
+// ---- zoom (its own key: resizing the hours chart shouldn't resize prices) ----
+let iifZoom = parseFloat(localStorage.getItem('na-hours-zoom') || '1') || 1;
+function applyIifZoomVar() {
+  if (iifModal) iifModal.style.setProperty('--price-scale', String(iifZoom));
+}
+function nudgeIifZoom(delta) {
+  iifZoom = Math.min(1.8, Math.max(0.7, Math.round((iifZoom + delta) * 10) / 10));
+  localStorage.setItem('na-hours-zoom', String(iifZoom));
+  applyIifZoomVar();
+}
+
+// ---- grid state ----
+// `${entryIdx}:${employeeSlot}|${column}` — the open cell, mirroring the price
+// table's openCellKey.
+let openIifCell = null;
+
+// One row per entry PER EMPLOYEE: a note line naming two people is two rows in
+// QuickBooks. Editing date/customer/hours changes the shared entry (so both
+// rows move together, which is right — it's one line of the note); editing the
+// employee changes only that row's slot.
+function iifGridRows() {
+  const rows = [];
+  iifParsedEntries.forEach((e, idx) => {
+    const emps = e.employees.length ? e.employees : [''];
+    emps.forEach((emp, empIdx) => rows.push({ e, idx, emp, empIdx, first: empIdx === 0 }));
+  });
+  return rows;
+}
+function iifRowKey(idx, empIdx) { return `${idx}:${empIdx}`; }
+function iifCellActionsHtml() {
+  return `<div class="price-cell-actions">
+    <button class="price-save iif-save" type="button">Save</button>
+    <button class="price-cancel iif-cancel" type="button">Cancel</button>
+  </div>`;
+}
+// A parsed entry holds a real Date; the grid edits it as YYYY-MM-DD.
+function iifIsoDate(e) {
+  return (e.date instanceof Date && !Number.isNaN(e.date.getTime())) ? ymd(e.date) : '';
+}
+// Accepts what trades actually write: "3.5" or "3:30".
+function parseHoursInput(text) {
+  const val = String(text || '').trim();
+  if (!val) return null;
+  const colon = val.match(/^(\d+):([0-5]?\d)$/);
+  if (colon) return parseInt(colon[1], 10) + parseInt(colon[2], 10) / 60;
+  const dec = val.match(/^(\d+(?:\.\d+)?)$/);
+  if (dec) return parseFloat(dec[1]);
+  return null;
+}
+
+function iifCellHtml(row, col) {
+  const { e, idx, emp, empIdx, first } = row;
+  const key = iifRowKey(idx, empIdx);
+  const open = openIifCell === `${key}|${col}`;
+  const cellAttrs = `data-cellkey="${key}|${col}" data-idx="${idx}" data-empidx="${empIdx}"`;
+  if (col === 'date') {
+    if (open) {
+      return `<td class="price-cell price-cell-editing iif-date" ${cellAttrs}>
+        <input class="iif-edit-date" type="date" value="${escapeHtml(iifIsoDate(e))}" />
+        ${iifCellActionsHtml()}</td>`;
+    }
+    return `<td class="price-cell iif-date" ${cellAttrs}>${escapeHtml(e.dateFormatted || '—')}</td>`;
+  }
+  if (col === 'employee') {
+    const cls = emp ? '' : ' iif-empty-emp';
+    const shown = emp || 'Nobody';
+    const issue = (first && e.issue) ? `<span class="iif-issue">⚠ ${escapeHtml(e.issue)}</span>` : '';
+    return `<td class="price-cell${open ? ' price-cell-editing' : ''}" ${cellAttrs}>
+      <span class="iif-pick-value${cls}">${escapeHtml(shown)}</span>${issue}</td>`;
+  }
+  if (col === 'customer') {
+    const name = e.customerMatched || '';
+    return `<td class="price-cell${open ? ' price-cell-editing' : ''}" ${cellAttrs}>
+      <span class="iif-pick-value">${escapeHtml(name || 'Choose…')}</span></td>`;
+  }
+  if (col === 'hours') {
+    if (open) {
+      return `<td class="price-cell price-cell-editing" ${cellAttrs}>
+        <input class="iif-edit-hours" type="text" inputmode="decimal" placeholder="3.5 or 3:30"
+               value="${escapeHtml(e.hoursFormatted || '')}" />
+        ${iifCellActionsHtml()}</td>`;
+    }
+    return `<td class="price-cell" ${cellAttrs}>${escapeHtml(e.hoursFormatted || '—')}</td>`;
+  }
+  // score — read-only, and only on the first row of a multi-employee entry
+  return `<td>${first ? `<span class="iif-score" style="color:${confidenceColor(e.confidence)};">${e.confidence}%</span>` : ''}</td>`;
+}
+
 function renderIIFEntries(entries) {
-  if (!iifTableBody) return;
+  if (!iifGrid) return;
   if (!entries.length) {
-    iifTableBody.innerHTML = '<tr><td colspan="6" style="padding:16px;color:var(--ink-soft);text-align:center;">No entries found.</td></tr>';
+    iifGrid.innerHTML = '<tbody><tr><td class="price-empty-state">No entries found.</td></tr></tbody>';
     return;
   }
+  const head = `<thead><tr>
+    <th class="iif-check" aria-label="Include"></th>
+    <th class="iif-date">Date</th>
+    <th>Employee</th>
+    <th>Customer</th>
+    <th>Hours</th>
+    <th>Score</th>
+  </tr></thead>`;
 
-  // Expand multi-employee entries into one row each
-  const rows = [];
-  entries.forEach((e, idx) => {
-    const emps = e.employees.length ? e.employees : ['?'];
-    emps.forEach((emp, empIdx) => {
-      rows.push({ e, idx, emp, first: empIdx === 0 });
-    });
-  });
-
-  iifTableBody.innerHTML = rows.map(({ e, idx, emp, first }) => {
-    const scoreColor = confidenceColor(e.confidence);
-    const rowClass = e.needsReview ? 'iif-needs-review' : '';
-    const issueIcon = (first && e.issue) ? `<br><span style="font-size:10px;color:#d97706;">⚠ ${escapeHtml(e.issue)}</span>` : '';
-    const empColor = emp === '?' ? 'color:#dc2626' : '';
-    return `
-      <tr class="${rowClass} iif-main-row" title="${escapeHtml(e.raw)}" data-raw-idx="${idx}">
-        <td><input type="checkbox" class="iif-row-check" data-idx="${idx}" data-emp="${escapeHtml(emp)}" checked /></td>
-        <td style="white-space:nowrap;">${first ? (e.dateFormatted || '?') : ''}</td>
-        <td style="white-space:nowrap;${empColor}">${escapeHtml(emp)}${issueIcon}</td>
-        <td><input class="iif-cell-input iif-customer-input" data-idx="${idx}" value="${escapeHtml(e.customerMatched)}" placeholder="Customer" /></td>
-        <td><input class="iif-cell-input iif-hours-input" data-idx="${idx}" value="${e.hoursFormatted || ''}" placeholder="H:MM" /></td>
-        <td>${first ? `<span class="iif-score" style="color:${scoreColor};">${e.confidence}%</span>` : ''}</td>
-      </tr>
-      <tr class="iif-raw-row" data-raw-for="${idx}" hidden>
-        <td colspan="6"><span class="iif-raw-label">Note line:</span> ${escapeHtml(e.raw)}</td>
-      </tr>
-    `;
+  const body = iifGridRows().map(row => {
+    const { e, idx, emp, empIdx } = row;
+    const key = iifRowKey(idx, empIdx);
+    const excluded = !!(e._excludedEmps && e._excludedEmps[emp]);
+    // The note line this row was read from, shown ABOVE the row while you edit
+    // it — you're correcting what the parser saw, so it has to be in view.
+    const srcRow = (openIifCell && openIifCell.startsWith(`${key}|`))
+      ? `<tr class="iif-src-row"><td class="iif-src" colspan="6"><span class="iif-src-label">Note line:</span> ${escapeHtml(e.raw || '(blank)')}</td></tr>`
+      : '';
+    return srcRow + `<tr class="${e.needsReview ? 'iif-needs-review' : ''}">
+      <td class="iif-check"><input type="checkbox" class="iif-row-check" data-idx="${idx}" data-emp="${escapeHtml(emp)}" ${excluded ? '' : 'checked'} /></td>
+      ${iifCellHtml(row, 'date')}
+      ${iifCellHtml(row, 'employee')}
+      ${iifCellHtml(row, 'customer')}
+      ${iifCellHtml(row, 'hours')}
+      ${iifCellHtml(row, 'score')}
+    </tr>`;
   }).join('');
 
-  // Tap a row (not its checkbox/inputs) to show/hide the raw note line — hover
-  // tooltips don't exist on touch screens.
-  iifTableBody.querySelectorAll('.iif-main-row').forEach(row => {
-    row.addEventListener('click', (ev) => {
-      if (ev.target.closest('input, select, button, a')) return;
-      const rawRow = row.nextElementSibling;
-      if (rawRow && rawRow.classList.contains('iif-raw-row')) rawRow.hidden = !rawRow.hidden;
-    });
-  });
+  iifGrid.innerHTML = head + `<tbody>${body}</tbody>`;
+  applyIifZoomVar();
+  wireIifGrid();
+}
 
-  // Row checkboxes: unchecked rows are excluded from the download.
-  // Exclusion is tracked per entry+employee, since multi-employee entries expand to one row each.
-  iifTableBody.querySelectorAll('.iif-row-check').forEach(cb => {
+function closeIifCell(rerender = true) {
+  iifOutsideTap.detach();
+  openIifCell = null;
+  if (rerender) renderIIFEntries(iifParsedEntries);
+}
+
+function openIifCellAt(cellKey) {
+  openIifCell = cellKey;
+  renderIIFEntries(iifParsedEntries);
+  const col = cellKey.split('|')[1];
+  if (col === 'employee' || col === 'customer') {
+    openIifPicker(col, cellKey);
+    return;
+  }
+  focusOpenIifCell();
+  setTimeout(() => iifOutsideTap.attach(), 0);
+}
+
+// Bring the open cell clear of the sticky header and the keyboard, then focus
+// it — same idea as focusOpenPriceCell.
+function focusOpenIifCell() {
+  const cell = iifGrid ? iifGrid.querySelector('.price-cell-editing') : null;
+  if (!cell || !iifScroll) return;
+  requestAnimationFrame(() => {
+    const c = cell.getBoundingClientRect();
+    const s = iifScroll.getBoundingClientRect();
+    iifScroll.scrollTop += (c.top - s.top) - 34;
+    if (c.left < s.left) iifScroll.scrollLeft += (c.left - s.left) - 8;
+    else if (c.right > s.right) iifScroll.scrollLeft += (c.right - s.right) + 8;
+    const input = cell.querySelector('input');
+    if (!input) return;
+    input.focus();
+    // select() is only meaningful on a text field — calling it on type="date"
+    // throws in some browsers.
+    if (input.type === 'text') input.select();
+  });
+}
+
+const iifOutsideTap = makeOutsideTapWatcher({
+  isOpen: () => !!openIifCell,
+  // The include tick counts as "inside": tapping it with a cell open should
+  // toggle the row, not close the editor and swallow the tap.
+  editingSelector: '.price-cell-editing, .iif-picker, .iif-check',
+  cellSelector: '.iif-grid .price-cell',
+  // While the picker is up it owns the screen; taps in it aren't "outside".
+  guard: () => !!(iifPicker && !iifPicker.hidden),
+  onCell: (other) => {
+    if (!other.dataset.cellkey) return false;
+    openIifCellAt(other.dataset.cellkey);
+    return true;
+  },
+  onOutside: () => closeIifCell(),
+});
+
+// ---- commits (in memory only — nothing reaches Firestore from this grid) ----
+function commitIifDate(idx, iso) {
+  const e = iifParsedEntries[idx];
+  if (!e || !iso) return;
+  const d = parseYmd(iso);
+  if (Number.isNaN(d.getTime())) return;
+  e.date = d;
+  e.dateFormatted = iifFormatDate(d);
+}
+function commitIifHours(idx, text) {
+  const e = iifParsedEntries[idx];
+  if (!e) return;
+  const hours = parseHoursInput(text);
+  if (hours === null) return;
+  e.hours = Math.round(hours * 100) / 100;
+  e.hoursFormatted = formatDuration(e.hours);
+}
+function commitIifEmployee(idx, empIdx, name) {
+  const e = iifParsedEntries[idx];
+  if (!e || !name) return;
+  if (!e.employees.length) e.employees = [name];
+  else {
+    const old = e.employees[empIdx];
+    e.employees[empIdx] = name;
+    // Exclusions are keyed by NAME, so carry the tick across a rename.
+    if (e._excludedEmps && old in e._excludedEmps) {
+      e._excludedEmps[name] = e._excludedEmps[old];
+      delete e._excludedEmps[old];
+    }
+  }
+}
+function commitIifCustomer(idx, name) {
+  const e = iifParsedEntries[idx];
+  if (!e) return;
+  e.customer = name;
+  e.customerMatched = name;
+}
+
+function wireIifGrid() {
+  if (!iifGrid) return;
+  // Include/exclude, tracked per entry+employee (one row each).
+  iifGrid.querySelectorAll('.iif-row-check').forEach(cb => {
     cb.addEventListener('change', () => {
       const entry = iifParsedEntries[parseInt(cb.dataset.idx, 10)];
       if (!entry._excludedEmps) entry._excludedEmps = {};
       entry._excludedEmps[cb.dataset.emp] = !cb.checked;
     });
   });
-
-  iifTableBody.querySelectorAll('.iif-customer-input').forEach(input => {
-    input.addEventListener('input', () => {
-      iifParsedEntries[parseInt(input.dataset.idx, 10)].customerMatched = input.value;
+  iifGrid.querySelectorAll('.price-cell').forEach(cell => {
+    cell.addEventListener('click', () => {
+      const key = cell.dataset.cellkey;
+      // Already open: the editor inside owns the tap.
+      if (!key || openIifCell === key) return;
+      openIifCellAt(key);
     });
   });
-  iifTableBody.querySelectorAll('.iif-hours-input').forEach(input => {
-    input.addEventListener('input', () => {
-      const idx = parseInt(input.dataset.idx, 10);
-      const val = input.value.trim();
-      const m = val.match(/^(\d+):(\d{2})$/);
-      if (m) {
-        iifParsedEntries[idx].hours = parseInt(m[1]) + parseInt(m[2]) / 60;
-        iifParsedEntries[idx].hoursFormatted = val;
-      }
+  const editing = iifGrid.querySelector('.price-cell-editing');
+  if (!editing) return;
+  const idx = parseInt(editing.dataset.idx, 10);
+  const col = (editing.dataset.cellkey || '').split('|')[1];
+  const save = () => {
+    if (col === 'date') commitIifDate(idx, editing.querySelector('.iif-edit-date').value);
+    else if (col === 'hours') commitIifHours(idx, editing.querySelector('.iif-edit-hours').value);
+    closeIifCell();
+  };
+  const saveBtn = editing.querySelector('.iif-save');
+  const cancelBtn = editing.querySelector('.iif-cancel');
+  if (saveBtn) saveBtn.addEventListener('click', save);
+  if (cancelBtn) cancelBtn.addEventListener('click', () => closeIifCell());
+  editing.querySelectorAll('input').forEach(input => {
+    input.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter') { ev.preventDefault(); save(); }
+      else if (ev.key === 'Escape') { ev.preventDefault(); closeIifCell(); }
     });
   });
 }
+
+// ---- employee / customer picker ----
+const iifPicker = document.getElementById('iif-picker');
+const iifPickerTitle = document.getElementById('iif-picker-title');
+const iifPickerSearch = document.getElementById('iif-picker-search');
+const iifPickerList = document.getElementById('iif-picker-list');
+let iifPickerKind = null;     // 'employee' | 'customer'
+let iifPickerCellKey = null;
+
+function renderIifPickerList(filter) {
+  if (!iifPickerList) return;
+  const words = (filter || '').trim().toLowerCase().split(/\s+/).filter(Boolean);
+  let html = '';
+  if (iifPickerKind === 'employee') {
+    const names = getEmployeeNames().filter(n => !words.length || words.every(w => n.toLowerCase().includes(w)));
+    html = names.length
+      ? names.map(n => `<li class="member-item iif-pick-item" data-value="${escapeHtml(n)}">
+          <span class="cal-chip" style="background:${employeeColour(n)}">${escapeHtml(n)}</span></li>`).join('')
+      : '<li class="member-item">No matching employees. Add them in Settings → Time Logger.</li>';
+  } else {
+    const customers = Storage.listCustomers().filter(c => {
+      if (!words.length) return true;
+      const def = Storage.getDefaultNoteForCustomer(c.id);
+      return words.every(w => (def ? def.body : '').toLowerCase().includes(w));
+    }).slice(0, 40);
+    html = customers.map(c => {
+      const label = customerCrumbLabel(c.id);
+      const addr = addressCandidates(c.id)[0] || '';
+      return `<li class="member-item iif-pick-item" data-value="${escapeHtml(label)}">
+        <span class="member-email">${escapeHtml(label)}${addr ? `<em class="setting-check-hint">${escapeHtml(addr)}</em>` : ''}</span>
+      </li>`;
+    }).join('');
+    // The parser can name a customer who isn't on file yet, and QuickBooks may
+    // know them under a name this app doesn't — so free text stays possible.
+    const typed = (filter || '').trim();
+    if (typed) {
+      html = `<li class="member-item iif-pick-item" data-value="${escapeHtml(typed)}">
+        <span class="member-email">Use “${escapeHtml(typed)}”<em class="setting-check-hint">not a customer on file</em></span></li>` + html;
+    }
+    if (!html) html = '<li class="member-item">No customers yet.</li>';
+  }
+  iifPickerList.innerHTML = html;
+  iifPickerList.querySelectorAll('.iif-pick-item').forEach(li => {
+    li.addEventListener('click', () => {
+      const [rowKey] = (iifPickerCellKey || '').split('|');
+      const [idxStr, empIdxStr] = rowKey.split(':');
+      const idx = parseInt(idxStr, 10);
+      if (iifPickerKind === 'employee') commitIifEmployee(idx, parseInt(empIdxStr, 10), li.dataset.value);
+      else commitIifCustomer(idx, li.dataset.value);
+      closeIifPicker();
+      closeIifCell();
+    });
+  });
+}
+
+function openIifPicker(kind, cellKey) {
+  if (!iifPicker) return;
+  iifPickerKind = kind;
+  iifPickerCellKey = cellKey;
+  if (iifPickerTitle) iifPickerTitle.textContent = kind === 'employee' ? 'Which employee?' : 'Which customer?';
+  if (iifPickerSearch) {
+    iifPickerSearch.value = '';
+    iifPickerSearch.placeholder = kind === 'employee' ? 'Search employees…' : 'Search customers…';
+    iifPickerSearch.hidden = kind === 'employee' && getEmployeeNames().length <= 8;
+  }
+  renderIifPickerList('');
+  iifPicker.hidden = false;
+}
+function closeIifPicker() {
+  if (iifPicker) iifPicker.hidden = true;
+  iifPickerKind = null;
+  iifPickerCellKey = null;
+}
+if (iifPickerSearch) iifPickerSearch.addEventListener('input', () => renderIifPickerList(iifPickerSearch.value));
+const iifPickerClose = document.getElementById('iif-picker-close');
+if (iifPickerClose) iifPickerClose.addEventListener('click', () => { closeIifPicker(); closeIifCell(); });
+if (iifPicker) iifPicker.addEventListener('click', (e) => {
+  if (e.target === iifPicker) { closeIifPicker(); closeIifCell(); }
+});
+const iifZoomIn = document.getElementById('iif-zoom-in');
+const iifZoomOut = document.getElementById('iif-zoom-out');
+if (iifZoomIn) iifZoomIn.addEventListener('click', () => nudgeIifZoom(0.1));
+if (iifZoomOut) iifZoomOut.addEventListener('click', () => nudgeIifZoom(-0.1));
 
 let iifNoteBody = null;      // cached while the modal is open
 let iifCustomerNames = null; // cached while the modal is open
@@ -6053,7 +6350,8 @@ function iifRangeFromInputs() {
 // Parse the hours note (only the selected date range) and render the table.
 function runIIFParse() {
   iifStatus.innerHTML = '<span class="nav-spinner" style="width:16px;height:16px;border-width:2px;vertical-align:middle;"></span> Parsing your hours note…';
-  if (iifTableBody) iifTableBody.innerHTML = '';
+  closeIifCell(false);                       // a re-parse invalidates row indexes
+  if (iifGrid) iifGrid.innerHTML = '';
   if (iifDownloadBtn) iifDownloadBtn.hidden = true;
   if (iifReviewNote) iifReviewNote.textContent = '';
 
@@ -6075,7 +6373,8 @@ function openIIFModal() {
   const note = findHoursNote();
   if (!note) {
     iifStatus.textContent = 'No note titled "hours" found. Create a general note with the title "hours" and add your work notes there.';
-    if (iifTableBody) iifTableBody.innerHTML = '';
+    closeIifCell(false);
+    if (iifGrid) iifGrid.innerHTML = '';
     if (iifDownloadBtn) iifDownloadBtn.hidden = true;
     if (iifReviewNote) iifReviewNote.textContent = '';
     iifModal.hidden = false;
@@ -6087,13 +6386,22 @@ function openIIFModal() {
   iifCustomerNames = getCustomerNamesList();
 
   iifModal.hidden = false;
+  applyIifZoomVar();
   runIIFParse();
+}
+
+// Leaving the modal must drop the open cell and its document-level tap
+// listener, or the next open starts with a stale editor and a live watcher.
+function closeIIFModal() {
+  closeIifPicker();
+  closeIifCell(false);
+  if (iifModal) iifModal.hidden = true;
 }
 
 if (iifBtn) iifBtn.addEventListener('click', openIIFModal);
 
-if (iifModalClose) iifModalClose.addEventListener('click', () => { iifModal.hidden = true; });
-if (iifModal) iifModal.addEventListener('click', e => { if (e.target === iifModal) iifModal.hidden = true; });
+if (iifModalClose) iifModalClose.addEventListener('click', closeIIFModal);
+if (iifModal) iifModal.addEventListener('click', e => { if (e.target === iifModal) closeIIFModal(); });
 if (editorIifBtn) editorIifBtn.addEventListener('click', openIIFModal);
 
 if (iifDownloadBtn) iifDownloadBtn.addEventListener('click', () => {

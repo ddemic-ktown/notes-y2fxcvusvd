@@ -472,12 +472,12 @@
 
         <div data-role-iif>
           <h4 class="setting-sub-title">Export</h4>
-          <p class="muted setting-hint">Parses your "hours" note between these dates and generates a .iif file for QuickBooks Desktop. Leave empty to parse everything.</p>
+          <p class="muted setting-hint">Parses your "hours" note between these dates into an editable chart you can correct before exporting a .iif file for QuickBooks Desktop. Leave empty to parse everything.</p>
           <div class="iif-range-row">
             <label class="iif-range-label">From <input id="iif-from-date" type="date" class="iif-date-input" /></label>
             <label class="iif-range-label">To <input id="iif-to-date" type="date" class="iif-date-input" /></label>
           </div>
-          <button id="iif-btn" class="secondary setting-wide-btn">Generate IIF file</button>
+          <button id="iif-btn" class="secondary setting-wide-btn">Process/enter hours</button>
         </div>
       </div>
 
@@ -577,7 +577,7 @@
             <button id="assign-btn" class="editor-more-item" aria-label="Share with users" hidden>Share with users</button>
             <button id="assign-customer-btn" class="editor-more-item" aria-label="Assign to customer" hidden>Assign to customer</button>
             <button id="duplicate-note-btn" class="editor-more-item" aria-label="Duplicate note" hidden>Duplicate note</button>
-            <button id="editor-iif-btn" class="editor-more-item" aria-label="Generate IIF file" hidden>Generate IIF file</button>
+            <button id="editor-iif-btn" class="editor-more-item" aria-label="Process/enter hours" hidden>Process/enter hours</button>
             <button id="delete-btn" class="editor-more-item danger-item" aria-label="Delete note">Delete note</button>
           </div>
         </div>
@@ -646,33 +646,44 @@
     </div>
   </div>
 
-  <!-- IIF Generator Modal -->
+  <!-- Process/enter hours — the parsed hours note as an editable grid.
+       It deliberately wears the PRICE TABLE's classes (price-scroll,
+       price-table, price-cell, price-cell-editing) so the two charts look and
+       behave identically: sticky headers, one cell open at a time, the editor
+       stacked inside the cell. Only what's genuinely different gets its own
+       class — see .iif-* in styles.css. -->
   <div id="iif-modal" class="modal-overlay" hidden>
     <div class="modal-panel iif-modal-panel">
       <div class="modal-header">
-        <h2 class="modal-title">Generate IIF File</h2>
+        <h2 class="modal-title">Process/enter hours</h2>
+        <div class="price-zoom" role="group" aria-label="Zoom">
+          <button id="iif-zoom-out" class="icon-btn" type="button" aria-label="Zoom out">−</button>
+          <button id="iif-zoom-in" class="icon-btn" type="button" aria-label="Zoom in">+</button>
+        </div>
         <button id="iif-modal-close" class="icon-btn" aria-label="Close">✕</button>
       </div>
       <div id="iif-status" class="iif-status"></div>
-      <div id="iif-entries" class="iif-table-wrap">
-        <table class="iif-table">
-          <thead>
-            <tr>
-              <th></th>
-              <th>Date</th>
-              <th>Employees</th>
-              <th>Customer</th>
-              <th>Hours</th>
-              <th>Score</th>
-            </tr>
-          </thead>
-          <tbody id="iif-table-body"></tbody>
-        </table>
+      <div id="iif-scroll" class="price-scroll iif-scroll">
+        <table id="iif-grid" class="price-table iif-grid"></table>
       </div>
       <div class="iif-footer">
         <span id="iif-review-note" class="iif-review-note"></span>
         <button id="iif-download-btn" class="primary iif-download-btn" hidden>Download .iif</button>
       </div>
+    </div>
+  </div>
+
+  <!-- Employee / customer picker for the hours grid. A second overlay above
+       the modal rather than an inline dropdown: a dropdown inside a scrolling
+       table gets clipped by the scroll container on a phone. -->
+  <div id="iif-picker" class="modal-overlay iif-picker" hidden>
+    <div class="modal-panel iif-picker-panel">
+      <div class="modal-header">
+        <h2 class="modal-title" id="iif-picker-title">Choose</h2>
+        <button id="iif-picker-close" class="icon-btn" type="button" aria-label="Close">✕</button>
+      </div>
+      <input id="iif-picker-search" class="signin-input" type="search" placeholder="Search…" autocomplete="off" />
+      <ul id="iif-picker-list" class="members-list iif-picker-list"></ul>
     </div>
   </div>
 
