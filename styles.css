@@ -37,6 +37,36 @@ body.dark-mode .note-card.keyword-card { background: #0f2a1e; border-color: #065
    (this bug hit the Shared pill, ⋯ menu items, and section controls). */
 [hidden] { display: none !important; }
 
+/* Base button styles. These were missing, so buttons outside the sign-in card
+   and the modals fell back to the browser's default — a stark white slab that
+   ignores dark mode entirely (the settings screen was the obvious victim).
+   Deliberately FIRST and low-specificity: every existing scoped rule
+   (.signin-card button.secondary, .modal-actions .secondary, #signout-btn,
+   .invite-form .primary) still wins, so nothing that already looked right
+   changes. */
+.secondary {
+  background: var(--surface);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 10px 14px;
+  font: inherit;
+  font-size: 15px;
+  cursor: pointer;
+}
+.secondary:hover { border-color: var(--accent); color: var(--accent); }
+.primary {
+  background: var(--accent);
+  color: var(--accent-ink);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  padding: 10px 14px;
+  font: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
 * { box-sizing: border-box; }
 html, body {
   margin: 0;
@@ -2089,11 +2119,39 @@ input[type="search"]::-webkit-search-cancel-button {
 /* Cancel a just-created note/customer: a red ✕ where the + normally sits.
    Moving it out of the header row leaves that row to the breadcrumb, which
    is what crowded it out before. */
-.fab-cancel {
-  background: var(--danger);
+/* Done on a just-created record: half the size of the blue +, in the same
+   corner. Small on purpose — it's a confirmation, not the primary action —
+   but padded out to a ~44px tap target. */
+.fab-done {
+  width: 30px;
+  height: 30px;
+  font-size: 16px;
+  background: #15803d;
   color: #fff;
-  font-size: 26px;
+  box-shadow: 0 3px 10px rgba(0,0,0,0.25);
+  /* keeps the visible circle 30px while the hit area stays thumb-sized */
+  border: 7px solid transparent;
+  background-clip: padding-box;
+  box-sizing: content-box;
 }
+
+/* Discard, in the editor header's top-right. Half-size round button rather
+   than the old wide "Cancel", which is what crowded this row before. */
+.round-btn {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: 0;
+  font-size: 15px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  padding: 0;
+}
+.round-btn-danger { background: var(--danger); color: #fff; }
 
 /* Long-press gestures must not start a text selection. The browser begins
    selecting (and on iOS shows the copy/paste callout) well before a 500ms

@@ -200,9 +200,7 @@
         <button class="icon-btn date-btn app-back-btn" aria-label="Back">‹ Back</button>
         <nav class="crumbs" id="crumbs-calendar" aria-label="Breadcrumb"></nav>
         <div class="cal-nav" role="group" aria-label="Change month">
-          <button id="cal-prev" class="icon-btn" aria-label="Previous month">∧</button>
           <button id="cal-today" class="icon-btn date-btn">Today</button>
-          <button id="cal-next" class="icon-btn" aria-label="Next month">∨</button>
         </div>
       </div>
     </header>
@@ -560,6 +558,7 @@
         <button class="icon-btn date-btn app-back-btn" aria-label="Back">‹ Back</button>
         <nav class="crumbs" id="crumbs-editor" aria-label="Breadcrumb"></nav>
         <span id="editor-shared-badge" class="shared-badge" title="Shared with assigned users" hidden>Shared</span>
+        <button id="editor-cancel-btn" class="round-btn round-btn-danger" type="button" aria-label="Discard and cancel" hidden>✕</button>
         <div class="editor-more-wrap">
           <button id="editor-more-btn" class="icon-btn date-btn editor-more-btn" aria-label="More options">⋯</button>
           <div id="editor-more-dropdown" class="editor-more-dropdown" hidden>
@@ -595,7 +594,7 @@
         <textarea id="editor-body" class="editor-body editor-body-input" placeholder="Start typing…" autocomplete="off" autocorrect="on" spellcheck="true"></textarea>
       </div>
     </main>
-    <button id="editor-cancel-btn" class="fab fab-cancel" type="button" aria-label="Discard and cancel" hidden>✕</button>
+    <button id="editor-done-btn" class="fab fab-done" type="button" aria-label="Done" hidden>✓</button>
   </section>
 
   <!-- First-run welcome (empty org, admin only) -->
@@ -681,6 +680,22 @@
   </div>
 
   <!-- Assign to Customer Modal -->
+  <!-- Shared from another app (Android share sheet) -->
+  <div id="share-modal" class="modal-overlay" hidden>
+    <div class="modal-panel">
+      <div class="modal-header">
+        <h2 class="modal-title">Save to which customer?</h2>
+        <button id="share-modal-close" class="icon-btn" aria-label="Close">✕</button>
+      </div>
+      <p id="share-summary" class="modal-hint"></p>
+      <div class="search-wrap" style="margin-bottom:10px;">
+        <input id="share-customer-search" class="search-input" type="search" placeholder="Search customers…" autocomplete="off" />
+        <button class="search-clear" type="button" aria-label="Clear search" hidden>✕</button>
+      </div>
+      <ul id="share-customer-list" class="members-list"></ul>
+    </div>
+  </div>
+
   <div id="assign-customer-modal" class="modal-overlay" hidden>
     <div class="modal-panel">
       <div class="modal-header">

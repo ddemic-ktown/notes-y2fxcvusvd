@@ -13,16 +13,16 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 10, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.08.01-0155', 'Android: share photos, files or links into JobPilot and pick a customer'],
+  ['v2026.08.01-0147', 'Settings buttons follow dark mode instead of staying bright white'],
+  ['v2026.08.01-0145', 'Calendar toolbar arrows removed; the mouse wheel changes months on desktop'],
+  ['v2026.08.01-0141', 'Fixes + buttons drifting up the screen or disappearing when no keyboard was open'],
+  ['v2026.08.01-0138', 'New note/customer gets a green ✓ Done; discard ✕ moves to the top right'],
   ['v2026.07.31-2133', 'Checks GitHub for a newer version on the home screen and when the app resumes'],
   ['v2026.07.31-2122', 'Price table: dragging a column no longer scrolls the table instead of moving it'],
   ['v2026.07.31-2111', 'New note or customer opens with the cursor in the title and the keyboard up'],
   ['v2026.07.31-2109', 'Customer search no longer jumps to the top of the job sheet — it moves only as far as it needs to'],
   ['v2026.07.31-2104', 'Price table: holding a row, column or cell no longer starts selecting text'],
-  ['v2026.07.31-2101', 'Every + button now stays above the on-screen keyboard'],
-  ['v2026.07.31-2053', 'New note/customer keeps its breadcrumb; Cancel is a red ✕ in the corner'],
-  ['v2026.07.31-2049', 'Customer search in the job sheet now shows five matches instead of two'],
-  ['v2026.07.31-2046', 'Calendar fades with a small nudge when you change month or day'],
-  ['v2026.07.31-2043', 'Calendar day view: swipe left or right to change days, with tappable cues either side'],
 ];
 const APP_VERSION = CHANGELOG[0][0];
 
@@ -875,11 +875,7 @@ function wireDayInteractions(canEdit) {
   });
 }
 
-const calPrev = document.getElementById('cal-prev');
-const calNext = document.getElementById('cal-next');
 const calToday = document.getElementById('cal-today');
-if (calPrev) calPrev.addEventListener('click', () => calShiftMonth(-1));
-if (calNext) calNext.addEventListener('click', () => calShiftMonth(1));
 if (calToday) calToday.addEventListener('click', () => { calCursor = new Date(); renderCalendar(); });
 // Swipe UP for the next month, DOWN for the previous — the grid moves the way
 // your finger does, as if scrolling forward through a continuous calendar.
@@ -902,6 +898,28 @@ function calShiftMonth(delta) {
   // renderCalendar rebuilds .cal-cells, so grab it after the render
   calSlide(calGrid && calGrid.querySelector('.cal-cells'), delta > 0 ? 'up' : 'down');
 }
+// Desktop: the wheel changes months once the grid has nothing left to scroll,
+// which is the same feel as the swipe. The toolbar arrows are gone — the ∧/∨
+// cues above and below the grid remain clickable for anyone using a mouse.
+if (calGrid) {
+  let lastWheel = 0;
+  calGrid.addEventListener('wheel', (e) => {
+    if (Math.abs(e.deltaY) < Math.abs(e.deltaX)) return;   // horizontal scroll
+    const cells = calGrid.querySelector('.cal-cells');
+    if (cells) {
+      // Let the grid scroll itself first; only shift at the edges.
+      const atTop = cells.scrollTop <= 0;
+      const atBottom = cells.scrollTop + cells.clientHeight >= cells.scrollHeight - 1;
+      if (e.deltaY < 0 && !atTop) return;
+      if (e.deltaY > 0 && !atBottom) return;
+    }
+    // One flick of a trackpad fires many events — don't jump three months.
+    if (Date.now() - lastWheel < 300) return;
+    lastWheel = Date.now();
+    calShiftMonth(e.deltaY > 0 ? 1 : -1);
+  }, { passive: true });
+}
+
 if (calGrid) {
   let sx = 0, sy = 0, tracking = false;
   calGrid.addEventListener('touchstart', (e) => {
@@ -1837,6 +1855,18 @@ if (priceShareModal) priceShareModal.addEventListener('click', (e) => { if (e.ta
 // iOS changes the visible height as the address bar shows/hides, and 100dvh
 // doesn't always keep up — the editor could end up taller than the screen on
 // first load, letting its toolbar scroll out of view. Track the real height.
+function editableFocused() {
+  const el = document.activeElement;
+  if (!el) return false;
+  const tag = el.tagName;
+  return tag === 'INPUT' || tag === 'TEXTAREA' || el.isContentEditable === true;
+}
+function keyboardInset(vv) {
+  if (!vv || !editableFocused()) return 0;
+  const gap = window.innerHeight - (vv.height + vv.offsetTop);
+  if (!(gap > 120)) return 0;                       // browser chrome, not a keyboard
+  return Math.min(gap, window.innerHeight * 0.6);   // never more than 60% of the screen
+}
 function updateAppVh() {
   // visualViewport shrinks when the on-screen keyboard appears; innerHeight
   // does not. Modals sized in vh therefore ran under the keyboard, hiding
@@ -1844,17 +1874,24 @@ function updateAppVh() {
   const vv = window.visualViewport;
   const h = (vv && vv.height) || window.innerHeight;
   document.documentElement.style.setProperty('--app-vh', h + 'px');
-  // How much of the layout viewport the keyboard covers. `position: fixed`
-  // anchors to the LAYOUT viewport, so a bottom-anchored button sits behind
-  // the keyboard without this offset — which is exactly when the editor's
-  // Cancel ✕ needs to be reachable.
-  const inset = vv ? Math.max(0, window.innerHeight - (vv.height + vv.offsetTop)) : 0;
-  document.documentElement.style.setProperty('--kb-inset', inset + 'px');
+  // How much of the layout viewport the KEYBOARD covers. `position: fixed`
+  // anchors to the layout viewport, so a bottom-anchored button would sit
+  // behind the keyboard without this offset.
+  //
+  // The raw gap is NOT trustworthy on its own: browser chrome (the URL bar)
+  // produces one too, and treating that as a keyboard pushed every FAB up the
+  // screen — mid-screen on one list, off the top on another. So require a
+  // focused text field, ignore anything small enough to be chrome, and cap it
+  // so a bad reading can never launch a control off-screen.
+  document.documentElement.style.setProperty('--kb-inset', keyboardInset(vv) + 'px');
 }
 updateAppVh();
 window.addEventListener('resize', updateAppVh);
 window.addEventListener('orientationchange', updateAppVh);
 if (window.visualViewport) window.visualViewport.addEventListener('resize', updateAppVh);
+// The keyboard announces itself through focus, not only through resize.
+window.addEventListener('focusin', updateAppVh);
+window.addEventListener('focusout', () => setTimeout(updateAppVh, 50));
 
 // ---------- price table: pinch zoom ----------
 // Two-finger pinch adjusts the same zoom the −/+ buttons use. One finger is
@@ -4245,6 +4282,8 @@ function updateCancelBtn() {
   if (!editorCancelBtn) return;
   const show = !!pendingNewRecord && currentType === 'note' && currentId === pendingNewRecord.noteId;
   editorCancelBtn.hidden = !show;
+  const doneBtn = document.getElementById('editor-done-btn');
+  if (doneBtn) doneBtn.hidden = !show;
   // Cancel already discards the record — showing 🗑 next to it is redundant.
   // (showEditor sets delete per role/note type; this only overrides while a
   // brand-new record is open.)
@@ -4255,6 +4294,18 @@ function updateCancelBtn() {
   // skipped for notes — the trail has to stay short.
   if (show) renderCrumbs('crumbs-editor', newRecordCrumbs(pendingNewRecord));
 }
+// Done: keep what's here and leave. history.back() is the same path the Back
+// button and Android's system back use, so save flushing and return-screen
+// logic are shared. commitAndCleanupEditor only discards a record that is still
+// completely empty, so anything typed survives.
+const editorDoneBtn = document.getElementById('editor-done-btn');
+if (editorDoneBtn) editorDoneBtn.addEventListener('click', () => {
+  // Drop the keyboard first: leaving it up over the destination screen looks
+  // broken, and blur() also commits any in-flight IME composition.
+  if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+  if (appHistoryDepth > 0) history.back();
+});
+
 if (editorCancelBtn) editorCancelBtn.addEventListener('click', () => {
   const rec = pendingNewRecord;
   if (!rec) return;
@@ -4331,6 +4382,104 @@ if (assignModalClose) assignModalClose.addEventListener('click', () => { assignM
 if (assignModal) assignModal.addEventListener('click', (e) => { if (e.target === assignModal) assignModal.hidden = true; });
 
 // ---------- assign to customer ----------
+// ---------- shared from another app ----------
+// Android only: the share sheet POSTs to ./share-target, the service worker
+// parks the payload in Cache Storage and redirects here with ?share=1.
+// iOS never gets here — WebKit has not implemented Web Share Target.
+const SHARE_CACHE = 'jobpilot-share';
+const shareModal = document.getElementById('share-modal');
+const shareCustomerSearch = document.getElementById('share-customer-search');
+const shareCustomerList = document.getElementById('share-customer-list');
+let sharePayload = null;      // { files: [File], title, text, url }
+
+async function readSharePayload() {
+  if (!('caches' in window)) return null;
+  const cache = await caches.open(SHARE_CACHE);
+  const metaResp = await cache.match(new Request(new URL('__share/meta', location.href)));
+  if (!metaResp) return null;
+  const meta = await metaResp.json().catch(() => null);
+  const files = [];
+  for (let i = 0; i < ((meta && meta.count) || 0); i++) {
+    const r = await cache.match(new Request(new URL('__share/file-' + i, location.href)));
+    if (!r) continue;
+    const blob = await r.blob();
+    const name = decodeURIComponent(r.headers.get('x-filename') || 'file');
+    files.push(new File([blob], name, { type: blob.type }));
+  }
+  return { files, title: (meta && meta.title) || '', text: (meta && meta.text) || '', url: (meta && meta.url) || '' };
+}
+async function clearSharePayload() {
+  if (!('caches' in window)) return;
+  await caches.delete(SHARE_CACHE).catch(() => {});
+}
+function shareSummaryText(p) {
+  const bits = [];
+  if (p.files.length) bits.push(p.files.length === 1 ? p.files[0].name : `${p.files.length} files`);
+  const txt = [p.text, p.url].filter(Boolean).join(' ');
+  if (txt) bits.push(txt.length > 60 ? txt.slice(0, 60) + '…' : txt);
+  return bits.join(' · ') || 'Nothing to import.';
+}
+function renderShareCustomers(filter) {
+  if (!shareCustomerList) return;
+  const words = (filter || '').trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const customers = Storage.listCustomers().filter(c => {
+    if (!words.length) return true;
+    const def = Storage.getDefaultNoteForCustomer(c.id);
+    return words.every(w => (def ? def.body : '').toLowerCase().includes(w));
+  }).slice(0, 40);
+  shareCustomerList.innerHTML = customers.length
+    ? customers.map(c => `<li class="member-item share-customer-item" data-id="${c.id}">
+        <span class="member-email">${escapeHtml(customerCrumbLabel(c.id))}</span></li>`).join('')
+    : '<li class="member-item">No customers found.</li>';
+  shareCustomerList.querySelectorAll('.share-customer-item').forEach(li => {
+    li.addEventListener('click', () => acceptShare(li.dataset.id));
+  });
+}
+async function acceptShare(customerId) {
+  const p = sharePayload;
+  sharePayload = null;
+  if (shareModal) shareModal.hidden = true;
+  await clearSharePayload();
+  if (!p || !customerId) return;
+  // Files are LOCAL to this device by design (see files.js) — they don't sync.
+  for (const f of p.files) {
+    try { await LocalFiles.add(customerId, f); } catch (e) { console.warn('share file', e); }
+  }
+  // Text and links go into the customer's default note, which DOES sync.
+  const txt = [p.title, p.text, p.url].filter(Boolean).join('\n').trim();
+  if (txt) {
+    const def = Storage.getDefaultNoteForCustomer(customerId);
+    if (def) {
+      const stamp = new Date().toLocaleDateString([], { month: 'short', day: 'numeric' });
+      Storage.updateNote(def.id, `${def.body || ''}\n\nShared ${stamp}\n${txt}`.trim());
+    }
+  }
+  activeCustomerId = customerId;
+  showCustomerNotes(customerId);
+}
+async function handleIncomingShare() {
+  if (!/[?&]share=1\b/.test(location.search)) return;
+  // Clean the URL first: a reload must not re-import the same payload.
+  history.replaceState(history.state, '', location.pathname);
+  const p = await readSharePayload().catch(() => null);
+  if (!p || (!p.files.length && !p.text && !p.url && !p.title)) { await clearSharePayload(); return; }
+  if (!isAdminRole() && !Storage.listCustomers().length) { await clearSharePayload(); return; }
+  sharePayload = p;
+  const summary = document.getElementById('share-summary');
+  if (summary) summary.textContent = shareSummaryText(p);
+  if (shareCustomerSearch) shareCustomerSearch.value = '';
+  renderShareCustomers('');
+  if (shareModal) shareModal.hidden = false;
+}
+if (shareCustomerSearch) {
+  shareCustomerSearch.addEventListener('input', () => renderShareCustomers(shareCustomerSearch.value));
+}
+const shareModalClose = document.getElementById('share-modal-close');
+// Dismissing drops the payload — leaving it parked would re-open this next launch.
+const dismissShare = async () => { sharePayload = null; if (shareModal) shareModal.hidden = true; await clearSharePayload(); };
+if (shareModalClose) shareModalClose.addEventListener('click', dismissShare);
+if (shareModal) shareModal.addEventListener('click', (e) => { if (e.target === shareModal) dismissShare(); });
+
 const assignCustomerModal = document.getElementById('assign-customer-modal');
 const assignCustomerModalClose = document.getElementById('assign-customer-modal-close');
 const assignCustomerSearch = document.getElementById('assign-customer-search');
@@ -5355,6 +5504,9 @@ onAuthStateChanged(auth, async (user) => {
     showEditorToast(`Your access level changed to ${ROLE_LABELS[newRole] || newRole}`);
   });
   showNotes();
+  // Only after sign-in and the first snapshot: the picker needs the customer
+  // list, and an unauthenticated user has nowhere to put a shared file.
+  handleIncomingShare();
   // One-time catch-up: stamp customer names onto already-shared notes
   Storage.backfillAssignedCustomerNames();
   // Drop stale assignments left behind by removed members (field edit only)

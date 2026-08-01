@@ -1,6 +1,6 @@
 // Service worker — offline cache for JobPilot
 // Version format: na-YYYY.MM.DD-HHMM (Pacific time) — must match APP_VERSION in app.js.
-const VERSION = 'na-2026.07.31-2133';
+const VERSION = 'na-2026.08.01-0155';
 const CORE = [
   './',
   './index.html',
@@ -27,13 +27,51 @@ self.addEventListener('install', (event) => {
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((names) =>
-      Promise.all(names.filter((n) => n !== VERSION).map((n) => caches.delete(n)))
+      // SHARE_CACHE is data in transit, not an asset cache — never sweep it.
+      Promise.all(names.filter((n) => n !== VERSION && n !== 'jobpilot-share').map((n) => caches.delete(n)))
     ).then(() => self.clients.claim())
   );
 });
 
+// Where a share is parked between the POST and the page that consumes it.
+const SHARE_CACHE = 'jobpilot-share';
+const shareUrl = (name) => new URL('__share/' + name, self.registration.scope).toString();
+
+// Android's share sheet POSTs here (see share_target in manifest.json). The
+// page can't read that POST body, so stash it in Cache Storage and redirect to
+// the app, which picks it up on load. iOS never calls this — WebKit has not
+// implemented Web Share Target.
+async function handleShare(request) {
+  try {
+    const form = await request.formData();
+    const cache = await caches.open(SHARE_CACHE);
+    const files = form.getAll('files').filter(f => f && typeof f.size === 'number');
+    for (let i = 0; i < files.length; i++) {
+      await cache.put(new Request(shareUrl('file-' + i)), new Response(files[i], {
+        headers: {
+          'content-type': files[i].type || 'application/octet-stream',
+          // encoded: header values can't carry arbitrary unicode
+          'x-filename': encodeURIComponent(files[i].name || 'file'),
+        },
+      }));
+    }
+    await cache.put(new Request(shareUrl('meta')), new Response(JSON.stringify({
+      title: form.get('title') || '',
+      text: form.get('text') || '',
+      url: form.get('url') || '',
+      count: files.length,
+    }), { headers: { 'content-type': 'application/json' } }));
+  } catch (e) { /* fall through — the app shows "nothing to import" */ }
+  // 303 so the browser follows with a GET; this is what closes the share sheet.
+  return Response.redirect('./?share=1', 303);
+}
+
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
+  if (event.request.method === 'POST' && url.pathname.endsWith('/share-target')) {
+    event.respondWith(handleShare(event.request));
+    return;
+  }
   if (event.request.method !== 'GET') return;
 
   // Same-origin: cache-first with network fallback
