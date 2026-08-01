@@ -31,6 +31,9 @@ let _uid = null;
 let _orgId = null;
 let _role = null; // 'admin' | 'employee' | 'customer'
 let _unsubs = [];
+let _jobsUnsub = null;              // tracked apart so it can be replaced alone
+let _hotFrom = '', _hotTo = '';     // the live window, YYYY-MM-DD
+const _fetchedMonths = new Set();   // 'YYYY-MM' already pulled by getDocs
 let _ready = false;
 let _customersReady = false;
 let _notesError = null;
@@ -150,17 +153,15 @@ function attachListeners() {
   // scoped to their own uid to match the rules (same reasoning as notes —
   // Firestore rejects an unscoped listener when the rule depends on a
   // per-document field). Customers get no calendar at all.
-  if (_role === 'admin' || _role === 'bookkeeper') {
-    _unsubs.push(onSnapshot(jobsCol(), (snap) => {
-      _cache.jobs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      emit();
-    }, (err) => { console.warn('jobs listener', err); }));
-  } else if (_role === 'employee') {
-    _unsubs.push(onSnapshot(query(jobsCol(), where('employeeUids', 'array-contains', _uid)), (snap) => {
-      _cache.jobs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      emit();
-    }, (err) => { console.warn('jobs listener', err); }));
-  }
+  // Jobs are split in two: a LIVE listener over a small hot window, and
+  // one-off fetches for older months (see fetchJobMonth). Listening to the
+  // whole collection meant every job ever created was re-read at every
+  // sign-in, for a calendar that only ever shows one month.
+  //
+  // Widening the live query instead was considered and rejected: a different
+  // cutoff is a DIFFERENT query with its own sync state, so each widen
+  // re-reads the whole new range — scrolling back N months costs O(N²).
+  attachJobsListener();
   // Only admins may read invites (firestore.rules) — skip the listener for other roles.
   if (_role === 'admin') {
     _unsubs.push(onSnapshot(invitesCol(), (snap) => {
@@ -173,6 +174,48 @@ function attachListeners() {
 function detachListeners() {
   for (const u of _unsubs) { try { u(); } catch (e) {} }
   _unsubs = [];
+  if (_jobsUnsub) { try { _jobsUnsub(); } catch (e) {} _jobsUnsub = null; }
+  _fetchedMonths.clear();
+}
+
+// ---------- calendar jobs: hot window + archive ----------
+function ymdOf(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+// One month back through one month forward. The month grid draws trailing days
+// of the neighbouring months, so a single-month window would show gaps.
+function hotWindow(today = new Date()) {
+  const from = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+  const to = new Date(today.getFullYear(), today.getMonth() + 2, 0);
+  return { from: ymdOf(from), to: ymdOf(to) };
+}
+// The live listener owns its window; anything older was fetched once and must
+// survive the listener's next snapshot, so merge by id instead of replacing.
+function mergeHotJobs(docs) {
+  const fresh = new Map(docs.map(d => [d.id, d]));
+  const kept = _cache.jobs.filter(j => {
+    const inWindow = j.date >= _hotFrom && j.date <= _hotTo;
+    return !inWindow && !fresh.has(j.id);      // archived, and not superseded
+  });
+  _cache.jobs = kept.concat(docs);
+}
+function attachJobsListener() {
+  if (_jobsUnsub) { try { _jobsUnsub(); } catch (e) {} _jobsUnsub = null; }
+  if (_role === 'customer' || !_role) return;
+  const w = hotWindow();
+  _hotFrom = w.from; _hotTo = w.to;
+  // Employees keep an unbounded array-contains query: adding a date range on
+  // top would need a COMPOSITE INDEX (deploy step, and the calendar breaks
+  // until it exists), for little gain — they only match their own jobs.
+  const q = (_role === 'admin' || _role === 'bookkeeper')
+    ? query(jobsCol(), where('date', '>=', _hotFrom), where('date', '<=', _hotTo))
+    : query(jobsCol(), where('employeeUids', 'array-contains', _uid));
+  _jobsUnsub = onSnapshot(q, (snap) => {
+    const docs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    if (_role === 'admin' || _role === 'bookkeeper') mergeHotJobs(docs);
+    else _cache.jobs = docs;                   // employee query covers everything
+    emit();
+  }, (err) => { console.warn('jobs listener', err); });
 }
 
 // ---------- org bootstrap ----------
@@ -716,6 +759,33 @@ export const Storage = {
   // settings: rules and the employee's own query work on uids, because a name
   // string means nothing to the server. A name with no linked account still
   // schedules fine — that person just can't see their schedule in the app.
+  // Pull one older month, once. Old jobs essentially never change, so they get
+  // a one-off read rather than a live subscription — that's what keeps the
+  // cost linear as you scroll back. Trade-off: a history month edited on
+  // another device won't update live here until a reload.
+  async ensureJobMonth(dateStr) {
+    if (!_orgId || _role === 'customer') return;
+    if (_role !== 'admin' && _role !== 'bookkeeper') return;   // employee query is unbounded already
+    const key = String(dateStr || '').slice(0, 7);             // YYYY-MM
+    if (!/^\d{4}-\d{2}$/.test(key)) return;
+    if (_fetchedMonths.has(key)) return;
+    // Inside the live window? The listener already has it.
+    const [y, m] = key.split('-').map(Number);
+    const from = `${key}-01`;
+    const to = ymdOf(new Date(y, m, 0));
+    if (from >= _hotFrom && to <= _hotTo) return;
+    _fetchedMonths.add(key);                                   // claim it before awaiting
+    try {
+      const snap = await getDocs(query(jobsCol(), where('date', '>=', from), where('date', '<=', to)));
+      const docs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      const have = new Set(_cache.jobs.map(j => j.id));
+      const added = docs.filter(d => !have.has(d.id));
+      if (added.length) { _cache.jobs = _cache.jobs.concat(added); emit(); }
+    } catch (err) {
+      _fetchedMonths.delete(key);                              // let it retry
+      console.warn('ensureJobMonth', err);
+    }
+  },
   listJobs() {
     return _cache.jobs.filter(j => !j.deletedAt);
   },

@@ -13,6 +13,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 10, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.08.01-0346', 'Calendar loads only nearby months, fetching older ones as you scroll to them'],
   ['v2026.08.01-0321', 'Fewer database writes while typing; saves on Enter, paste and leaving the app'],
   ['v2026.08.01-0311', 'Your theme, time format and other preferences now follow you to every device'],
   ['v2026.08.01-0306', 'Signing in shows a loading card instead of leaving the sign-in form on screen'],
@@ -22,7 +23,6 @@ const CHANGELOG = [
   ['v2026.08.01-0145', 'Calendar toolbar arrows removed; the mouse wheel changes months on desktop'],
   ['v2026.08.01-0141', 'Fixes + buttons drifting up the screen or disappearing when no keyboard was open'],
   ['v2026.08.01-0138', 'New note/customer gets a green ✓ Done; discard ✕ moves to the top right'],
-  ['v2026.07.31-2133', 'Checks GitHub for a newer version on the home screen and when the app resumes'],
 ];
 const APP_VERSION = CHANGELOG[0][0];
 
@@ -576,6 +576,11 @@ function showCalendar() {
 }
 
 function renderCalendar() {
+  // Older months aren't in the live window — pull them once, on demand. The
+  // grid draws trailing days of both neighbours, so cover those too.
+  for (const off of [-1, 0, 1]) {
+    Storage.ensureJobMonth(ymd(new Date(calCursor.getFullYear(), calCursor.getMonth() + off, 1)));
+  }
   if (!calGrid) return;
   renderCrumbs('crumbs-calendar', [
     { label: 'Home', go: 'home' },
@@ -638,6 +643,7 @@ function renderCalendar() {
 }
 
 function showCalendarDay(dateStr) {
+  Storage.ensureJobMonth(dateStr);
   if (calSelectedDate !== dateStr) calCrewFocus = null;
   calSelectedDate = dateStr;
   hideAllScreens();
@@ -1012,6 +1018,7 @@ if (calGrid) {
 function calShiftDay(delta) {
   if (!calSelectedDate) return;
   calSelectedDate = shiftYmd(calSelectedDate, delta);
+  Storage.ensureJobMonth(calSelectedDate);       // swiping can cross a month
   calCrewFocus = null;                    // a new day's crews are different
   renderCalendarDay();
   const dir = delta > 0 ? 'left' : 'right';
