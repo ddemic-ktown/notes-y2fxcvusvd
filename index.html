@@ -219,7 +219,12 @@
         <nav class="crumbs" id="crumbs-calendar-day" aria-label="Breadcrumb"></nav>
       </div>
     </header>
-    <main id="cal-day-list" class="notes-list"></main>
+    <main class="cal-day-main">
+      <div id="cal-day-untimed" class="cal-untimed" hidden></div>
+      <div id="cal-day-scroll" class="cal-day-scroll">
+        <div id="cal-day-timeline" class="cal-timeline"></div>
+      </div>
+    </main>
     <button id="cal-day-fab" class="fab" aria-label="New job">+</button>
   </section>
 

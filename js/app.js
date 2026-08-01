@@ -13,6 +13,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 10, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.07.31-1832', 'Calendar day view is a timeline: drag jobs to a new time, drag the corner to resize'],
   ['v2026.07.31-1801', 'New Calendar: month grid, day view, jobs with employees, customer and address'],
   ['v2026.07.30-2050', 'Trash with 30-day undo, sync status, tap-to-call, backup, best-price mark, duplicate note'],
   ['v2026.07.30-2030', 'While adding, the header shows “New customer” so Cancel always fits'],
@@ -22,7 +23,6 @@ const CHANGELOG = [
   ['v2026.07.30-1807', 'Delete moved from the bin icon into the ⋯ menu'],
   ['v2026.07.30-1802', 'Two new tutorials: the price table, and installing the app on your phone'],
   ['v2026.07.30-0211', 'Cancel always fits on small screens; the bin is hidden while it shows'],
-  ['v2026.07.30-0200', 'Cancel button when adding a new customer or note discards it'],
 ];
 const APP_VERSION = CHANGELOG[0][0];
 
@@ -439,7 +439,6 @@ updateAppBackButtons();
 const calendarView = document.getElementById('calendar-view');
 const calendarDayView = document.getElementById('calendar-day-view');
 const calGrid = document.getElementById('cal-grid');
-const calDayList = document.getElementById('cal-day-list');
 // Stable per-name colours from a fixed palette — no setup, and a person keeps
 // their colour as employees come and go.
 const EMP_COLOURS = ['#2563eb', '#16a34a', '#d97706', '#9333ea', '#db2777', '#0891b2', '#65a30d', '#dc2626'];
@@ -543,8 +542,54 @@ function showCalendarDay(dateStr) {
   if (!handlingPopstate) history.pushState({ screen: 'calendar-day', date: dateStr }, '');
 }
 
+// ---------- day timeline ----------
+// A Google-style day view: hour rail on the left, jobs drawn as blocks
+// positioned by start time and sized by duration. Long-press a block to drag
+// it to a new time; drag the corner handle to change its length. Jobs with no
+// times can't be placed on a timeline, so they sit in a strip above it.
+const HOUR_PX = 56;          // one hour of timeline
+const SNAP_MIN = 15;         // dragging snaps to quarter hours
+const DEFAULT_LEN = 60;      // a job with a start but no end draws as an hour
+
+function minutesFromHHMM(t) {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(String(t || ''));
+  if (!m) return null;
+  const h = Number(m[1]), mi = Number(m[2]);
+  if (h > 23 || mi > 59) return null;
+  return h * 60 + mi;
+}
+function hhmmFromMinutes(min) {
+  const clamped = Math.max(0, Math.min(24 * 60 - 1, Math.round(min)));
+  return `${String(Math.floor(clamped / 60)).padStart(2, '0')}:${String(clamped % 60).padStart(2, '0')}`;
+}
+function snapMinutes(min) { return Math.round(min / SNAP_MIN) * SNAP_MIN; }
+function jobSpan(job) {
+  const start = minutesFromHHMM(job.start);
+  if (start == null) return null;                       // untimed
+  let end = minutesFromHHMM(job.end);
+  if (end == null || end <= start) end = start + DEFAULT_LEN;
+  return { start, end };
+}
+// Side-by-side lanes so overlapping jobs don't hide each other: walk them in
+// start order and reuse the first lane whose last job has finished.
+function layoutLanes(spans) {
+  const laneEnds = [];
+  const placed = spans.map(() => ({ lane: 0, lanes: 1 }));
+  spans.map((s, i) => ({ s, i })).sort((a, b) => a.s.start - b.s.start).forEach(({ s, i }) => {
+    let lane = laneEnds.findIndex(end => end <= s.start);
+    if (lane === -1) { lane = laneEnds.length; laneEnds.push(0); }
+    laneEnds[lane] = s.end;
+    placed[i].lane = lane;
+  });
+  const total = Math.max(1, laneEnds.length);
+  placed.forEach(p => { p.lanes = total; });
+  return placed;
+}
+
 function renderCalendarDay() {
-  if (!calDayList || !calSelectedDate) return;
+  const timeline = document.getElementById('cal-day-timeline');
+  const untimedWrap = document.getElementById('cal-day-untimed');
+  if (!timeline || !calSelectedDate) return;
   renderCrumbs('crumbs-calendar-day', [
     { label: 'Home', go: 'home' },
     { label: 'Calendar', go: 'calendar' },
@@ -553,30 +598,149 @@ function renderCalendarDay() {
   const canEdit = isAdminRole();
   const dayFab = document.getElementById('cal-day-fab');
   if (dayFab) dayFab.style.display = canEdit ? '' : 'none';
+
   const jobs = Storage.listJobsByDate(calSelectedDate);
-  if (!jobs.length) {
-    calDayList.innerHTML = `<p class="empty-state">Nothing scheduled${canEdit ? ' — tap + to add a job.' : '.'}</p>`;
-    return;
+  const timed = [], untimed = [];
+  jobs.forEach(j => { (jobSpan(j) ? timed : untimed).push(j); });
+
+  // Untimed jobs — nowhere to put them on a clock, so they get their own strip
+  if (untimed.length) {
+    untimedWrap.hidden = false;
+    untimedWrap.innerHTML = '<p class="cal-untimed-label">Any time</p>' + untimed.map(j => {
+      const who = j.customerName || (j.customerId ? customerCrumbLabel(j.customerId) : 'No customer');
+      const chips = (j.employeeNames || []).map(n =>
+        `<span class="cal-chip" style="background:${employeeColour(n)}">${escapeHtml(n)}</span>`).join('');
+      return `<div class="cal-untimed-job" data-job="${j.id}">${escapeHtml(who)} ${chips}</div>`;
+    }).join('');
+  } else {
+    untimedWrap.hidden = true;
+    untimedWrap.innerHTML = '';
   }
-  calDayList.innerHTML = jobs.map(j => {
-    const time = [j.start, j.end].filter(Boolean).join(' – ') || 'Any time';
-    const names = (j.employeeNames || []);
-    const chips = names.length
-      ? names.map(n => `<span class="cal-chip" style="background:${employeeColour(n)}">${escapeHtml(n)}</span>`).join('')
-      : '<span class="cal-chip cal-chip-none">No one assigned</span>';
+
+  const spans = timed.map(jobSpan);
+  const lanes = layoutLanes(spans);
+  const hours = Array.from({ length: 24 }, (_, h) => `
+    <div class="cal-hour" style="top:${h * HOUR_PX}px">
+      <span class="cal-hour-label">${String(h).padStart(2, '0')}:00</span>
+    </div>`).join('');
+  const blocks = timed.map((j, i) => {
+    const { start, end } = spans[i];
+    const { lane, lanes: n } = lanes[i];
+    const top = (start / 60) * HOUR_PX;
+    const height = Math.max(22, ((end - start) / 60) * HOUR_PX - 2);
+    const width = `calc((100% - 52px) / ${n} - 4px)`;
+    const left = `calc(52px + ((100% - 52px) / ${n}) * ${lane} + 2px)`;
     const who = j.customerName || (j.customerId ? customerCrumbLabel(j.customerId) : 'No customer');
-    return `<article class="note-card cal-day-card" data-job="${j.id}">
-      <div class="note-head"><p class="note-title">${escapeHtml(who)}</p><span class="note-date">${escapeHtml(time)}</span></div>
-      <div class="cal-day-chips">${chips}</div>
-      ${j.address ? `<p class="note-preview">${escapeHtml(j.address)}</p>` : ''}
-      ${j.description ? `<p class="note-preview">${escapeHtml(j.description)}</p>` : ''}
-    </article>`;
+    const chips = (j.employeeNames || []).slice(0, 3).map(nm =>
+      `<span class="cal-chip" style="background:${employeeColour(nm)}">${escapeHtml(nm.split(/[\s(]+/)[0])}</span>`).join('');
+    const timeTxt = `${hhmmFromMinutes(start)}–${hhmmFromMinutes(end)}`;
+    return `<div class="cal-block" data-job="${j.id}" style="top:${top}px;height:${height}px;left:${left};width:${width}">
+      <div class="cal-block-time">${escapeHtml(timeTxt)}</div>
+      <div class="cal-block-who">${escapeHtml(who)}</div>
+      <div class="cal-block-chips">${chips}</div>
+      ${canEdit ? '<div class="cal-resize" aria-hidden="true"></div>' : ''}
+    </div>`;
   }).join('');
-  if (canEdit) {
-    calDayList.querySelectorAll('.cal-day-card').forEach(card => {
-      card.addEventListener('click', () => openJobModal(card.dataset.job, calSelectedDate));
-    });
+  timeline.style.height = `${24 * HOUR_PX}px`;
+  timeline.innerHTML = hours + blocks;
+
+  if (!jobs.length) {
+    untimedWrap.hidden = false;
+    untimedWrap.innerHTML = `<p class="cal-untimed-label">Nothing scheduled${canEdit ? ' — tap + to add a job' : ''}</p>`;
   }
+
+  wireDayInteractions(canEdit);
+
+  // Open on the first job rather than at midnight
+  const scroller = document.getElementById('cal-day-scroll');
+  if (scroller) {
+    const firstStart = spans.length ? Math.min(...spans.map(s => s.start)) : 8 * 60;
+    scroller.scrollTop = Math.max(0, (firstStart / 60) * HOUR_PX - HOUR_PX);
+  }
+}
+
+// Tap opens the editor; long-press drags the block to a new time; the corner
+// handle changes its length. Admin only — employees can't write jobs.
+function wireDayInteractions(canEdit) {
+  const timeline = document.getElementById('cal-day-timeline');
+  if (!timeline) return;
+  timeline.querySelectorAll('.cal-untimed-job, #cal-day-untimed .cal-untimed-job').forEach(() => {});
+  document.querySelectorAll('#cal-day-untimed .cal-untimed-job').forEach(el => {
+    el.addEventListener('click', () => { if (canEdit) openJobModal(el.dataset.job, calSelectedDate); });
+  });
+
+  timeline.querySelectorAll('.cal-block').forEach(block => {
+    const jobId = block.dataset.job;
+    let pressTimer = null, dragging = false, resizing = false;
+    let startY = 0, origTop = 0, origH = 0, moved = false;
+
+    const beginDrag = (y) => {
+      dragging = true;
+      moved = false;
+      startY = y;
+      origTop = parseFloat(block.style.top);
+      origH = parseFloat(block.style.height);
+      block.classList.add('cal-block-dragging');
+      if (navigator.vibrate) navigator.vibrate(10); // "it lifted" feedback
+    };
+
+    block.addEventListener('pointerdown', (e) => {
+      if (!canEdit) return;
+      if (e.target.classList.contains('cal-resize')) {
+        resizing = true;
+        startY = e.clientY;
+        origTop = parseFloat(block.style.top);
+        origH = parseFloat(block.style.height);
+        block.setPointerCapture(e.pointerId);
+        e.preventDefault();
+        return;
+      }
+      pressTimer = setTimeout(() => { beginDrag(e.clientY); block.setPointerCapture(e.pointerId); }, 450);
+    });
+    block.addEventListener('pointermove', (e) => {
+      if (resizing) {
+        moved = true;
+        const h = Math.max(HOUR_PX * SNAP_MIN / 60, origH + (e.clientY - startY));
+        block.style.height = `${h}px`;
+        return;
+      }
+      if (!dragging) {
+        // A real scroll gesture shouldn't turn into a drag
+        if (pressTimer && Math.abs(e.clientY - (startY || e.clientY)) > 8) { clearTimeout(pressTimer); pressTimer = null; }
+        return;
+      }
+      moved = true;
+      const next = Math.max(0, Math.min(24 * HOUR_PX - origH, origTop + (e.clientY - startY)));
+      block.style.top = `${next}px`;
+    });
+    const finish = async (e) => {
+      if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
+      if (!dragging && !resizing) return;                 // plain tap handled below
+      const wasDragging = dragging, wasResizing = resizing;
+      dragging = resizing = false;
+      block.classList.remove('cal-block-dragging');
+      if (!moved) { renderCalendarDay(); return; }
+      const job = Storage.getJob(jobId);
+      if (!job) return;
+      const span = jobSpan(job);
+      const duration = span ? span.end - span.start : DEFAULT_LEN;
+      if (wasDragging) {
+        const newStart = snapMinutes((parseFloat(block.style.top) / HOUR_PX) * 60);
+        await Storage.saveJob({ ...job, start: hhmmFromMinutes(newStart), end: hhmmFromMinutes(newStart + duration) });
+      } else if (wasResizing) {
+        const startMin = span ? span.start : 0;
+        const newLen = Math.max(SNAP_MIN, snapMinutes((parseFloat(block.style.height) / HOUR_PX) * 60));
+        await Storage.saveJob({ ...job, start: hhmmFromMinutes(startMin), end: hhmmFromMinutes(startMin + newLen) });
+      }
+      renderCalendarDay();
+    };
+    block.addEventListener('pointerup', finish);
+    block.addEventListener('pointercancel', finish);
+    block.addEventListener('click', () => {
+      if (moved) { moved = false; return; }              // that was a drag, not a tap
+      if (canEdit) openJobModal(jobId, calSelectedDate);
+    });
+  });
 }
 
 const calPrev = document.getElementById('cal-prev');
@@ -672,9 +836,16 @@ function renderJobCustomer(filter) {
     const hay = (def ? def.body : '').toLowerCase();
     return words.every(w => hay.includes(w));
   }).slice(0, 8);
-  ul.innerHTML = customers.map(c => `<li class="member-item job-customer-item" data-id="${c.id}">
-      <span class="member-email">${escapeHtml(customerCrumbLabel(c.id))}</span>
-    </li>`).join('');
+  ul.innerHTML = customers.map(c => {
+    // Show the address too — two customers can share a surname, and the
+    // address is what tells you which one you mean.
+    const addr = addressCandidates(c.id)[0] || '';
+    return `<li class="member-item job-customer-item" data-id="${c.id}">
+      <span class="member-email">${escapeHtml(customerCrumbLabel(c.id))}${
+        addr ? `<em class="setting-check-hint">${escapeHtml(addr)}</em>` : ''
+      }</span>
+    </li>`;
+  }).join('');
   ul.querySelectorAll('.job-customer-item').forEach(li => {
     li.addEventListener('click', () => {
       jobChosenCustomer = { id: li.dataset.id, name: customerCrumbLabel(li.dataset.id) };

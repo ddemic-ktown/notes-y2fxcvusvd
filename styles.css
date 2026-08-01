@@ -440,6 +440,55 @@ body.editor-open {
 .cal-more { font-size: 10px; color: var(--ink-soft); font-weight: 600; }
 .cal-day-card .cal-day-chips { display: flex; flex-wrap: wrap; gap: 4px; margin: 4px 0; }
 .cal-day-card .cal-chip { font-size: 11px; padding: 2px 8px; }
+
+/* Day timeline — hour rail on the left, jobs as positioned blocks */
+.cal-day-main { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.cal-untimed {
+  flex-shrink: 0;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+}
+.cal-untimed-label { margin: 0 0 4px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--ink-soft); }
+.cal-untimed-job {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  padding: 6px 8px; margin-bottom: 4px; font-size: 14px;
+  background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius);
+  cursor: pointer;
+}
+.cal-day-scroll { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+.cal-timeline { position: relative; }
+.cal-hour {
+  position: absolute; left: 0; right: 0; height: 0;
+  border-top: 1px solid var(--line);
+}
+.cal-hour-label {
+  position: absolute; top: -7px; left: 4px; width: 44px;
+  font-size: 11px; color: var(--ink-soft); background: var(--bg); padding-right: 4px;
+}
+.cal-block {
+  position: absolute;
+  background: var(--surface);
+  border: 1px solid var(--accent);
+  border-left: 4px solid var(--accent);
+  border-radius: 6px;
+  padding: 3px 6px;
+  overflow: hidden;
+  cursor: pointer;
+  box-shadow: var(--shadow);
+  touch-action: none;   /* we handle the drag ourselves */
+}
+.cal-block-dragging { opacity: 0.85; box-shadow: 0 6px 18px rgba(0,0,0,0.3); z-index: 5; }
+.cal-block-time { font-size: 10px; color: var(--ink-soft); }
+.cal-block-who { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cal-block-chips { display: flex; flex-wrap: wrap; gap: 2px; margin-top: 2px; }
+.cal-block-chips .cal-chip { font-size: 9px; padding: 1px 5px; }
+.cal-resize {
+  position: absolute; right: 0; bottom: 0; width: 22px; height: 18px;
+  cursor: ns-resize;
+  background: linear-gradient(135deg, transparent 55%, var(--accent) 55%, var(--accent) 70%, transparent 70%);
+  border-bottom-right-radius: 6px;
+}
 /* Job editor */
 .job-time-row { display: flex; gap: 8px; }
 .job-time-row label { flex: 1; display: flex; flex-direction: column; gap: 2px; }
