@@ -13,6 +13,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 10, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.07.31-2133', 'Checks GitHub for a newer version on the home screen and when the app resumes'],
   ['v2026.07.31-2122', 'Price table: dragging a column no longer scrolls the table instead of moving it'],
   ['v2026.07.31-2111', 'New note or customer opens with the cursor in the title and the keyboard up'],
   ['v2026.07.31-2109', 'Customer search no longer jumps to the top of the job sheet — it moves only as far as it needs to'],
@@ -22,7 +23,6 @@ const CHANGELOG = [
   ['v2026.07.31-2049', 'Customer search in the job sheet now shows five matches instead of two'],
   ['v2026.07.31-2046', 'Calendar fades with a small nudge when you change month or day'],
   ['v2026.07.31-2043', 'Calendar day view: swipe left or right to change days, with tappable cues either side'],
-  ['v2026.07.31-2040', 'Pull-to-refresh no longer reloads the app by accident; a ⟳ button on the home screen refreshes instead'],
 ];
 const APP_VERSION = CHANGELOG[0][0];
 
@@ -2752,6 +2752,7 @@ function showNotes() {
   history.replaceState({ screen: 'home' }, '');
   restoreScroll('home');
   if (swReg) swReg.update().catch(() => {});
+  checkDeployedVersion();          // ask GitHub what's actually deployed
 }
 
 const isDesktop = window.matchMedia('(hover: hover) and (pointer: fine)').matches;
@@ -6534,6 +6535,42 @@ function applyWaitingUpdate() {
     swReg.waiting.postMessage('SKIP_WAITING');
   }
 }
+
+// ---------- deploy check ----------
+// Browsers throttle their own service-worker update checks, and a phone that
+// resumes from background rather than launching fresh can sit on an old
+// version for a long time. So ask GitHub directly what's deployed.
+//
+// It reads sw.js rather than a version.json: one less file to keep in step
+// with the version bump, and it can't drift from what's actually live.
+function parseSwVersion(text) {
+  const m = /const\s+VERSION\s*=\s*'na-([^']+)'/.exec(String(text || ''));
+  return m ? 'v' + m[1] : null;
+}
+let lastDeployCheck = 0;
+async function checkDeployedVersion() {
+  if (!navigator.onLine) return;
+  if (Date.now() - lastDeployCheck < 30000) return;   // don't spam on every visit
+  lastDeployCheck = Date.now();
+  try {
+    // The query string is REQUIRED: our own service worker answers same-origin
+    // requests cache-first, so 'sw.js' would come back from the stale cache.
+    // A URL it has never cached falls through to the network.
+    const resp = await fetch('sw.js?ts=' + Date.now(), { cache: 'no-store' });
+    if (!resp.ok) return;
+    const deployed = parseSwVersion(await resp.text());
+    if (!deployed || deployed === APP_VERSION) return;
+    if (swReg) {
+      await swReg.update().catch(() => {});
+      // If the new worker is already parked, take it now; otherwise the
+      // updatefound → controllerchange path picks it up and reloads.
+      applyWaitingUpdate();
+    }
+  } catch (e) { /* offline or blocked — try again next time */ }
+}
+// iOS restores a suspended PWA without firing visibilitychange, so pageshow is
+// the event that catches a phone coming back after days in the background.
+window.addEventListener('pageshow', () => { checkDeployedVersion(); });
 
 // Manual refresh — replaces the browser's pull-to-refresh, which fired by
 // accident on non-scrolling screens. Checks for a new app version first: if
