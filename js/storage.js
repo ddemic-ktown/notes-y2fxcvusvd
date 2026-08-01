@@ -665,6 +665,28 @@ export const Storage = {
   listJobs() {
     return _cache.jobs.filter(j => !j.deletedAt);
   },
+  // Who you're most likely to be booking next. Ranked by how many jobs you
+  // scheduled for them inside the window, then by how recently — a customer you
+  // book every week should outrank a one-off from yesterday. The window is
+  // measured on `updated` (when you did the scheduling), not on the job's date,
+  // so booking next month's work today still counts as activity today.
+  recentJobCustomerIds(limit = 5, windowDays = 30) {
+    const cutoff = Date.now() - windowDays * 86400000;
+    const alive = new Set(this.liveCustomers().map(c => c.id));
+    const stats = new Map();
+    for (const j of this.listJobs()) {
+      if (!j.customerId || !alive.has(j.customerId)) continue;
+      const t = new Date(j.updated || j.created || 0).getTime() || 0;
+      const s = stats.get(j.customerId) || { id: j.customerId, count: 0, last: 0 };
+      if (t >= cutoff) s.count++;
+      if (t > s.last) s.last = t;
+      stats.set(j.customerId, s);
+    }
+    return [...stats.values()]
+      .sort((a, b) => (b.count - a.count) || (b.last - a.last))
+      .slice(0, Math.max(0, limit))
+      .map(s => s.id);
+  },
   listJobsByDate(dateStr) {
     return this.listJobs()
       .filter(j => j.date === dateStr)

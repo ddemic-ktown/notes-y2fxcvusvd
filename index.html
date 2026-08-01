@@ -248,12 +248,16 @@
       <h4 class="setting-sub-title">Who's working</h4>
       <ul id="job-employees" class="members-list"></ul>
       <h4 class="setting-sub-title">Customer</h4>
-      <div class="search-wrap">
-        <input id="job-customer-search" class="search-input" type="search" placeholder="Search customers…" autocomplete="off" />
-        <button class="search-clear" type="button" aria-label="Clear search" hidden>✕</button>
+      <!-- column-reverse when there's more room above the field, so matches
+           aren't stuck behind the keyboard -->
+      <div id="job-customer-picker" class="job-customer-picker">
+        <div class="search-wrap">
+          <input id="job-customer-search" class="search-input" type="search" placeholder="Search customers…" autocomplete="off" />
+          <button class="search-clear" type="button" aria-label="Clear search" hidden>✕</button>
+        </div>
+        <ul id="job-customer-list" class="members-list job-customer-list"></ul>
       </div>
       <p id="job-customer-chosen" class="muted setting-hint"></p>
-      <ul id="job-customer-list" class="members-list"></ul>
       <div id="job-address-wrap" hidden>
         <label class="setting-inline-label" for="job-address">Address</label>
         <input id="job-address" class="signin-input" type="text" placeholder="Optional" />

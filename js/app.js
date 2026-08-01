@@ -13,16 +13,16 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 10, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.07.31-1955', 'Job customer field suggests who you book most often before you type'],
+  ['v2026.07.31-1952', 'Customer search lifts to the top of the job form so matches are never behind the keyboard'],
+  ['v2026.07.31-1948', 'Customer matches appear above the search box when there is more room there'],
+  ['v2026.07.31-1943', 'Fixed: customer search results are reachable with the keyboard up'],
+  ['v2026.07.31-1940', 'Fixed: the day view scrolls again when you drag starting on a job card'],
+  ['v2026.07.31-1938', 'Opening a price scrolls it into view, and you can still drag the table around'],
+  ['v2026.07.31-1936', 'Pinch zoom on the price table no longer opens cells at all'],
   ['v2026.07.31-1928', 'Fixed: the item column now stays locked while scrolling the price table sideways'],
   ['v2026.07.31-1908', 'Calendar months change by swiping up and down, with the next months named'],
   ['v2026.07.31-1905', 'Fixed: price, date and availability now stack when entering a price'],
-  ['v2026.07.31-1901', 'Tapping away from a price you are entering cancels it, like the Cancel button'],
-  ['v2026.07.31-1854', 'Fixed: pinch-zooming the price table no longer opens a cell when you let go'],
-  ['v2026.07.31-1851', 'Search bar on the price table filters items as you type'],
-  ['v2026.07.31-1848', 'Price table Layout button: reorder rows and columns, or tick several and send them to the top'],
-  ['v2026.07.31-1844', 'Price cells show availability and the quote date under the price'],
-  ['v2026.07.31-1842', 'Calendar groups jobs by crew — names shown once, not on every job'],
-  ['v2026.07.31-1837', 'Job editor: enter any two of start, end and hours — the third fills itself'],
 ];
 const APP_VERSION = CHANGELOG[0][0];
 
@@ -744,6 +744,7 @@ function wireDayInteractions(canEdit) {
     const jobId = block.dataset.job;
     let pressTimer = null, dragging = false, resizing = false;
     let startY = 0, origTop = 0, origH = 0, moved = false;
+    let downX = 0, downY = 0;   // where the finger landed, to tell scroll from press
 
     const beginDrag = (y) => {
       dragging = true;
@@ -752,6 +753,10 @@ function wireDayInteractions(canEdit) {
       origTop = parseFloat(block.style.top);
       origH = parseFloat(block.style.height);
       block.classList.add('cal-block-dragging');
+      // Take the gesture over ONLY now — until this moment the block is
+      // `touch-action: pan-y` so the day can be scrolled with a finger that
+      // happens to start on a card.
+      block.style.touchAction = 'none';
       if (navigator.vibrate) navigator.vibrate(10); // "it lifted" feedback
     };
 
@@ -766,6 +771,7 @@ function wireDayInteractions(canEdit) {
         e.preventDefault();
         return;
       }
+      downX = e.clientX; downY = e.clientY;
       pressTimer = setTimeout(() => { beginDrag(e.clientY); block.setPointerCapture(e.pointerId); }, 450);
     });
     block.addEventListener('pointermove', (e) => {
@@ -776,8 +782,14 @@ function wireDayInteractions(canEdit) {
         return;
       }
       if (!dragging) {
-        // A real scroll gesture shouldn't turn into a drag
-        if (pressTimer && Math.abs(e.clientY - (startY || e.clientY)) > 8) { clearTimeout(pressTimer); pressTimer = null; }
+        // A real scroll gesture shouldn't turn into a drag. This compares
+        // against where the finger LANDED — the old check used a variable that
+        // is only set once dragging starts, so it always measured zero and
+        // never cancelled.
+        if (pressTimer && Math.hypot(e.clientX - downX, e.clientY - downY) > 8) {
+          clearTimeout(pressTimer);
+          pressTimer = null;
+        }
         return;
       }
       moved = true;
@@ -790,6 +802,7 @@ function wireDayInteractions(canEdit) {
       const wasDragging = dragging, wasResizing = resizing;
       dragging = resizing = false;
       block.classList.remove('cal-block-dragging');
+      block.style.touchAction = '';   // hand scrolling back to the browser
       if (!moved) { renderCalendarDay(); return; }
       const job = Storage.getJob(jobId);
       if (!job) return;
@@ -900,28 +913,87 @@ function renderJobEmployees(selected) {
     : '<li class="member-item">Add employees in Settings → Time Logger first.</li>';
 }
 
+// How tall the match list can be: whatever is left between the bottom of the
+// search field and the bottom of the VISIBLE viewport (visualViewport shrinks
+// for the keyboard, innerHeight doesn't), less room for the panel's padding.
+// Floor of 120px so it's never a useless sliver on a very short screen.
+function customerListMaxHeight(inputRect) {
+  const viewH = (window.visualViewport && window.visualViewport.height) || window.innerHeight;
+  return Math.max(120, (viewH - inputRect.bottom) - 90);
+}
+
+// Scroll the modal panel so the customer field sits just under the panel's top
+// edge. This is what native pickers do: put the field at the top and let the
+// results own the rest of the screen, instead of trying to guess whether there
+// is more room above or below.
+function liftCustomerField() {
+  const input = document.getElementById('job-customer-search');
+  const panel = input && input.closest('.modal-panel');
+  if (!panel) return;
+  const r = input.getBoundingClientRect(), p = panel.getBoundingClientRect();
+  const delta = (r.top - p.top) - 8;
+  // Don't fight the panel: only ever scroll as far as it actually can.
+  const max = panel.scrollHeight - panel.clientHeight;
+  panel.scrollTop = Math.min(Math.max(0, panel.scrollTop + delta), Math.max(0, max));
+  const ul = document.getElementById('job-customer-list');
+  if (ul && ul.children.length) {
+    ul.style.maxHeight = customerListMaxHeight(input.getBoundingClientRect()) + 'px';
+  }
+}
+
 function renderJobCustomer(filter) {
   const ul = document.getElementById('job-customer-list');
   const chosen = document.getElementById('job-customer-chosen');
   if (!ul) return;
   chosen.textContent = jobChosenCustomer ? `Selected: ${jobChosenCustomer.name}` : '';
   const words = (filter || '').trim().toLowerCase().split(/\s+/).filter(Boolean);
-  const customers = Storage.listCustomers().filter(c => {
-    if (!words.length) return false; // only show results while searching
-    const def = Storage.getDefaultNoteForCustomer(c.id);
-    const hay = (def ? def.body : '').toLowerCase();
-    return words.every(w => hay.includes(w));
-  }).slice(0, 8);
-  ul.innerHTML = customers.map(c => {
-    // Show the address too — two customers can share a surname, and the
-    // address is what tells you which one you mean.
-    const addr = addressCandidates(c.id)[0] || '';
-    return `<li class="member-item job-customer-item" data-id="${c.id}">
-      <span class="member-email">${escapeHtml(customerCrumbLabel(c.id))}${
-        addr ? `<em class="setting-check-hint">${escapeHtml(addr)}</em>` : ''
-      }</span>
-    </li>`;
-  }).join('');
+  // Nothing typed yet: offer the customers you actually book, so the common
+  // case needs no keyboard at all. Ranked by frequency-then-recency; a brand
+  // new org has no job history, so fall back to the customer list (already
+  // sorted most-recently-touched first). Skipped once a customer is chosen —
+  // a live list under "Selected: …" just looks like it didn't take.
+  let heading = '';
+  let customers;
+  if (!words.length) {
+    if (jobChosenCustomer) customers = [];
+    else {
+      const ids = Storage.recentJobCustomerIds(5);
+      customers = ids.map(id => Storage.getCustomer(id)).filter(Boolean);
+      heading = customers.length ? 'Recent' : '';
+      if (!customers.length) {
+        customers = Storage.listCustomers().slice(0, 5);
+        heading = customers.length ? 'Customers' : '';
+      }
+    }
+  } else {
+    customers = Storage.listCustomers().filter(c => {
+      const def = Storage.getDefaultNoteForCustomer(c.id);
+      const hay = (def ? def.body : '').toLowerCase();
+      return words.every(w => hay.includes(w));
+    }).slice(0, 8);
+  }
+  ul.innerHTML = (heading ? `<li class="member-item picker-heading">${heading}</li>` : '') +
+    customers.map(c => {
+      // Show the address too — two customers can share a surname, and the
+      // address is what tells you which one you mean.
+      const addr = addressCandidates(c.id)[0] || '';
+      return `<li class="member-item job-customer-item" data-id="${c.id}">
+        <span class="member-email">${escapeHtml(customerCrumbLabel(c.id))}${
+          addr ? `<em class="setting-check-hint">${escapeHtml(addr)}</em>` : ''
+        }</span>
+      </li>`;
+    }).join('');
+  // The list always sits below the field; what makes it usable is that the
+  // field gets lifted to the top of the panel on focus (see liftCustomerField),
+  // so everything below it is free space. All that's left here is to stop the
+  // list running off the bottom of the visible viewport.
+  if (customers.length) {
+    requestAnimationFrame(() => {
+      const input = document.getElementById('job-customer-search');
+      if (!input) return;
+      ul.style.maxHeight = customerListMaxHeight(input.getBoundingClientRect()) + 'px';
+    });
+  }
   ul.querySelectorAll('.job-customer-item').forEach(li => {
     li.addEventListener('click', () => {
       jobChosenCustomer = { id: li.dataset.id, name: customerCrumbLabel(li.dataset.id) };
@@ -982,6 +1054,22 @@ if (jobDurEl) jobDurEl.addEventListener('input', () => { if (jobDurEl.value) syn
 
 const jobCustomerSearch = document.getElementById('job-customer-search');
 if (jobCustomerSearch) jobCustomerSearch.addEventListener('input', () => renderJobCustomer(jobCustomerSearch.value));
+if (jobCustomerSearch) {
+  // On iOS the focus event fires BEFORE the keyboard is up, so a focus-only
+  // lift measures the full-height viewport and lands in the wrong place. The
+  // visualViewport resize that follows is the one that gets it right, so we
+  // listen to both — debounced, since it fires on every frame of the keyboard
+  // animation.
+  jobCustomerSearch.addEventListener('focus', () => requestAnimationFrame(liftCustomerField));
+  if (window.visualViewport) {
+    let liftTimer = null;
+    window.visualViewport.addEventListener('resize', () => {
+      if (document.activeElement !== jobCustomerSearch) return;
+      clearTimeout(liftTimer);
+      liftTimer = setTimeout(liftCustomerField, 100);
+    });
+  }
+}
 const jobClose = document.getElementById('job-close');
 if (jobClose) jobClose.addEventListener('click', () => { jobModal.hidden = true; });
 if (jobModal) jobModal.addEventListener('click', (e) => { if (e.target === jobModal) jobModal.hidden = true; });
@@ -1107,27 +1195,69 @@ function priceCellHtml(item, vendor, canEdit, isCheapest) {
 // Close the open price cell without saving — used by Cancel, Escape, and a tap
 // outside the cell.
 function cancelPriceEdit() {
-  document.removeEventListener('pointerdown', outsidePriceTap, true);
+  detachOutsidePriceTap();
   openCellKey = null;
   renderPriceTable();
 }
+// Firing on pointerDOWN made the table impossible to scroll with a cell open:
+// the moment a finger touched, it counted as "tapped outside". Judge on
+// RELEASE instead — a tap is a short press that barely moved; anything longer
+// or further is a scroll and leaves the editor alone.
+const TAP_SLOP_PX = 8;
+const TAP_MAX_MS = 500;
+let tapStart = null;
+function outsidePriceDown(e) {
+  tapStart = { x: e.clientX, y: e.clientY, t: Date.now() };
+}
 function outsidePriceTap(e) {
-  if (!openCellKey) { document.removeEventListener('pointerdown', outsidePriceTap, true); return; }
-  if (pinchJustHappened()) return;                 // zooming, not tapping away
+  if (!openCellKey) { detachOutsidePriceTap(); return; }
+  if (pinchJustHappened()) { tapStart = null; return; }
+  const start = tapStart;
+  tapStart = null;
+  if (!start) return;
+  const moved = Math.hypot(e.clientX - start.x, e.clientY - start.y);
+  if (moved > TAP_SLOP_PX || Date.now() - start.t > TAP_MAX_MS) return;  // a drag
   if (e.target.closest && e.target.closest('.price-cell-editing')) return;  // inside the cell
   // Tapping a DIFFERENT cell should move there in one tap. Re-rendering
   // replaces the DOM, so the follow-up click would never land — open the new
   // cell here instead of waiting for it.
   const other = e.target.closest ? e.target.closest('.price-cell') : null;
   if (other && other.dataset.key && Storage.canEditPriceTable()) {
-    document.removeEventListener('pointerdown', outsidePriceTap, true);
+    detachOutsidePriceTap();
     openCellKey = other.dataset.key;
     renderPriceTable();
-    const input = priceTableEl.querySelector('.price-cell-editing .price-input');
-    if (input) input.focus();
+    focusOpenPriceCell();
     return;
   }
   cancelPriceEdit();
+}
+function attachOutsidePriceTap() {
+  document.addEventListener('pointerdown', outsidePriceDown, true);
+  document.addEventListener('pointerup', outsidePriceTap, true);
+}
+function detachOutsidePriceTap() {
+  document.removeEventListener('pointerdown', outsidePriceDown, true);
+  document.removeEventListener('pointerup', outsidePriceTap, true);
+  tapStart = null;
+}
+
+// --- A: bring the open cell (and its stacked fields) to the top, clear of the
+// keyboard, instead of leaving it wherever it happened to be.
+function focusOpenPriceCell() {
+  const cell = priceTableEl ? priceTableEl.querySelector('.price-cell-editing') : null;
+  const scroller = document.getElementById('price-scroll');
+  if (!cell || !scroller) return;
+  requestAnimationFrame(() => {
+    const c = cell.getBoundingClientRect();
+    const s = scroller.getBoundingClientRect();
+    const headH = 34;  // roughly the sticky vendor row
+    scroller.scrollTop += (c.top - s.top) - headH;
+    // and nudge sideways if the column is half off the edge
+    if (c.left < s.left) scroller.scrollLeft += (c.left - s.left) - 8;
+    else if (c.right > s.right) scroller.scrollLeft += (c.right - s.right) + 8;
+    const input = cell.querySelector('.price-input');
+    if (input) input.focus();
+  });
 }
 
 function renderPriceTable() {
@@ -1199,18 +1329,22 @@ function renderPriceTable() {
 }
 
 function wirePriceTable(canEdit) {
+  priceLongPressCancels.clear();   // stale closures from the previous render
   // Long-press (or right-click) opens history; a plain tap opens inline entry
   priceTableEl.querySelectorAll('.price-cell').forEach(cell => {
     let pressTimer = null;
     let longPressed = false;
     const key = cell.dataset.key;
     const startPress = (e) => {
-      if (e && e.isPrimary === false) { cancelPress(); return; }  // second finger = pinch
-      if (pinchJustHappened()) return;
+      if (pricePointerCount > 1 || pinchJustHappened()) return;   // pinching
       longPressed = false;
       pressTimer = setTimeout(() => { longPressed = true; openPriceHistory(key); }, 500);
     };
-    const cancelPress = () => { if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; } };
+    const cancelPress = () => {
+      if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
+      longPressed = false;
+    };
+    priceLongPressCancels.add(cancelPress);
     cell.addEventListener('pointerdown', startPress);
     cell.addEventListener('pointerup', cancelPress);
     cell.addEventListener('pointerleave', cancelPress);
@@ -1223,15 +1357,14 @@ function wirePriceTable(canEdit) {
       if (e.target.closest('.price-cell-editing')) return; // already editing
       openCellKey = key;
       renderPriceTable();
-      const input = priceTableEl.querySelector('.price-cell-editing .price-input');
-      if (input) input.focus();
+      focusOpenPriceCell();
     });
   });
   const editing = priceTableEl.querySelector('.price-cell-editing');
   if (editing) {
     const [itemId, vendorId] = editing.dataset.key.split('|');
     const save = async () => {
-      document.removeEventListener('pointerdown', outsidePriceTap, true);
+      detachOutsidePriceTap();
       const price = editing.querySelector('.price-input').value;
       const date = editing.querySelector('.price-date').value;
       const avail = editing.querySelector('.price-avail').value;
@@ -1244,9 +1377,8 @@ function wirePriceTable(canEdit) {
     // Tapping anywhere outside the open cell is the same as Cancel. Registered
     // on the NEXT tick so the tap that opened the cell doesn't close it, and
     // ignored during a pinch so zooming doesn't discard what you typed.
-    setTimeout(() => {
-      document.addEventListener('pointerdown', outsidePriceTap, true);
-    }, 0);
+    setTimeout(attachOutsidePriceTap, 0);
+    focusOpenPriceCell();
     editing.querySelector('.price-input').addEventListener('keydown', (e) => {
       if (e.key === 'Enter') { e.preventDefault(); save(); }
       if (e.key === 'Escape') { cancelPriceEdit(); }
@@ -1406,7 +1538,11 @@ if (priceShareModal) priceShareModal.addEventListener('click', (e) => { if (e.ta
 // doesn't always keep up — the editor could end up taller than the screen on
 // first load, letting its toolbar scroll out of view. Track the real height.
 function updateAppVh() {
-  document.documentElement.style.setProperty('--app-vh', window.innerHeight + 'px');
+  // visualViewport shrinks when the on-screen keyboard appears; innerHeight
+  // does not. Modals sized in vh therefore ran under the keyboard, hiding
+  // whatever sat at the bottom (e.g. customer search results).
+  const h = (window.visualViewport && window.visualViewport.height) || window.innerHeight;
+  document.documentElement.style.setProperty('--app-vh', h + 'px');
 }
 updateAppVh();
 window.addEventListener('resize', updateAppVh);
@@ -1420,8 +1556,38 @@ const priceScrollEl = document.getElementById('price-scroll');
 // Lifting a pinch used to land as a tap on whatever cell was under the finger,
 // opening its editor. Any multi-touch gesture now suppresses cell taps briefly
 // after the last finger leaves.
+// Multi-touch is tracked for the WHOLE price view, not per cell. Per-cell
+// guards weren't enough: the first finger lands on a cell (starting its
+// long-press) before the second arrives, and the second finger only cancelled
+// the timer on the cell IT touched. Clicks are also swallowed in the capture
+// phase during and just after a gesture, so nothing downstream sees them.
 let pinchSuppressUntil = 0;
-function pinchJustHappened() { return Date.now() < pinchSuppressUntil; }
+let pricePointerCount = 0;
+const priceLongPressCancels = new Set();   // cancel callbacks for open timers
+function pinchJustHappened() { return pricePointerCount >= 2 || Date.now() < pinchSuppressUntil; }
+function cancelAllPriceLongPress() {
+  priceLongPressCancels.forEach(fn => { try { fn(); } catch (e) {} });
+}
+const priceViewEl = document.getElementById('price-view');
+if (priceViewEl) {
+  const bump = () => { pinchSuppressUntil = Date.now() + 500; };
+  priceViewEl.addEventListener('pointerdown', () => {
+    pricePointerCount++;
+    if (pricePointerCount >= 2) { bump(); cancelAllPriceLongPress(); }
+  }, true);
+  const release = () => {
+    if (pricePointerCount >= 2) bump();       // keep suppressing past the release
+    pricePointerCount = Math.max(0, pricePointerCount - 1);
+  };
+  priceViewEl.addEventListener('pointerup', release, true);
+  priceViewEl.addEventListener('pointercancel', release, true);
+  // Swallow the click a pinch leaves behind, before any cell/button sees it
+  priceViewEl.addEventListener('click', (e) => {
+    if (!pinchJustHappened()) return;
+    e.stopPropagation();
+    e.preventDefault();
+  }, true);
+}
 if (priceScrollEl) {
   const pts = new Map();
   let startDist = 0, startZoom = 1;
@@ -1796,7 +1962,7 @@ function hideAllScreens() {
   if (fm) fm.hidden = true;
   const pm = document.getElementById('price-more-dropdown');
   if (pm) pm.hidden = true;
-  document.removeEventListener('pointerdown', outsidePriceTap, true);
+  detachOutsidePriceTap();
   listView.classList.remove('active');
   customersView.classList.remove('active');
   customerNotesView.classList.remove('active');
