@@ -83,7 +83,11 @@ html, body {
   overscroll-behavior-y: contain;
 }
 body { min-height: 100vh; }
-body.editor-open {
+/* Both of these screens are fixed to the visible viewport, so the page behind
+   them must not scroll — otherwise the browser still moves it when the
+   keyboard opens. */
+body.editor-open,
+body.hours-open {
   overflow: hidden;
   height: 100vh;
   height: 100dvh;
@@ -1294,7 +1298,7 @@ body.dark-mode .compiled-action.danger-soft { color: #f87171; border-color: #b91
 /* Trailing space so ANY row — including the last — can be scrolled up to sit
    directly under the pinned note line. Without it the bottom rows stay at the
    bottom of the screen, as far from the note line as it is possible to get. */
-.iif-scroll { flex: 1; min-height: 120px; padding: 8px 12px 55vh; }
+.iif-scroll { flex: 1; min-height: 120px; padding: 8px 12px 40vh; }
 .iif-grid { width: 100%; }
 /* Two sticky columns: the include tick, then the date. The tick has a fixed
    width so the date column knows where to start — `left` can't be `auto`. */
@@ -2030,6 +2034,31 @@ input[type="search"]::-webkit-search-cancel-button {
      scroller. */
   overflow: hidden;
 }
+/* Process/enter hours — SAME treatment, same reason. The note line in the
+   header has to stay in front of you while you correct rows, and a plain
+   `.screen` (min-height: 100vh) lets the DOCUMENT scroll: the address bar
+   makes the section taller than the visible area, and opening the keyboard
+   makes the browser scroll the page to reveal the focused cell — carrying the
+   header off the top. Sticky positioning cannot help, because the header is
+   not inside the element that scrolls. Fixing the section to the visible
+   viewport removes the outer scroller altogether; .iif-scroll is then the only
+   thing that moves. Do not go back to sticky — it was tried in
+   v2026.08.02-0728 and does nothing about this. */
+#hours-view.active {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  height: 100dvh;
+  height: var(--app-vh, 100dvh);
+  min-height: 0;
+  max-height: var(--app-vh, 100dvh);
+  overflow: hidden;
+}
+#hours-view .app-header { flex-shrink: 0; }
 #editor-view .app-header,
 #editor-view .editor-title { flex-shrink: 0; }
 #editor-view .app-header {

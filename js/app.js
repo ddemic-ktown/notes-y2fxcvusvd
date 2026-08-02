@@ -16,6 +16,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 10, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.08.02-0734', 'Hours screen no longer scrolls the note line away when the keyboard opens'],
   ['v2026.08.02-0728', 'Hours card on the home screen; shorter dates; the note line now follows you down the chart'],
   ['v2026.08.01-0902', 'Process/enter hours is now its own screen like the Price Table, with the date range on it'],
   ['v2026.08.01-0802', 'Hours chart: searchable drop lists for employee and customer, note line pinned on top'],
@@ -25,7 +26,6 @@ const CHANGELOG = [
   ['v2026.08.01-0321', 'Fewer database writes while typing; saves on Enter, paste and leaving the app'],
   ['v2026.08.01-0311', 'Your theme, time format and other preferences now follow you to every device'],
   ['v2026.08.01-0306', 'Signing in shows a loading card instead of leaving the sign-in form on screen'],
-  ['v2026.08.01-0207', 'Calendar day view: long-press to move a job works on the phone again'],
 ];
 const APP_VERSION = CHANGELOG[0][0];
 
@@ -2430,8 +2430,9 @@ function hideAllScreens() {
   if (jm) jm.hidden = true;
   editorView.classList.remove('active');
   if (signinView) signinView.classList.remove('active');
-  // Body class controls page-level scroll lock for editor screen
+  // Body class controls page-level scroll lock for the editor and hours screens
   document.body.classList.remove('editor-open');
+  document.body.classList.remove('hours-open');
   // Screens reset search inputs programmatically (no input event) — keep the
   // ✕ clear buttons in sync on every navigation
   refreshSearchClears();
@@ -6413,6 +6414,8 @@ function showHoursView() {
   if (!isAdminRole() && !isBookkeeperRole()) return;
   hideAllScreens();
   hoursView.classList.add('active');
+  // Locks page scroll behind the fixed screen — same contract as editor-open.
+  document.body.classList.add('hours-open');
   renderCrumbs('crumbs-hours', [
     { label: 'Home', go: 'home' },
     { label: 'Process/enter hours' },
