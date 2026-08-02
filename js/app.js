@@ -16,16 +16,16 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 10, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.08.02-1417', 'Every row in the hours chart can be exported; a conflict lets you tick only one side'],
+  ['v2026.08.02-1407', 'Save hours from the chart — saved lines show green, and disagreements show red'],
+  ['v2026.08.02-1353', 'Hours grid: Cancel now closes the note-line editor instead of reopening it'],
+  ['v2026.08.02-1316', 'Price table: holding a price no longer opens the editor and keyboard behind the history'],
   ['v2026.08.02-0943', 'Hours grid: Save/Cancel moved to the header so nothing can cover them; pinch to zoom'],
   ['v2026.08.02-0920', 'Hours grid: Cancel works on every cell, and picking a date no longer jumps to another row'],
   ['v2026.08.02-0846', 'Hours grid: tap the note line to fix it in your hours note without leaving the chart'],
   ['v2026.08.02-0839', 'Hours grid: Cancel and Save now work when the keyboard is open'],
   ['v2026.08.02-0745', 'Hours grid: no entry count and no warning text — the orange row is the only flag'],
   ['v2026.08.02-0740', 'Home cards are titles only; "Process/enter hours" is now just "Hours"'],
-  ['v2026.08.02-0734', 'Hours screen no longer scrolls the note line away when the keyboard opens'],
-  ['v2026.08.02-0728', 'Hours card on the home screen; shorter dates; the note line now follows you down the chart'],
-  ['v2026.08.01-0902', 'Process/enter hours is now its own screen like the Price Table, with the date range on it'],
-  ['v2026.08.01-0802', 'Hours chart: searchable drop lists for employee and customer, note line pinned on top'],
 ];
 const APP_VERSION = CHANGELOG[0][0];
 
@@ -1752,13 +1752,24 @@ function wirePriceTable(canEdit) {
     const startPress = (e) => {
       if (pricePointerCount > 1 || pinchJustHappened()) return;   // pinching
       pressing = true;
-      longPressed = false;
-      pressTimer = setTimeout(() => { longPressed = true; openPriceHistory(key); }, 500);
+      longPressed = false;      // reset HERE — the only correct place; see below
+      pressTimer = setTimeout(() => {
+        longPressed = true;
+        suppressPriceTap();     // and belt-and-braces for the click that follows
+        openPriceHistory(key);
+      }, 500);
     };
+    // Deliberately does NOT clear longPressed. It used to, and that was the bug:
+    // cancelPress runs on POINTERUP, and the click event fires after it — so by
+    // the time the click handler asked "was that a long press?" the answer had
+    // already been wiped, and it opened the cell editor. Which focused the price
+    // input, which raised the keyboard, on top of the history sheet you'd just
+    // opened. Intermittent, because some browsers suppress the synthetic click
+    // after a long press and some don't. startPress resets the flag for the next
+    // gesture, which is all that's needed.
     const cancelPress = () => {
       if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
       pressing = false;
-      longPressed = false;
     };
     priceLongPressCancels.add(cancelPress);
     cell.addEventListener('selectstart', (e) => { if (pressing) e.preventDefault(); });
@@ -1766,9 +1777,15 @@ function wirePriceTable(canEdit) {
     cell.addEventListener('pointerup', cancelPress);
     cell.addEventListener('pointerleave', cancelPress);
     cell.addEventListener('pointercancel', cancelPress);
-    cell.addEventListener('contextmenu', (e) => { e.preventDefault(); cancelPress(); openPriceHistory(key); });
+    cell.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      cancelPress();
+      suppressPriceTap();
+      openPriceHistory(key);
+    });
     cell.addEventListener('click', (e) => {
       if (longPressed) { longPressed = false; return; }
+      if (priceTapSuppressed()) return;  // the click a long-press left behind
       if (pinchJustHappened()) return;   // that was a zoom, not a tap
       if (!canEdit) return;
       if (e.target.closest('.price-cell-editing')) return; // already editing
@@ -2010,6 +2027,11 @@ let pinchSuppressUntil = 0;
 let pricePointerCount = 0;
 const priceLongPressCancels = new Set();   // cancel callbacks for open timers
 function pinchJustHappened() { return pricePointerCount >= 2 || Date.now() < pinchSuppressUntil; }
+// A long press (or right-click) has just opened the history sheet. The click
+// that a long press leaves behind must not also open the cell editor.
+let priceTapSuppressUntil = 0;
+function suppressPriceTap(ms = 700) { priceTapSuppressUntil = Date.now() + ms; }
+function priceTapSuppressed() { return Date.now() < priceTapSuppressUntil; }
 function cancelAllPriceLongPress() {
   priceLongPressCancels.forEach(fn => { try { fn(); } catch (e) {} });
 }
@@ -5976,6 +5998,7 @@ const iifGrid = document.getElementById('iif-grid');
 const iifScroll = document.getElementById('iif-scroll');
 const iifSrcBar = document.getElementById('iif-src-bar');
 const iifDownloadBtn = document.getElementById('iif-download-btn');
+const iifSaveHoursBtn = document.getElementById('iif-save-hours-btn');
 const editorIifBtn = document.getElementById('editor-iif-btn');
 
 let iifParsedEntries = [];
@@ -6035,13 +6058,148 @@ let openIifCell = null;
 // QuickBooks. Editing date/customer/hours changes the shared entry (so both
 // rows move together, which is right — it's one line of the note); editing the
 // employee changes only that row's slot.
+// Matching a saved timelog to a note line, by DATE + EMPLOYEE + CUSTOMER.
+// Consequence worth knowing: hours is then the only field that can disagree,
+// which is what makes a "discrepancy" a precise thing to show. The trade-off
+// is that correcting a customer breaks the link — the old record shows as
+// saved-but-not-in-the-note rather than quietly updating.
+function iifLogKey(dateStr, employee, customer) {
+  return [
+    String(dateStr || ''),
+    String(employee || '').trim().toLowerCase(),
+    String(customer || '').trim().toLowerCase(),
+  ].join('|');
+}
+function iifEntryLogKey(e, emp) {
+  return iifLogKey(iifIsoDate(e), emp, e.customerMatched);
+}
+// Hours are floats derived from clock arithmetic; compare to the nearest
+// minute rather than exactly, or 3.4999999 and 3.5 read as a discrepancy.
+function sameHours(a, b) { return Math.abs((Number(a) || 0) - (Number(b) || 0)) < 0.009; }
+
+// One row per entry PER EMPLOYEE: a note line naming two people is two rows in
+// QuickBooks. Editing date/customer/hours changes the shared entry (so both
+// rows move together, which is right — it's one line of the note); editing the
+// employee changes only that row's slot.
+//
+// Rows are the UNION of the note and what's already saved:
+//   matched, same hours  → one green row  (kind 'saved')
+//   matched, hours differ → green row (saved) + red row (what the note says)
+//   note only            → plain row      (kind 'note')
+//   saved only           → green row      (kind 'saved') so recorded hours
+//                          can't vanish just because a line left the note
+// Several note lines sharing a key (two visits, same customer, same day) pair
+// off IN ORDER against the records with that key; extras stay unmatched rather
+// than silently merging.
 function iifGridRows() {
+  const byKey = new Map();
+  for (const t of iifVisibleTimeLogs()) {
+    if (!byKey.has(t._key)) byKey.set(t._key, []);
+    byKey.get(t._key).push(t);
+  }
   const rows = [];
   iifParsedEntries.forEach((e, idx) => {
     const emps = e.employees.length ? e.employees : [''];
-    emps.forEach((emp, empIdx) => rows.push({ e, idx, emp, empIdx, first: empIdx === 0 }));
+    emps.forEach((emp, empIdx) => {
+      const key = iifEntryLogKey(e, emp);
+      const pool = byKey.get(key);
+      const log = (pool && pool.length) ? pool.shift() : null;
+      const base = { e, idx, emp, empIdx, first: empIdx === 0 };
+      if (log && sameHours(log.hours, e.hours)) {
+        // In sync. One row, and it stays editable — correcting an already
+        // saved line is exactly what you'd want to do next.
+        rows.push({ ...base, kind: 'saved', log, editable: true });
+      } else if (log) {
+        // A PAIR: the same work described two ways. The saved row states what's
+        // on record; the red row is what the note says now and is the one you
+        // edit and re-save. `pair` marks them so only one can be ticked — they
+        // are one piece of work, and exporting both would double it.
+        rows.push({ ...base, kind: 'saved', log, editable: false, pair: true });
+        rows.push({ ...base, kind: 'differs', log, editable: true, pair: true });
+      } else {
+        rows.push({ ...base, kind: 'note', editable: true });
+      }
+    });
   });
+  // Anything saved that no note line claimed
+  for (const list of byKey.values()) {
+    for (const log of list) {
+      rows.push({ log, kind: 'saved', orphan: true, first: true, editable: false });
+    }
+  }
   return rows;
+}
+
+// ---- which rows are ticked ----
+// Keyed by ROW, not by entry+employee as before: orphan rows have no entry
+// behind them, and the two halves of a pair need to be tickable separately.
+// One map serves both Save hours and Download .iif, so "ticked" means the same
+// thing for both: this row is the truth. Cleared on every re-parse.
+let iifTickState = new Map();
+let iifRenderedRows = [];
+function iifRowTickId(row) {
+  if (row.orphan) return `log:${row.log.id}`;
+  if (row.kind === 'saved') return `saved:${row.log.id}`;
+  if (row.kind === 'differs') return `differs:${row.idx}:${row.empIdx}`;
+  return `note:${row.idx}:${row.empIdx}`;
+}
+function iifRowTicked(row) {
+  const id = iifRowTickId(row);
+  if (!iifTickState.has(id)) {
+    // In a disagreeing pair the NOTE is ticked by default — it's your most
+    // recent word on the matter. Everything else starts ticked.
+    iifTickState.set(id, !(row.kind === 'saved' && row.pair));
+  }
+  return iifTickState.get(id);
+}
+function setIifRowTick(row, on) {
+  iifTickState.set(iifRowTickId(row), on);
+  // Ticking one half of a pair unticks the other. Unticking leaves both off —
+  // "neither of these" is a legitimate answer.
+  if (on && row.pair) {
+    const partner = row.kind === 'saved'
+      ? `differs:${row.idx}:${row.empIdx}`
+      : `saved:${row.log.id}`;
+    iifTickState.set(partner, false);
+  }
+}
+// Timelogs for the range currently on screen, keyed for matching.
+function iifVisibleTimeLogs() {
+  const r = iifRangeFromInputs();
+  const from = r.from ? ymd(r.from) : '';
+  const to = r.to ? ymd(r.to) : '';
+  return Storage.listTimeLogsInRange(from, to).map(t => ({
+    ...t,
+    _key: iifLogKey(t.date, t.employeeName, t.customerName),
+  }));
+}
+function iifShortDateFromIso(iso) {
+  const d = parseYmd(iso);
+  if (Number.isNaN(d.getTime())) return String(iso || '—');
+  return d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
+}
+// What a row displays, whichever side it came from.
+function iifRowValues(row) {
+  if (row.kind === 'saved') {
+    const t = row.log;
+    return {
+      dateText: iifShortDateFromIso(t.date),
+      dateIso: t.date,
+      emp: t.employeeName || '',
+      cust: t.customerName || '',
+      hoursText: t.hoursFormatted || '',
+      confidence: null,
+    };
+  }
+  const e = row.e;
+  return {
+    dateText: iifShortDate(e),
+    dateIso: iifIsoDate(e),
+    emp: row.emp || '',
+    cust: e.customerMatched || '',
+    hoursText: e.hoursFormatted || '',
+    confidence: e.confidence,
+  };
 }
 function iifRowKey(idx, empIdx) { return `${idx}:${empIdx}`; }
 // Save/Cancel are NOT rendered inside the cell — see #iif-cell-bar in the
@@ -6081,50 +6239,60 @@ function parseHoursInput(text) {
 }
 
 function iifCellHtml(row, col) {
-  const { e, idx, emp, empIdx, first } = row;
+  const { idx, empIdx, first } = row;
+  const v = iifRowValues(row);
+  // A read-only row (a saved record with no note line, or the record half of a
+  // disagreeing pair) carries no cell key, so nothing can open an editor on it.
+  if (!row.editable) {
+    if (col === 'date') return `<td class="iif-date">${escapeHtml(v.dateText)}</td>`;
+    if (col === 'employee') return `<td>${escapeHtml(v.emp || 'Nobody')}</td>`;
+    if (col === 'customer') return `<td>${escapeHtml(v.cust || '—')}</td>`;
+    if (col === 'hours') return `<td>${escapeHtml(v.hoursText || '—')}</td>`;
+    return `<td>${row.orphan ? '<span class="iif-tag">not in note</span>' : ''}</td>`;
+  }
   const key = iifRowKey(idx, empIdx);
   const open = openIifCell === `${key}|${col}`;
   const cellAttrs = `data-cellkey="${key}|${col}" data-idx="${idx}" data-empidx="${empIdx}"`;
   if (col === 'date') {
     if (open) {
       return `<td class="price-cell price-cell-editing iif-date" ${cellAttrs}>
-        <input class="iif-edit-date" type="date" value="${escapeHtml(iifIsoDate(e))}" /></td>`;
+        <input class="iif-edit-date" type="date" value="${escapeHtml(v.dateIso)}" /></td>`;
     }
-    return `<td class="price-cell iif-date" ${cellAttrs}>${escapeHtml(iifShortDate(e))}</td>`;
+    return `<td class="price-cell iif-date" ${cellAttrs}>${escapeHtml(v.dateText)}</td>`;
   }
   if (col === 'employee') {
     if (open) {
       return `<td class="price-cell price-cell-editing" ${cellAttrs}>
         <input class="iif-edit-emp" type="text" list="iif-emp-list" placeholder="Employee"
-               autocomplete="off" value="${escapeHtml(emp)}" /></td>`;
+               autocomplete="off" value="${escapeHtml(v.emp)}" /></td>`;
     }
-    const cls = emp ? '' : ' iif-empty-emp';
-    const shown = emp || 'Nobody';
+    const cls = v.emp ? '' : ' iif-empty-emp';
     // No issue text here: the orange row already says "look at this", and a
     // sentence under every uncertain name made the grid hard to read.
     return `<td class="price-cell" ${cellAttrs}>
-      <span class="iif-pick-value${cls}">${escapeHtml(shown)}</span></td>`;
+      <span class="iif-pick-value${cls}">${escapeHtml(v.emp || 'Nobody')}</span></td>`;
   }
   if (col === 'customer') {
-    const name = e.customerMatched || '';
     if (open) {
       return `<td class="price-cell price-cell-editing" ${cellAttrs}>
         <input class="iif-edit-cust" type="text" list="iif-cust-list" placeholder="Customer"
-               autocomplete="off" value="${escapeHtml(name)}" /></td>`;
+               autocomplete="off" value="${escapeHtml(v.cust)}" /></td>`;
     }
     return `<td class="price-cell" ${cellAttrs}>
-      <span class="iif-pick-value">${escapeHtml(name || 'Choose…')}</span></td>`;
+      <span class="iif-pick-value">${escapeHtml(v.cust || 'Choose…')}</span></td>`;
   }
   if (col === 'hours') {
     if (open) {
       return `<td class="price-cell price-cell-editing" ${cellAttrs}>
         <input class="iif-edit-hours" type="text" inputmode="decimal" placeholder="3.5 or 3:30"
-               value="${escapeHtml(e.hoursFormatted || '')}" /></td>`;
+               value="${escapeHtml(v.hoursText)}" /></td>`;
     }
-    return `<td class="price-cell" ${cellAttrs}>${escapeHtml(e.hoursFormatted || '—')}</td>`;
+    return `<td class="price-cell" ${cellAttrs}>${escapeHtml(v.hoursText || '—')}</td>`;
   }
   // score — read-only, and only on the first row of a multi-employee entry
-  return `<td>${first ? `<span class="iif-score" style="color:${confidenceColor(e.confidence)};">${e.confidence}%</span>` : ''}</td>`;
+  return `<td>${first && v.confidence != null
+    ? `<span class="iif-score" style="color:${confidenceColor(v.confidence)};">${v.confidence}%</span>`
+    : ''}</td>`;
 }
 
 function renderIIFEntries(entries) {
@@ -6142,11 +6310,22 @@ function renderIIFEntries(entries) {
     <th>Score</th>
   </tr></thead>`;
 
-  const body = iifGridRows().map(row => {
-    const { e, idx, emp, empIdx } = row;
-    const excluded = !!(e._excludedEmps && e._excludedEmps[emp]);
-    return `<tr class="${e.needsReview ? 'iif-needs-review' : ''}">
-      <td class="iif-check"><input type="checkbox" class="iif-row-check" data-idx="${idx}" data-emp="${escapeHtml(emp)}" ${excluded ? '' : 'checked'} /></td>
+  iifRenderedRows = iifGridRows();
+  const body = iifRenderedRows.map((row, i) => {
+    const { e } = row;
+    // Green = on record. Red = the note now says something different. Both
+    // outrank the orange needs-review tint: "saved" and "disagrees" are the
+    // stronger facts.
+    const cls = [
+      (e && e.needsReview) ? 'iif-needs-review' : '',
+      row.kind === 'saved' ? 'iif-saved' : '',
+      row.kind === 'differs' ? 'iif-differs' : '',
+    ].filter(Boolean).join(' ');
+    // EVERY row is tickable now, so anything visible can be exported —
+    // including a record whose note line has since been tidied away.
+    const tick = `<input type="checkbox" class="iif-row-check" data-row="${i}" ${iifRowTicked(row) ? 'checked' : ''} />`;
+    return `<tr class="${cls}">
+      <td class="iif-check">${tick}</td>
       ${iifCellHtml(row, 'date')}
       ${iifCellHtml(row, 'employee')}
       ${iifCellHtml(row, 'customer')}
@@ -6204,12 +6383,31 @@ function renderIifSrcBar() {
     setTimeout(() => { ta.focus(); }, 0);
     return;
   }
-  const canEdit = isAdminRole();
+  // Tap-to-edit is wired to this INNER element, not to #iif-src-bar itself.
+  //
+  // The bar is never replaced — only its innerHTML changes — so a listener
+  // attached to the bar accumulated one copy per render AND stayed live while
+  // editing. Clicking Cancel then ran the button's handler (editing off) and,
+  // as the click bubbled up, a stale tap-to-edit handler turned editing back
+  // on: Cancel worked and was instantly undone.
+  //
+  // Guarding that handler with `if (iifSrcEditing) return` does NOT fix it —
+  // the Cancel button has already set the flag false by the time the bubbled
+  // click arrives. Same trap as the price-table long-press bug. The fix is to
+  // attach to something the render DESTROYS: .iif-src-open doesn't exist in
+  // the editing state, so there is no handler left to undo anything.
+  //
+  // RULE: only wire inside a render when that render rebuilds the element.
   iifSrcBar.innerHTML =
-    `<span class="iif-src-label">Note line:</span> <span class="iif-src-text">${escapeHtml(e.raw || '(blank)')}</span>`;
+    `<div class="iif-src-open"><span class="iif-src-label">Note line:</span> ` +
+    `<span class="iif-src-text">${escapeHtml(e.raw || '(blank)')}</span></div>`;
+  const canEdit = isAdminRole();
   iifSrcBar.classList.toggle('iif-src-tappable', canEdit);
   if (canEdit) {
-    wireIifCellButton(iifSrcBar, () => { iifSrcEditing = true; renderIifSrcBar(); });
+    wireIifCellButton(iifSrcBar.querySelector('.iif-src-open'), () => {
+      iifSrcEditing = true;
+      renderIifSrcBar();
+    });
   }
 }
 
@@ -6368,15 +6566,9 @@ function commitIifEmployee(idx, empIdx, name) {
   const e = iifParsedEntries[idx];
   if (!e || !name) return;
   if (!e.employees.length) e.employees = [name];
-  else {
-    const old = e.employees[empIdx];
-    e.employees[empIdx] = name;
-    // Exclusions are keyed by NAME, so carry the tick across a rename.
-    if (e._excludedEmps && old in e._excludedEmps) {
-      e._excludedEmps[name] = e._excludedEmps[old];
-      delete e._excludedEmps[old];
-    }
-  }
+  else e.employees[empIdx] = name;
+  // (Ticks used to be keyed by employee NAME and had to be carried across a
+  // rename. They're keyed by row position now, so a rename leaves them alone.)
 }
 function commitIifCustomer(idx, name) {
   const e = iifParsedEntries[idx];
@@ -6421,12 +6613,14 @@ function wireIifCellButton(el, fn) {
 
 function wireIifGrid() {
   if (!iifGrid) return;
-  // Include/exclude, tracked per entry+employee (one row each).
   iifGrid.querySelectorAll('.iif-row-check').forEach(cb => {
     cb.addEventListener('change', () => {
-      const entry = iifParsedEntries[parseInt(cb.dataset.idx, 10)];
-      if (!entry._excludedEmps) entry._excludedEmps = {};
-      entry._excludedEmps[cb.dataset.emp] = !cb.checked;
+      const row = iifRenderedRows[parseInt(cb.dataset.row, 10)];
+      if (!row) return;
+      setIifRowTick(row, cb.checked);
+      // Ticking half of a pair unticks the other half — redraw so you can see
+      // that happen rather than discovering it in the exported file.
+      if (row.pair) renderIIFEntries(iifParsedEntries);
     });
   });
   iifGrid.querySelectorAll('.price-cell').forEach(cell => {
@@ -6596,10 +6790,18 @@ function iifRangeFromInputs() {
 function runIIFParse() {
   iifStatus.innerHTML = '<span class="nav-spinner" style="width:16px;height:16px;border-width:2px;vertical-align:middle;"></span> Parsing your hours note…';
   closeIifCell(false);                       // a re-parse invalidates row indexes
+  iifTickState = new Map();                  // ...and the ticks keyed on them
+  iifRenderedRows = [];
   if (iifGrid) iifGrid.innerHTML = '';
   if (iifDownloadBtn) iifDownloadBtn.hidden = true;
+  if (iifSaveHoursBtn) iifSaveHoursBtn.hidden = true;
 
-  setTimeout(() => {
+  // Pull the already-saved hours for this range first, so the grid can be
+  // drawn green/red in one pass rather than flashing everything as unsaved.
+  const r0 = iifRangeFromInputs();
+  Promise.resolve(
+    Storage.ensureTimeLogRange(r0.from ? ymd(r0.from) : '', r0.to ? ymd(r0.to) : '')
+  ).catch(() => {}).then(() => {
     const range = iifRangeFromInputs();
     iifParsedEntries = parseHoursNote(iifNoteBody, iifCustomerNames, getEmployeeNames(), range);
 
@@ -6610,8 +6812,87 @@ function runIIFParse() {
     iifStatus.textContent = '';
     renderIIFEntries(iifParsedEntries);
     if (iifDownloadBtn) iifDownloadBtn.hidden = total === 0;
-  }, 30);
+    if (iifSaveHoursBtn) iifSaveHoursBtn.hidden = total === 0 || !isAdminRole();
+  });
 }
+
+// ---- Save hours: the ticked note rows become timelog records ----
+// One record per PERSON. A row that already has a matching record is UPDATED
+// rather than duplicated — matching is by date + employee + customer, so the
+// only thing that can change is the hours.
+function iifRowsToSave() {
+  const out = [];
+  for (const row of iifRenderedRows) {
+    // Green rows are already records — an in-sync one has nothing to write,
+    // and the record half of a pair means "keep what's stored".
+    if (row.kind !== 'note' && row.kind !== 'differs') continue;
+    if (!iifRowTicked(row)) continue;
+    const e = row.e, emp = row.emp;
+    if (!emp) continue;                       // nobody to pay
+    if (!e.hours || e.hours <= 0) continue;   // nothing to record
+    if (!e.customerMatched) continue;
+    const cust = Storage.listCustomers().find(c => customerCrumbLabel(c.id) === e.customerMatched);
+    out.push({
+      // A red row carries the record it disagrees with, so this UPDATES rather
+      // than adding a second record for the same work.
+      id: row.log ? row.log.id : null,
+      date: iifIsoDate(e),
+      employeeName: emp,
+      customerId: cust ? cust.id : null,
+      customerName: e.customerMatched,
+      hours: e.hours,
+      hoursFormatted: e.hoursFormatted,
+      note: e.raw || '',
+    });
+  }
+  return out;
+}
+
+// The .iif is built from the TICKED ROWS, not from the parsed note entries.
+// That's what makes every row exportable: a green row exports what's on
+// record, a red row exports what the note says, and a record whose note line
+// has gone can still reach QuickBooks. Pairs are mutually exclusive, so the
+// same work can never appear twice.
+function iifExportEntries() {
+  return iifRenderedRows
+    .filter(iifRowTicked)
+    .map(row => {
+      const v = iifRowValues(row);
+      const d = parseYmd(v.dateIso);
+      const hours = row.kind === 'saved' ? Number(row.log.hours) : Number(row.e.hours);
+      return {
+        dateFormatted: Number.isNaN(d.getTime()) ? '' : iifFormatDate(d),
+        employees: v.emp ? [v.emp] : [],
+        hours,
+        hoursFormatted: v.hoursText,
+        customerMatched: v.cust,
+      };
+    })
+    // generateIIF skips these anyway; dropping them here keeps the count honest
+    .filter(e => e.employees.length && e.hours > 0 && e.customerMatched && e.dateFormatted);
+}
+if (iifSaveHoursBtn) iifSaveHoursBtn.addEventListener('click', async () => {
+  if (!isAdminRole()) return;
+  const recs = iifRowsToSave();
+  if (!recs.length) {
+    iifStatus.textContent = 'Nothing new to save — every ticked line is already on record.';
+    return;
+  }
+  const updates = recs.filter(r => r.id).length;
+  const adds = recs.length - updates;
+  iifSaveHoursBtn.disabled = true;
+  iifStatus.innerHTML = '<span class="nav-spinner" style="width:16px;height:16px;border-width:2px;vertical-align:middle;"></span> Saving hours…';
+  try {
+    await Storage.saveTimeLogsBulk(recs);
+    iifStatus.textContent = `Saved ${adds} new record${adds === 1 ? '' : 's'}` +
+      (updates ? `, updated ${updates}` : '') + '.';
+  } catch (err) {
+    console.error(err);
+    iifStatus.textContent = 'Could not save hours. If this is the first time, the Firestore rules may not be deployed yet.';
+  }
+  iifSaveHoursBtn.disabled = false;
+  renderIIFEntries(iifParsedEntries);
+});
 
 // A SCREEN, not a sheet: you navigate to it, and the system back button (or
 // ‹ Back) leaves it like any other screen. Entered fresh every time — the note
@@ -6637,6 +6918,7 @@ function showHoursView() {
     closeIifCell(false);
     if (iifGrid) iifGrid.innerHTML = '';
     if (iifDownloadBtn) iifDownloadBtn.hidden = true;
+    if (iifSaveHoursBtn) iifSaveHoursBtn.hidden = true;
     return;
   }
 
@@ -6661,13 +6943,11 @@ if (iifFromDate) iifFromDate.addEventListener('change', () => { if (iifNoteBody 
 if (iifToDate) iifToDate.addEventListener('change', () => { if (iifNoteBody !== null) runIIFParse(); });
 
 if (iifDownloadBtn) iifDownloadBtn.addEventListener('click', () => {
-  // Only include checked rows (per entry+employee)
-  const includedEntries = iifParsedEntries
-    .map(e => ({
-      ...e,
-      employees: e.employees.filter(emp => !(e._excludedEmps && e._excludedEmps[emp])),
-    }))
-    .filter(e => e.employees.length > 0);
+  const includedEntries = iifExportEntries();
+  if (!includedEntries.length) {
+    iifStatus.textContent = 'Nothing ticked to export.';
+    return;
+  }
   const iif = generateIIF(includedEntries, getEmployeeTypeMap());
   const blob = new Blob([iif], { type: 'text/plain' });
   const url = URL.createObjectURL(blob);

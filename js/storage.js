@@ -24,6 +24,10 @@ const _cache = {
   priceConfig: { vendors: [], sharedWith: [] },
   priceItems: [],
   jobs: [],
+  // Hours actually worked, one doc per person per line. Fetched on demand for
+  // the range the Hours screen is showing rather than kept on a live listener:
+  // it serves exactly one screen, which you open deliberately.
+  timelogs: [],
 };
 const _listeners = new Set();
 let _onRoleChange = null;
@@ -34,6 +38,7 @@ let _unsubs = [];
 let _jobsUnsub = null;              // tracked apart so it can be replaced alone
 let _hotFrom = '', _hotTo = '';     // the live window, YYYY-MM-DD
 const _fetchedMonths = new Set();   // 'YYYY-MM' already pulled by getDocs
+const _fetchedLogRanges = new Set(); // 'from|to' timelog ranges already pulled
 let _ready = false;
 let _customersReady = false;
 let _notesError = null;
@@ -68,6 +73,7 @@ function orgDoc()       { return doc(db, `orgs/${_orgId}`); }
 function priceConfigDoc(){ return doc(db, `orgs/${_orgId}/priceMeta/config`); }
 function priceItemsCol() { return collection(db, `orgs/${_orgId}/priceItems`); }
 function jobsCol()       { return collection(db, `orgs/${_orgId}/jobs`); }
+function timelogsCol()   { return collection(db, `orgs/${_orgId}/timelogs`); }
 
 // ---------- listeners ----------
 function attachListeners() {
@@ -176,6 +182,7 @@ function detachListeners() {
   _unsubs = [];
   if (_jobsUnsub) { try { _jobsUnsub(); } catch (e) {} _jobsUnsub = null; }
   _fetchedMonths.clear();
+  _fetchedLogRanges.clear();
 }
 
 // ---------- calendar jobs: hot window + archive ----------
@@ -309,6 +316,7 @@ export const Storage = {
     _cache.priceConfig = { vendors: [], sharedWith: [] };
     _cache.priceItems = [];
     _cache.jobs = [];
+    _cache.timelogs = [];
 
     const { orgId, role } = await resolveOrg(userId, userEmail);
     _orgId = orgId;
@@ -349,6 +357,7 @@ export const Storage = {
     _cache.priceConfig = { vendors: [], sharedWith: [] };
     _cache.priceItems = [];
     _cache.jobs = [];
+    _cache.timelogs = [];
     emit();
   },
 
@@ -853,6 +862,81 @@ export const Storage = {
     _cache.jobs = _cache.jobs.filter(j => j.id !== id);
     emit();
     await tracked(deleteDoc(doc(jobsCol(), id))).catch(err => console.warn("deleteJob", err));
+  },
+
+  // ---------- Time logs (hours actually worked) ----------
+  // A job is a plan; a timelog is a fact. Separate collections so deleting a
+  // cancelled job can never touch recorded hours. ONE DOCUMENT PER PERSON: two
+  // people on one line of the hours note is two records, because that's two
+  // rows in QuickBooks and two people's pay.
+  //
+  // Fetched on demand for the range the Hours screen is showing — no live
+  // listener, because this serves one screen that you open deliberately, and a
+  // permanent listener would re-read every record at every sign-in for a
+  // screen most sessions never visit.
+  async ensureTimeLogRange(fromStr, toStr) {
+    if (!_orgId || _role === 'customer') return;
+    if (!fromStr || !toStr) return;
+    const key = `${fromStr}|${toStr}`;
+    if (_fetchedLogRanges.has(key)) return;
+    _fetchedLogRanges.add(key);                       // claim it before awaiting
+    try {
+      const q = (_role === 'admin' || _role === 'bookkeeper')
+        ? query(timelogsCol(), where('date', '>=', fromStr), where('date', '<=', toStr))
+        : query(timelogsCol(), where('employeeUids', 'array-contains', _uid));
+      const snap = await getDocs(q);
+      const docs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      const have = new Set(_cache.timelogs.map(t => t.id));
+      const added = docs.filter(d => !have.has(d.id));
+      if (added.length) { _cache.timelogs = _cache.timelogs.concat(added); emit(); }
+    } catch (err) {
+      _fetchedLogRanges.delete(key);                  // let it retry
+      console.warn('ensureTimeLogRange', err);
+    }
+  },
+  listTimeLogs() { return _cache.timelogs.slice(); },
+  listTimeLogsInRange(fromStr, toStr) {
+    return _cache.timelogs.filter(t =>
+      (!fromStr || t.date >= fromStr) && (!toStr || t.date <= toStr));
+  },
+  getTimeLog(id) { return _cache.timelogs.find(t => t.id === id) || null; },
+  async saveTimeLog(rec) {
+    const id = rec.id || uid();
+    const now = nowIso();
+    const existing = _cache.timelogs.find(t => t.id === id);
+    const next = {
+      id,
+      date: rec.date,                                  // 'YYYY-MM-DD'
+      employeeName: rec.employeeName || '',
+      // Rules filter on uids, never on the name — see the jobs comment.
+      employeeUids: this.employeeUidsFor([rec.employeeName].filter(Boolean)),
+      customerId: rec.customerId || null,
+      customerName: rec.customerName || '',
+      hours: Number(rec.hours) || 0,
+      hoursFormatted: rec.hoursFormatted || '',
+      note: rec.note || '',                            // the source line, for context
+      created: existing ? existing.created : now,
+      updated: now,
+    };
+    const i = _cache.timelogs.findIndex(t => t.id === id);
+    if (i === -1) _cache.timelogs.push(next); else _cache.timelogs[i] = next;
+    emit();
+    await tracked(setDoc(doc(timelogsCol(), id), stripId(next)))
+      .catch(err => console.warn('saveTimeLog', err));
+    return next;
+  },
+  // Sequential rather than a batch: it keeps the cache and the write path
+  // identical to the single-record case, and a partial failure leaves the
+  // records that did save intact instead of rolling the lot back.
+  async saveTimeLogsBulk(recs) {
+    const out = [];
+    for (const r of recs) out.push(await this.saveTimeLog(r));
+    return out;
+  },
+  async deleteTimeLog(id) {
+    _cache.timelogs = _cache.timelogs.filter(t => t.id !== id);
+    emit();
+    await tracked(deleteDoc(doc(timelogsCol(), id))).catch(err => console.warn('deleteTimeLog', err));
   },
 
   // ---------- Sample data ----------

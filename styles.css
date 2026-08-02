@@ -1320,6 +1320,17 @@ body.dark-mode .compiled-action.danger-soft { color: #f87171; border-color: #b91
 .iif-grid thead .iif-date { z-index: 4; }
 .iif-grid tbody tr.iif-needs-review td { background: #fff7ed; }
 body.dark-mode .iif-grid tbody tr.iif-needs-review td { background: #2d1a00; }
+/* GREEN = on record in timelogs. RED = the note now says something different.
+   Both are listed after the needs-review rule so they win: "saved" and
+   "disagrees" are stronger facts than "the parser wasn't sure". A left edge as
+   well as a tint, so the two are told apart by shape and not colour alone. */
+.iif-grid tbody tr.iif-saved td { background: #ecfdf5; }
+.iif-grid tbody tr.iif-saved td:first-child { box-shadow: inset 3px 0 0 #16a34a; }
+.iif-grid tbody tr.iif-differs td { background: #fef2f2; }
+.iif-grid tbody tr.iif-differs td:first-child { box-shadow: inset 3px 0 0 #dc2626; }
+body.dark-mode .iif-grid tbody tr.iif-saved td { background: #052e1b; }
+body.dark-mode .iif-grid tbody tr.iif-differs td { background: #3f1212; }
+.iif-tag { font-size: calc(11px * var(--price-scale)); color: var(--ink-soft); font-style: italic; }
 /* The source line from the note, pinned above the grid while a cell is open.
    It is NOT a table row: inside the scroller it drifted off the top as soon as
    you scrolled, and it has to survive the keyboard and an open drop list. */
@@ -1341,6 +1352,9 @@ body.dark-mode .iif-grid tbody tr.iif-needs-review td { background: #2d1a00; }
 .iif-src-bar[hidden] { display: none; }
 .iif-src-label { font-weight: 600; color: var(--ink); margin-right: 4px; }
 .iif-src-tappable { cursor: pointer; }
+/* The tap-to-edit target. A child, not the bar itself, so the render destroys
+   it when the editor opens — see renderIifSrcBar. */
+.iif-src-open { display: block; }
 .iif-src-input {
   display: block; width: 100%; resize: vertical;
   padding: 6px 8px; font: inherit; font-size: 14px;

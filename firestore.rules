@@ -105,6 +105,20 @@ service cloud.firestore {
         allow create, update, delete: if isAdmin();
       }
 
+      // ---- Time logs (hours actually worked) ----
+      // A job is a PLAN, a timelog is a FACT — separate collections so that
+      // deleting a cancelled job can never touch recorded hours, and so an
+      // employee could later be allowed to log their own time without gaining
+      // any power over the schedule. One document per PERSON per line of work.
+      // Same uid-not-name rule as jobs.
+      match /timelogs/{logId} {
+        allow read: if isAdmin() || isBookkeeper();
+        allow read: if isEmployee() &&
+          ('employeeUids' in resource.data) &&
+          request.auth.uid in resource.data.employeeUids;
+        allow create, update, delete: if isAdmin();
+      }
+
       // ---- Price table ----
       // priceMeta/config holds the vendor columns and the share list.
       // Each row (item) is its own doc in priceItems, so a price edit rewrites
