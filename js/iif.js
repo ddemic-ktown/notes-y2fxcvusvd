@@ -198,7 +198,13 @@ export function parseHoursNote(text, customers, employees, range = {}) {
   let currentDate = null;
   let activeEmployees = [];
 
-  for (const rawLine of lines) {
+  // Indexed, because each entry records WHICH line it came from. The hours
+  // screen writes corrections back into the note, and locating the line by
+  // matching its text would be unsafe: identical lines genuinely recur
+  // ("davor 8-4 smith" on Monday and again on Tuesday), so an edit would land
+  // on the wrong day. Position is the key; the text is only a sanity check.
+  for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
+    const rawLine = lines[lineIndex];
     // Strip inline comments (// and everything after)
     const uncommented = rawLine.replace(/\/\/.*$/, '');
     const line = uncommented.trim();
@@ -327,6 +333,7 @@ export function parseHoursNote(text, customers, employees, range = {}) {
       hoursFormatted: hours ? formatDuration(hours) : '',
       confidence,
       raw: rawLine.trim(),
+      lineIndex,          // position in the note body — see the loop comment
       needsReview,
       issue,
     });

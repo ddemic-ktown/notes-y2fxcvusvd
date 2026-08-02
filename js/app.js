@@ -16,6 +16,8 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 10, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.08.02-0846', 'Hours grid: tap the note line to fix it in your hours note without leaving the chart'],
+  ['v2026.08.02-0839', 'Hours grid: Cancel and Save now work when the keyboard is open'],
   ['v2026.08.02-0745', 'Hours grid: no entry count and no warning text — the orange row is the only flag'],
   ['v2026.08.02-0740', 'Home cards are titles only; "Process/enter hours" is now just "Hours"'],
   ['v2026.08.02-0734', 'Hours screen no longer scrolls the note line away when the keyboard opens'],
@@ -24,8 +26,6 @@ const CHANGELOG = [
   ['v2026.08.01-0802', 'Hours chart: searchable drop lists for employee and customer, note line pinned on top'],
   ['v2026.08.01-0707', 'Hours chart now looks and edits like the price table — every field editable'],
   ['v2026.08.01-0401', 'Opening the app with an active session no longer flashes the sign-in screen'],
-  ['v2026.08.01-0346', 'Calendar loads only nearby months, fetching older ones as you scroll to them'],
-  ['v2026.08.01-0321', 'Fewer database writes while typing; saves on Enter, paste and leaving the app'],
 ];
 const APP_VERSION = CHANGELOG[0][0];
 
@@ -6160,15 +6160,88 @@ function renderIIFEntries(entries) {
 }
 
 // The note line for whichever row is open. Lives in the sticky header, so it
-// stays put no matter how far down the chart you are working.
+// stays put no matter how far down the chart you are working. Tapping it (as
+// an admin) edits the actual line in the hours note — see saveIifNoteLine.
+let iifSrcEditing = false;
+function openIifCellEntryIndex() {
+  if (!openIifCell) return -1;
+  return parseInt(openIifCell.split('|')[0].split(':')[0], 10);
+}
 function renderIifSrcBar() {
   if (!iifSrcBar) return;
-  if (!openIifCell) { iifSrcBar.hidden = true; iifSrcBar.innerHTML = ''; return; }
-  const idx = parseInt(openIifCell.split('|')[0].split(':')[0], 10);
+  if (!openIifCell) { iifSrcBar.hidden = true; iifSrcBar.innerHTML = ''; iifSrcEditing = false; return; }
+  const idx = openIifCellEntryIndex();
   const e = iifParsedEntries[idx];
   if (!e) { iifSrcBar.hidden = true; return; }
-  iifSrcBar.innerHTML = `<span class="iif-src-label">Note line:</span> ${escapeHtml(e.raw || '(blank)')}`;
   iifSrcBar.hidden = false;
+  if (iifSrcEditing) {
+    iifSrcBar.innerHTML = `
+      <textarea id="iif-src-input" class="iif-src-input" rows="2"></textarea>
+      <p id="iif-src-error" class="iif-src-error" hidden></p>
+      <div class="price-cell-actions iif-src-actions">
+        <button class="price-save iif-src-save" type="button">Save to note</button>
+        <button class="price-cancel iif-src-cancel" type="button">Cancel</button>
+      </div>`;
+    const ta = document.getElementById('iif-src-input');
+    // Set as a property, not in the markup: the raw line can contain anything.
+    ta.value = e.raw || '';
+    wireIifCellButton(iifSrcBar.querySelector('.iif-src-save'), () => {
+      const res = saveIifNoteLine(idx, ta.value);
+      if (!res.ok) {
+        const err = document.getElementById('iif-src-error');
+        if (err) { err.textContent = res.msg; err.hidden = false; }
+        return;
+      }
+      iifSrcEditing = false;
+      renderIifSrcBar();
+    });
+    wireIifCellButton(iifSrcBar.querySelector('.iif-src-cancel'), () => {
+      iifSrcEditing = false;
+      renderIifSrcBar();
+    });
+    setTimeout(() => { ta.focus(); }, 0);
+    return;
+  }
+  const canEdit = isAdminRole();
+  iifSrcBar.innerHTML =
+    `<span class="iif-src-label">Note line:</span> <span class="iif-src-text">${escapeHtml(e.raw || '(blank)')}</span>` +
+    (canEdit ? '<span class="iif-src-hint">tap to edit the note</span>' : '');
+  iifSrcBar.classList.toggle('iif-src-tappable', canEdit);
+  if (canEdit) {
+    wireIifCellButton(iifSrcBar, () => { iifSrcEditing = true; renderIifSrcBar(); });
+  }
+}
+
+// Write one corrected line back into the "hours" note.
+//
+// Deliberately does NOT re-parse: re-reading the note would rebuild every entry
+// and throw away the corrections you'd already made in the grid, and shift the
+// row indexes the open cell is keyed on. The note is fixed for next time; the
+// row keeps the values you can edit directly anyway.
+function saveIifNoteLine(idx, text) {
+  if (!isAdminRole()) return { ok: false, msg: 'Read-only access.' };
+  const e = iifParsedEntries[idx];
+  if (!e) return { ok: false, msg: 'That row is gone — reopen this screen.' };
+  // Re-read from Storage rather than trusting the copy cached when this screen
+  // opened: the note may have been edited here or on another device since.
+  const note = findHoursNote();
+  if (!note) return { ok: false, msg: 'The hours note no longer exists.' };
+  const { title, body } = splitTitleAndBody(note.body);
+  const lines = body.split('\n');
+  const li = e.lineIndex;
+  if (li == null || li < 0 || li >= lines.length) {
+    return { ok: false, msg: 'The note has changed — reopen this screen to edit it.' };
+  }
+  // Position located the line; the text confirms it's still the same one.
+  if (lines[li].trim() !== (e.raw || '').trim()) {
+    return { ok: false, msg: 'That line changed somewhere else — reopen this screen.' };
+  }
+  lines[li] = text;
+  const nextBody = lines.join('\n');
+  Storage.updateNote(note.id, title + '\n' + nextBody);
+  e.raw = text.trim();
+  iifNoteBody = nextBody;    // keep the cache in step for a later re-parse
+  return { ok: true };
 }
 
 // Both drop lists are rebuilt when the screen opens: employees and customers can
@@ -6197,6 +6270,7 @@ function refreshIifDatalists() {
 function closeIifCell(rerender = true) {
   iifOutsideTap.detach();
   openIifCell = null;
+  iifSrcEditing = false;     // never strand a half-finished note edit
   if (rerender) renderIIFEntries(iifParsedEntries);
   else renderIifSrcBar();     // no re-render: retire the pinned note line here
 }
@@ -6237,8 +6311,10 @@ function focusOpenIifCell() {
 const iifOutsideTap = makeOutsideTapWatcher({
   isOpen: () => !!openIifCell,
   // The include tick counts as "inside": tapping it with a cell open should
-  // toggle the row, not close the editor and swallow the tap.
-  editingSelector: '.price-cell-editing, .iif-check',
+  // toggle the row, not close the editor and swallow the tap. So does the note
+  // bar — tapping it opens ITS editor, and closing the cell would take the bar
+  // away with it.
+  editingSelector: '.price-cell-editing, .iif-check, .iif-src-bar',
   cellSelector: '.iif-grid .price-cell',
   onCell: (other) => {
     if (!other.dataset.cellkey) return false;
@@ -6298,6 +6374,36 @@ function commitIifCustomer(idx, name) {
   e.customerMatched = name;
 }
 
+// Save/Cancel act on POINTERDOWN, not click.
+//
+// Tapping either button blurs the open input, which dismisses the keyboard,
+// which changes --app-vh — and this screen is SIZED to --app-vh (it has to be;
+// see the note-line fix in v2026.08.02-0734). So the whole screen reflows
+// between pointerdown and pointerup, the button slides out from under your
+// finger, the two events land on different elements, and the browser never
+// dispatches a click at all. Cancel looked completely dead; Save only seemed
+// to work because Enter is the other way to trigger it.
+//
+// preventDefault on pointerdown keeps the field focused so nothing moves until
+// we've acted. The click listener is a fallback for anything without pointer
+// events, and the `done` flag stops both paths firing.
+//
+// The price table wires the identical buttons with a plain click and is fine —
+// #price-view isn't sized to the visible viewport, so it doesn't reflow when
+// the keyboard closes. Don't "fix" that one to match.
+function wireIifCellButton(el, fn) {
+  if (!el) return;
+  let done = false;
+  const run = (ev) => {
+    if (done) return;
+    done = true;
+    ev.preventDefault();
+    fn();
+  };
+  el.addEventListener('pointerdown', run);
+  el.addEventListener('click', run);
+}
+
 function wireIifGrid() {
   if (!iifGrid) return;
   // Include/exclude, tracked per entry+employee (one row each).
@@ -6347,10 +6453,8 @@ function wireIifGrid() {
     }
     closeIifCell();
   };
-  const saveBtn = editing.querySelector('.iif-save');
-  const cancelBtn = editing.querySelector('.iif-cancel');
-  if (saveBtn) saveBtn.addEventListener('click', save);
-  if (cancelBtn) cancelBtn.addEventListener('click', () => closeIifCell());
+  wireIifCellButton(editing.querySelector('.iif-save'), save);
+  wireIifCellButton(editing.querySelector('.iif-cancel'), () => closeIifCell());
   editing.querySelectorAll('input').forEach(input => {
     input.addEventListener('keydown', (ev) => {
       if (ev.key === 'Enter') { ev.preventDefault(); save(); }
