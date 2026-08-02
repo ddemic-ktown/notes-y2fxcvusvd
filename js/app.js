@@ -16,6 +16,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 10, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.08.02-1506', 'Diagnostic build: reports what the hours Cancel button actually receives'],
   ['v2026.08.02-1456', 'Deleting a customer now says where the notes go; Trash is a button, not a long list'],
   ['v2026.08.02-1447', 'Proper undo and redo icons that look the same on every device'],
   ['v2026.08.02-1446', 'iPhone: the date picker stays open instead of closing and inserting today'],
@@ -25,7 +26,6 @@ const CHANGELOG = [
   ['v2026.08.02-1407', 'Save hours from the chart — saved lines show green, and disagreements show red'],
   ['v2026.08.02-1353', 'Hours grid: Cancel now closes the note-line editor instead of reopening it'],
   ['v2026.08.02-1316', 'Price table: holding a price no longer opens the editor and keyboard behind the history'],
-  ['v2026.08.02-0943', 'Hours grid: Save/Cancel moved to the header so nothing can cover them; pinch to zoom'],
 ];
 const APP_VERSION = CHANGELOG[0][0];
 
@@ -6552,6 +6552,7 @@ function closeIifCell(rerender = true) {
 }
 
 function openIifCellAt(cellKey) {
+  iifTrace = [];              // TEMP: diagnostic trace, reset per cell opened
   openIifCell = cellKey;
   renderIIFEntries(iifParsedEntries);
   focusOpenIifCell();
@@ -6796,10 +6797,50 @@ function renderIifCellBar(col) {
   showIifCellHint('');
   iifCellBar.hidden = false;
 }
-wireIifCellButton(document.getElementById('iif-cell-save'), () => {
-  if (iifCellSaveFn) iifCellSaveFn();
+// ---- TEMPORARY DIAGNOSTIC (v2026.08.02-1512) ----
+// Cancel reportedly does nothing, and three readings of this code have not
+// explained why. Rather than guess a fourth time, record what the button
+// actually receives and show it on screen — there is no console on a phone.
+// REMOVE once the cause is known: this block, iifTrace/iifDiag, and the
+// window.onerror hook below.
+// Written to #iif-status, NOT to the hint inside the bar: closing the cell
+// hides that bar, which would erase the very evidence we're collecting.
+let iifTrace = [];
+function iifDiag(step) {
+  iifTrace.push(step);
+  if (iifStatus) iifStatus.textContent = 'cancel: ' + iifTrace.join(' ');
+}
+// An exception thrown inside a re-render used to vanish silently, which looks
+// exactly like a dead button. Surface it on screen instead.
+window.addEventListener('error', (e) => {
+  if (!hoursView || !hoursView.classList.contains('active')) return;
+  if (iifStatus) iifStatus.textContent = 'error: ' + (e.message || 'unknown');
 });
-wireIifCellButton(document.getElementById('iif-cell-cancel'), () => closeIifCell());
+
+wireIifCellButton(document.getElementById('iif-cell-save'), () => {
+  try {
+    if (iifCellSaveFn) iifCellSaveFn();
+  } catch (err) {
+    if (iifStatus) iifStatus.textContent = 'save failed: ' + (err && err.message ? err.message : String(err));
+  }
+});
+// Raw listeners, independent of wireIifCellButton, so we can tell "the button
+// never received the event" from "it received it and the handler didn't run".
+const iifCancelEl = document.getElementById('iif-cell-cancel');
+if (iifCancelEl) {
+  ['touchstart', 'pointerdown', 'mousedown', 'click'].forEach(t => {
+    iifCancelEl.addEventListener(t, () => iifDiag(t), true);
+  });
+}
+wireIifCellButton(iifCancelEl, () => {
+  iifDiag('handler');
+  try {
+    closeIifCell();
+    iifDiag('done');
+  } catch (err) {
+    iifDiag('THREW:' + (err && err.message ? err.message : String(err)));
+  }
+});
 
 const iifZoomIn = document.getElementById('iif-zoom-in');
 const iifZoomOut = document.getElementById('iif-zoom-out');
