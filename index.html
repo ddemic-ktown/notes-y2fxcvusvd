@@ -541,7 +541,7 @@
       <div class="setting-row setting-list-row" data-staff-only>
         <h3 class="setting-list-title">Trash</h3>
         <p class="muted setting-hint">Deleted notes and customers stay here for 30 days, then go for good.</p>
-        <ul id="trash-list" class="members-list"></ul>
+        <button id="trash-open-btn" class="secondary setting-wide-btn" type="button">Trash</button>
       </div>
 
       <div class="setting-row setting-list-row" data-staff-only>
@@ -623,7 +623,12 @@
           <button id="editor-more-btn" class="icon-btn date-btn editor-more-btn" aria-label="More options">⋯</button>
           <div id="editor-more-dropdown" class="editor-more-dropdown" hidden>
             <button id="date-today-btn" class="editor-more-item" aria-label="Insert today's date">Today's date</button>
-            <label id="date-picker-btn" class="editor-more-item" aria-label="Pick a date to insert" style="cursor:pointer;">Pick a date…<input id="date-picker-input" type="date" style="position:absolute;opacity:0;pointer-events:none;width:1px;height:1px;" /></label>
+            <!-- The date input is laid OVER this row at full size rather than
+                 hidden at 1px inside a <label>. iOS anchors its date wheel to
+                 the control and dismisses it when that control isn't really
+                 there — which is why the picker used to flash and close, and
+                 a dismissed wheel commits today's date. -->
+            <div id="date-picker-btn" class="editor-more-item date-picker-row"><span aria-hidden="true">Pick a date…</span><input id="date-picker-input" class="date-picker-overlay" type="date" aria-label="Pick a date to insert" /></div>
             <button id="assign-btn" class="editor-more-item" aria-label="Share with users" hidden>Share with users</button>
             <button id="assign-customer-btn" class="editor-more-item" aria-label="Assign to customer" hidden>Assign to customer</button>
             <button id="duplicate-note-btn" class="editor-more-item" aria-label="Duplicate note" hidden>Duplicate note</button>
@@ -642,8 +647,16 @@
         <button id="search-prev-btn" class="icon-btn" aria-label="Previous match">↑</button>
         <button id="search-next-btn" class="icon-btn" aria-label="Next match">↓</button>
         <button id="checkbox-btn" class="icon-btn" aria-label="Toggle checkbox on line(s)">☐</button>
-        <button id="undo-btn" class="icon-btn" aria-label="Undo" disabled>↶</button>
-        <button id="redo-btn" class="icon-btn" aria-label="Redo" disabled>↷</button>
+        <!-- Inline SVG, not ↶/↷. Those are text glyphs, so iOS fell back to a
+             different font and drew them thin and mismatched against the rest
+             of the toolbar. currentColor means they follow the theme and dim
+             with :disabled for free. -->
+        <button id="undo-btn" class="icon-btn" aria-label="Undo" disabled>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h9a6 6 0 0 1 0 12H7"/><path d="M8 4 4 8l4 4"/></svg>
+        </button>
+        <button id="redo-btn" class="icon-btn" aria-label="Redo" disabled>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 8h-9a6 6 0 0 0 0 12h6"/><path d="M16 4l4 4-4 4"/></svg>
+        </button>
       </div>
       <button id="compiled-warning" class="compiled-warning" hidden></button>
     </header>
@@ -693,6 +706,18 @@
       <p class="muted" style="font-size:13px; margin:0 0 12px;">Select who can see this note. Admins always have access.</p>
       <ul id="assign-members-list" class="members-list"></ul>
       <button id="assign-save-btn" class="primary" style="margin-top:14px; width:100%; padding:10px; border:none; border-radius:var(--radius); font-weight:600; font-size:15px; cursor:pointer; background:var(--accent); color:var(--accent-ink);">Save</button>
+    </div>
+  </div>
+
+  <!-- TRASH -->
+  <div id="trash-modal" class="modal-overlay" hidden>
+    <div class="modal-panel">
+      <div class="modal-header">
+        <h2 class="modal-title">Trash</h2>
+        <button id="trash-close" class="icon-btn" type="button" aria-label="Close">✕</button>
+      </div>
+      <p class="modal-hint">Deleted notes and customers stay here for 30 days, then go for good. A customer restores together with the notes deleted alongside them.</p>
+      <ul id="trash-list" class="members-list trash-list"></ul>
     </div>
   </div>
 

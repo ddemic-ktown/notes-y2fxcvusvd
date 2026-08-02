@@ -16,16 +16,16 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 10, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.08.02-1456', 'Deleting a customer now says where the notes go; Trash is a button, not a long list'],
+  ['v2026.08.02-1447', 'Proper undo and redo icons that look the same on every device'],
+  ['v2026.08.02-1446', 'iPhone: the date picker stays open instead of closing and inserting today'],
+  ['v2026.08.02-1433', 'iPhone: the keyboard no longer disappears when moving from a note title to the note'],
+  ['v2026.08.02-1428', 'Calendar day view: swiping to another day now works on top of a job too'],
   ['v2026.08.02-1417', 'Every row in the hours chart can be exported; a conflict lets you tick only one side'],
   ['v2026.08.02-1407', 'Save hours from the chart — saved lines show green, and disagreements show red'],
   ['v2026.08.02-1353', 'Hours grid: Cancel now closes the note-line editor instead of reopening it'],
   ['v2026.08.02-1316', 'Price table: holding a price no longer opens the editor and keyboard behind the history'],
   ['v2026.08.02-0943', 'Hours grid: Save/Cancel moved to the header so nothing can cover them; pinch to zoom'],
-  ['v2026.08.02-0920', 'Hours grid: Cancel works on every cell, and picking a date no longer jumps to another row'],
-  ['v2026.08.02-0846', 'Hours grid: tap the note line to fix it in your hours note without leaving the chart'],
-  ['v2026.08.02-0839', 'Hours grid: Cancel and Save now work when the keyboard is open'],
-  ['v2026.08.02-0745', 'Hours grid: no entry count and no warning text — the orange row is the only flag'],
-  ['v2026.08.02-0740', 'Home cards are titles only; "Process/enter hours" is now just "Hours"'],
 ];
 const APP_VERSION = CHANGELOG[0][0];
 
@@ -668,6 +668,11 @@ function showCalendarDay(dateStr) {
 // would otherwise do. Only effective because a long-press involves no movement
 // — once a scroll is under way, touchmove stops being cancelable.
 let calTouchOwned = false;
+// Set when a long-press drag or a resize actually claims the gesture, and
+// cleared at the start of the NEXT touch — not on release. The day-swipe
+// handler reads it at touchend, and calTouchOwned is already false by then
+// (it's cleared on pointerup, and pointer/touch ordering isn't guaranteed).
+let calDragClaimed = false;
 function blockCalDragScroll(e) {
   if (calTouchOwned && e.cancelable) e.preventDefault();
 }
@@ -865,6 +870,7 @@ function wireDayInteractions(canEdit) {
     let downX = 0, downY = 0;   // where the finger landed, to tell scroll from press
     const takeOverCalTouch = () => {
       calTouchOwned = true;
+      calDragClaimed = true;     // survives past pointerup, for the swipe check
       document.addEventListener('touchmove', blockCalDragScroll, { passive: false });
     };
     const releaseCalTouch = () => {
@@ -1041,13 +1047,20 @@ if (calDayMain) {
   let sx = 0, sy = 0, tracking = false;
   calDayMain.addEventListener('touchstart', (e) => {
     if (e.touches.length !== 1) return;
-    // A finger that lands on a job block belongs to the drag/resize gesture.
-    if (e.target.closest('.cal-block, .cal-resize')) { tracking = false; return; }
+    // Swipes starting ON a job block used to be discarded here, on the theory
+    // that such a finger "belongs to the drag gesture". It doesn't: a drag
+    // needs a 450ms long-press, and the block's own pointermove cancels that
+    // timer after 8px of travel — so a swipe across a job can never become a
+    // drag. All the guard achieved was that you couldn't change day by swiping
+    // anywhere a job was drawn. Judged at touchend instead, on whether a drag
+    // actually took over.
+    calDragClaimed = false;
     sx = e.touches[0].clientX; sy = e.touches[0].clientY; tracking = true;
   }, { passive: true });
   calDayMain.addEventListener('touchend', (e) => {
     if (!tracking) return;
     tracking = false;
+    if (calDragClaimed) return;     // that was a drag or a resize, not a swipe
     const t = e.changedTouches[0];
     const dx = t.clientX - sx, dy = t.clientY - sy;
     // Clearly horizontal only — the timeline scrolls vertically.
@@ -2901,7 +2914,7 @@ function showSettings() {
   renderEmployeeList();
   if (accountEmailEl && auth.currentUser) accountEmailEl.textContent = auth.currentUser.email || '';
   refreshSeedButtons();
-  renderTrashList();
+  refreshTrashUi();
   applyClockButton();
   const moveCheckedInput = document.getElementById('setting-move-checked');
   if (moveCheckedInput) moveCheckedInput.checked = getMoveCheckedToBottom();
@@ -3908,10 +3921,16 @@ if (editorMoreBtn) editorMoreBtn.addEventListener('click', (e) => {
   toggleMoreDropdown();
 });
 // Close dropdown when any item inside it is clicked
-// Exception: date-picker-btn is a label that opens the native picker — let iOS handle it first
+// Exception: the date row holds the native picker — leave the menu open under
+// it, or the input the wheel is anchored to disappears mid-gesture.
 if (editorMoreDropdown) editorMoreDropdown.addEventListener('click', (e) => {
   if (e.target.closest('#date-picker-btn')) return;
   closeMoreDropdown();
+});
+// Start every pick from empty, so a value left over from last time can't be
+// re-committed by a dismissal.
+if (datePickerInput) datePickerInput.addEventListener('pointerdown', () => {
+  datePickerInput.value = '';
 });
 
 dateTodayBtn.addEventListener('click', () => {
@@ -4065,7 +4084,21 @@ function restoreBodyEditable() {
 }
 bodyInput.addEventListener('touchstart', () => {
   if (isReadOnlyRole() || bodyInput.readOnly) return;
-  if (document.activeElement === bodyInput) return; // already typing
+  // Skip the trick whenever the keyboard is ALREADY UP — body or TITLE.
+  //
+  // The guard used to check the body alone, and that cost the keyboard on
+  // iPhone: after typing a new note's title, focus is on the title and the
+  // keyboard is showing. Tapping the body then made it readonly first, so iOS
+  // dismissed the keyboard (a readonly field can't take input) and the
+  // blur()/focus() in the click handler, arriving mid-dismissal, was ignored.
+  // Focus was correct all along — which is why switching apps and back brought
+  // the keyboard straight back for the already-focused textarea.
+  //
+  // The trick exists to stop a checkbox tap RAISING the keyboard. If it's
+  // already up there is nothing to prevent, so applying it can only do harm.
+  // Cost of this: tapping a checkbox while the title is focused now keeps the
+  // keyboard up. A small wrong in place of a large one.
+  if (document.activeElement === bodyInput || document.activeElement === titleInput) return;
   bodyTempReadonly = true;
   bodyInput.readOnly = true;
   // Safety net: a tap that never becomes a click (scroll/drag) must not leave
@@ -4510,9 +4543,13 @@ if (editorCancelBtn) editorCancelBtn.addEventListener('click', () => {
 deleteBtn.addEventListener('click', () => {
   if (!currentId) return;
   if (currentType === 'note' && currentIsDefault) return;
+  // Say where it goes and that it comes back. The cascade is intentional (a
+  // customer's notes travel with them and restore together), but that isn't
+  // guessable — people looked for the notes in Orphaned notes and concluded
+  // they'd been lost.
   const label = currentType === 'customer'
-    ? 'Delete this customer and all their notes?'
-    : 'Delete this note?';
+    ? 'Delete this customer?\n\nTheir notes will be deleted too. Everything goes to Settings → Trash, where you can restore it for 30 days.'
+    : 'Delete this note?\n\nIt goes to Settings → Trash, where you can restore it for 30 days.';
   if (confirm(label)) {
     if (currentType === 'customer') {
       Storage.deleteCustomer(currentId);
@@ -5232,6 +5269,43 @@ renderSyncStatus();
 // Deleting is a soft delete (deletedAt); this is where things can be brought
 // back or finished off. A customer and the notes deleted with them appear as
 // one entry, so restoring puts the whole set back together.
+// Settings shows a BUTTON, not the list. The list itself lives in a modal, so
+// opening Settings no longer walks every deleted record just to draw rows
+// nobody asked to see.
+function renderTrashButton() {
+  const btn = document.getElementById('trash-open-btn');
+  if (!btn || !isAdminRole()) return;
+  const n = Storage.listTrash().length;
+  btn.textContent = n ? `Trash (${n})` : 'Trash is empty';
+  btn.disabled = n === 0;
+}
+// What Settings (and a background sync) should call: always the button, and
+// the list too if it happens to be open.
+function refreshTrashUi() {
+  renderTrashButton();
+  const modal = document.getElementById('trash-modal');
+  if (modal && !modal.hidden) renderTrashList();
+}
+function openTrashModal() {
+  const modal = document.getElementById('trash-modal');
+  if (!modal || !isAdminRole()) return;
+  renderTrashList();
+  modal.hidden = false;
+}
+function closeTrashModal() {
+  const modal = document.getElementById('trash-modal');
+  if (modal) modal.hidden = true;
+  renderTrashButton();     // the count may have changed while it was open
+}
+const trashOpenBtn = document.getElementById('trash-open-btn');
+if (trashOpenBtn) trashOpenBtn.addEventListener('click', openTrashModal);
+const trashCloseBtn = document.getElementById('trash-close');
+if (trashCloseBtn) trashCloseBtn.addEventListener('click', closeTrashModal);
+const trashModalEl = document.getElementById('trash-modal');
+if (trashModalEl) trashModalEl.addEventListener('click', (e) => {
+  if (e.target === trashModalEl) closeTrashModal();
+});
+
 function renderTrashList() {
   const el = document.getElementById('trash-list');
   if (!el || !isAdminRole()) return;
@@ -5256,6 +5330,7 @@ function renderTrashList() {
     btn.addEventListener('click', async () => {
       await Storage.restoreFromTrash(btn.dataset.kind, btn.dataset.id);
       renderTrashList();
+      renderTrashButton();
     });
   });
   el.querySelectorAll('.trash-purge').forEach(btn => {
@@ -5263,6 +5338,7 @@ function renderTrashList() {
       if (!confirm('Delete this permanently? This cannot be undone.')) return;
       await Storage.purgeFromTrash(btn.dataset.kind, btn.dataset.id);
       renderTrashList();
+      renderTrashButton();
     });
   });
 }
@@ -5660,7 +5736,7 @@ function rerenderCurrent() {
     renderKeywordList();
     renderEmployeeList();
     renderMembersList();
-    renderTrashList();
+    refreshTrashUi();
   }
 }
 
