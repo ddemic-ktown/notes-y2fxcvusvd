@@ -399,14 +399,15 @@
         <label class="iif-range-label">From <input id="iif-from-date" type="date" class="iif-date-input" /></label>
         <label class="iif-range-label">To <input id="iif-to-date" type="date" class="iif-date-input" /></label>
       </div>
+      <!-- The note line the open row was read from. It lives INSIDE the header
+           because the header is position: sticky — anywhere else it scrolled
+           away once you were working on rows further down, and the keyboard
+           pushed it off the top. You're correcting what the parser read, so it
+           has to stay in front of you. -->
+      <div id="iif-src-bar" class="iif-src-bar" hidden></div>
     </header>
     <main class="price-main hours-main">
       <div id="iif-status" class="iif-status"></div>
-      <!-- The note line the open row was read from. PINNED here rather than
-           sitting in the table: you're correcting what the parser read, so it
-           has to stay in view while the keyboard and the drop list cover the
-           bottom of the screen. -->
-      <div id="iif-src-bar" class="iif-src-bar" hidden></div>
       <div id="iif-scroll" class="price-scroll iif-scroll">
         <table id="iif-grid" class="price-table iif-grid"></table>
       </div>

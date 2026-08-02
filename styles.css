@@ -1291,7 +1291,10 @@ body.dark-mode .compiled-action.danger-soft { color: #f87171; border-color: #b91
 .hours-main { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .hours-actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
 .iif-status { font-size: 13px; color: var(--ink-soft); padding: 8px 12px 0; flex-shrink: 0; }
-.iif-scroll { flex: 1; min-height: 120px; padding: 8px 12px; }
+/* Trailing space so ANY row — including the last — can be scrolled up to sit
+   directly under the pinned note line. Without it the bottom rows stay at the
+   bottom of the screen, as far from the note line as it is possible to get. */
+.iif-scroll { flex: 1; min-height: 120px; padding: 8px 12px 55vh; }
 .iif-grid { width: 100%; }
 /* Two sticky columns: the include tick, then the date. The tick has a fixed
    width so the date column knows where to start — `left` can't be `auto`. */
@@ -1315,16 +1318,18 @@ body.dark-mode .iif-grid tbody tr.iif-needs-review td { background: #2d1a00; }
    you scrolled, and it has to survive the keyboard and an open drop list. */
 .iif-src-bar {
   flex-shrink: 0;
-  margin: 8px 12px 0;
   padding: 8px 10px;
   border: 1px solid var(--line);
   border-left: 3px solid var(--accent);
   border-radius: 6px;
-  background: var(--surface);
+  background: var(--bg);
   color: var(--ink-soft);
   font-size: 13px;
   white-space: pre-wrap;
   word-break: break-word;
+  /* Long note lines must not push the chart off the screen */
+  max-height: 22vh;
+  overflow-y: auto;
 }
 .iif-src-bar[hidden] { display: none; }
 .iif-src-label { font-weight: 600; color: var(--ink); margin-right: 4px; }

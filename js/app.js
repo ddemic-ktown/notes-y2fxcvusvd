@@ -16,6 +16,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 10, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.08.02-0728', 'Hours card on the home screen; shorter dates; the note line now follows you down the chart'],
   ['v2026.08.01-0902', 'Process/enter hours is now its own screen like the Price Table, with the date range on it'],
   ['v2026.08.01-0802', 'Hours chart: searchable drop lists for employee and customer, note line pinned on top'],
   ['v2026.08.01-0707', 'Hours chart now looks and edits like the price table — every field editable'],
@@ -25,7 +26,6 @@ const CHANGELOG = [
   ['v2026.08.01-0311', 'Your theme, time format and other preferences now follow you to every device'],
   ['v2026.08.01-0306', 'Signing in shows a loading card instead of leaving the sign-in form on screen'],
   ['v2026.08.01-0207', 'Calendar day view: long-press to move a job works on the phone again'],
-  ['v2026.08.01-0155', 'Android: share photos, files or links into JobPilot and pick a customer'],
 ];
 const APP_VERSION = CHANGELOG[0][0];
 
@@ -3240,6 +3240,18 @@ function renderNotesList() {
       <p class="note-preview">${priceItemCount} ${priceItemCount === 1 ? 'item' : 'items'} · ${priceVendorCount} ${priceVendorCount === 1 ? 'vendor' : 'vendors'}</p>
     </article>
   ` : '';
+  // Hours card — same audience as the Settings entry: admin (full) and
+  // bookkeeper (read-only export). The preview only asks whether the note
+  // exists; counting entries would mean parsing it on every home render.
+  const hoursCard = (isAdminRole() || isBookkeeperRole()) ? `
+    <article class="note-card nav-card" data-nav="hours">
+      <div class="note-head">
+        <p class="note-title">Process/enter hours</p>
+        <span class="note-chevron">›</span>
+      </div>
+      <p class="note-preview">${findHoursNote() ? 'From your hours note' : 'No hours note yet'}</p>
+    </article>
+  ` : '';
 
   const keywordsRanked = getKeywords()
     .map(kw => {
@@ -3352,9 +3364,10 @@ function renderNotesList() {
       </div>
       <p class="note-preview">${orphanCount > 0 ? 'Tap to review notes with no customer' : 'No orphaned notes'}</p>
     </article>`;
-  // Customers and Price Table sit side by side at the top of the home screen
+  // Customers and Price Table sit side by side at the top of the home screen;
+  // Calendar and Hours pair up on the row beneath. A lone card fills the row.
   const navRow = `<div class="nav-card-row">${customersCard}${priceCard}</div>`
-    + (calendarCard ? `<div class="nav-card-row">${calendarCard}</div>` : '');
+    + ((calendarCard || hoursCard) ? `<div class="nav-card-row">${calendarCard}${hoursCard}</div>` : '');
   notesList.innerHTML = navRow + pinnedBlock + olderHtml + orphanCard;
 
   applyLayoutMode();
@@ -3398,6 +3411,7 @@ function renderNotesList() {
       else if (card.dataset.keyword) showAggregator(card.dataset.keyword);
       else if (card.dataset.nav === 'price') showPriceTable();
       else if (card.dataset.nav === 'calendar') showCalendar();
+      else if (card.dataset.nav === 'hours') showHoursView();
       else if (card.dataset.nav === 'orphans') {
         const count = Storage.listOrphanedNotes().length;
         if (count > 0) showOrphanNotes();
@@ -6046,6 +6060,14 @@ function iifCellActionsHtml() {
 function iifIsoDate(e) {
   return (e.date instanceof Date && !Number.isNaN(e.date.getTime())) ? ymd(e.date) : '';
 }
+// DISPLAY ONLY — "Tue, Jul 21". The year is noise when you're checking a
+// fortnight of work, and the weekday is what you actually reconcile against.
+// e.dateFormatted stays MM/DD/YYYY: generateIIF writes it straight into the
+// file and QuickBooks needs the full date there.
+function iifShortDate(e) {
+  if (!(e.date instanceof Date) || Number.isNaN(e.date.getTime())) return e.dateFormatted || '—';
+  return e.date.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
+}
 // Accepts what trades actually write: "3.5" or "3:30".
 function parseHoursInput(text) {
   const val = String(text || '').trim();
@@ -6068,7 +6090,7 @@ function iifCellHtml(row, col) {
         <input class="iif-edit-date" type="date" value="${escapeHtml(iifIsoDate(e))}" />
         ${iifCellActionsHtml()}</td>`;
     }
-    return `<td class="price-cell iif-date" ${cellAttrs}>${escapeHtml(e.dateFormatted || '—')}</td>`;
+    return `<td class="price-cell iif-date" ${cellAttrs}>${escapeHtml(iifShortDate(e))}</td>`;
   }
   if (col === 'employee') {
     if (open) {
@@ -6142,7 +6164,8 @@ function renderIIFEntries(entries) {
   wireIifGrid();
 }
 
-// The note line for whichever row is open, pinned above the grid.
+// The note line for whichever row is open. Lives in the sticky header, so it
+// stays put no matter how far down the chart you are working.
 function renderIifSrcBar() {
   if (!iifSrcBar) return;
   if (!openIifCell) { iifSrcBar.hidden = true; iifSrcBar.innerHTML = ''; return; }
@@ -6154,7 +6177,7 @@ function renderIifSrcBar() {
   iifSrcBar.hidden = false;
 }
 
-// Both drop lists are rebuilt when the modal opens: employees and customers can
+// Both drop lists are rebuilt when the screen opens: employees and customers can
 // change between sessions, and a stale list would offer names that no longer
 // exist.
 function refreshIifDatalists() {
@@ -6191,15 +6214,21 @@ function openIifCellAt(cellKey) {
   setTimeout(() => iifOutsideTap.attach(), 0);
 }
 
-// Bring the open cell clear of the sticky header and the keyboard, then focus
-// it — same idea as focusOpenPriceCell.
+// Bring the open cell to the TOP of the chart, so the row you're editing sits
+// directly under the pinned note line however far down the chart it started.
+// The 55vh of trailing space on .iif-scroll is what lets the last rows get
+// there. Two frames: the note line appearing changes the header's height, and
+// measuring before that reflow lands the row in the wrong place.
 function focusOpenIifCell() {
   const cell = iifGrid ? iifGrid.querySelector('.price-cell-editing') : null;
   if (!cell || !iifScroll) return;
-  requestAnimationFrame(() => {
+  requestAnimationFrame(() => requestAnimationFrame(() => {
     const c = cell.getBoundingClientRect();
     const s = iifScroll.getBoundingClientRect();
-    iifScroll.scrollTop += (c.top - s.top) - 34;
+    // Clear the sticky column header, nothing more.
+    const headH = (iifGrid.querySelector('thead') || { getBoundingClientRect: () => ({ height: 0 }) })
+      .getBoundingClientRect().height;
+    iifScroll.scrollTop += (c.top - s.top) - headH - 4;
     if (c.left < s.left) iifScroll.scrollLeft += (c.left - s.left) - 8;
     else if (c.right > s.right) iifScroll.scrollLeft += (c.right - s.right) + 8;
     const input = cell.querySelector('input');
@@ -6208,7 +6237,7 @@ function focusOpenIifCell() {
     // select() is only meaningful on a text field — calling it on type="date"
     // throws in some browsers.
     if (input.type === 'text') input.select();
-  });
+  }));
 }
 
 const iifOutsideTap = makeOutsideTapWatcher({
