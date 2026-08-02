@@ -16,6 +16,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 10, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.08.02-1652', 'Back now closes an open pop-up instead of navigating the screen behind it'],
   ['v2026.08.02-1506', 'Diagnostic build: reports what the hours Cancel button actually receives'],
   ['v2026.08.02-1456', 'Deleting a customer now says where the notes go; Trash is a button, not a long list'],
   ['v2026.08.02-1447', 'Proper undo and redo icons that look the same on every device'],
@@ -25,7 +26,6 @@ const CHANGELOG = [
   ['v2026.08.02-1417', 'Every row in the hours chart can be exported; a conflict lets you tick only one side'],
   ['v2026.08.02-1407', 'Save hours from the chart — saved lines show green, and disagreements show red'],
   ['v2026.08.02-1353', 'Hours grid: Cancel now closes the note-line editor instead of reopening it'],
-  ['v2026.08.02-1316', 'Price table: holding a price no longer opens the editor and keyboard behind the history'],
 ];
 const APP_VERSION = CHANGELOG[0][0];
 
@@ -480,6 +480,37 @@ history.replaceState = (...args) => {
 window.addEventListener('popstate', () => {
   appHistoryDepth = Math.max(0, appHistoryDepth - 1);
   updateAppBackButtons();
+});
+
+// ---------- modals own the back press ----------
+// A sheet used to stay open while the SCREEN BEHIND IT navigated, because
+// modals never took part in history at all.
+//
+// Done with a MutationObserver on the `hidden` attribute rather than by
+// converting every open/close site: there are ~35 of them across 11 modals,
+// and one missed site would leave the history stack unbalanced — a worse bug
+// than the one being fixed. Watching the state itself cannot be missed, works
+// however a sheet is opened or closed (✕, tap outside, Save, Escape), and
+// covers any modal added later without anyone remembering to wire it up.
+const modalStack = [];
+let modalBackSwallow = 0;   // history.back() calls we issued ourselves
+let modalSyncing = false;   // we are the ones changing .hidden — don't echo
+document.querySelectorAll('.modal-overlay').forEach(el => {
+  new MutationObserver(() => {
+    // Mid-navigation, hideAllScreens closes the job modal. Consuming an entry
+    // then would eat a second screen off the stack.
+    if (handlingPopstate || modalSyncing) return;
+    const open = !el.hidden;
+    const at = modalStack.indexOf(el);
+    if (open && at === -1) {
+      modalStack.push(el);
+      history.pushState({ modal: el.id }, '');
+    } else if (!open && at !== -1) {
+      modalStack.splice(at, 1);
+      modalBackSwallow++;
+      history.back();          // retire the entry this sheet pushed
+    }
+  }).observe(el, { attributes: true, attributeFilter: ['hidden'] });
 });
 document.querySelectorAll('.app-back-btn').forEach(btn => {
   // history.back() fires the same popstate path Android's system back uses,
@@ -4395,6 +4426,20 @@ function commitAndCleanupEditor() {
 
 // Android/browser back button support
 window.addEventListener('popstate', (e) => {
+  // Our own history.back(), issued because a sheet was closed by its ✕ / a tap
+  // outside / a Save. Consume it and do nothing — the screen must not move.
+  if (modalBackSwallow > 0) { modalBackSwallow--; return; }
+  // A sheet is open: this back press belongs to IT, because opening it pushed
+  // its own history entry. Close the top one and leave the screen alone.
+  if (modalStack.length) {
+    const el = modalStack.pop();
+    modalSyncing = true;            // don't let the observer echo this hide
+    el.hidden = true;
+    modalSyncing = false;
+    if (el.id === 'trash-modal') renderTrashButton();
+    return;
+  }
+
   handlingPopstate = true;
   const screen = e.state && e.state.screen;
   currentPopstateTarget = screen;
