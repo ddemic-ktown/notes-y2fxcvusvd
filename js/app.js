@@ -16,6 +16,8 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 10, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.08.02-0745', 'Hours grid: no entry count and no warning text — the orange row is the only flag'],
+  ['v2026.08.02-0740', 'Home cards are titles only; "Process/enter hours" is now just "Hours"'],
   ['v2026.08.02-0734', 'Hours screen no longer scrolls the note line away when the keyboard opens'],
   ['v2026.08.02-0728', 'Hours card on the home screen; shorter dates; the note line now follows you down the chart'],
   ['v2026.08.01-0902', 'Process/enter hours is now its own screen like the Price Table, with the date range on it'],
@@ -24,8 +26,6 @@ const CHANGELOG = [
   ['v2026.08.01-0401', 'Opening the app with an active session no longer flashes the sign-in screen'],
   ['v2026.08.01-0346', 'Calendar loads only nearby months, fetching older ones as you scroll to them'],
   ['v2026.08.01-0321', 'Fewer database writes while typing; saves on Enter, paste and leaving the app'],
-  ['v2026.08.01-0311', 'Your theme, time format and other preferences now follow you to every device'],
-  ['v2026.08.01-0306', 'Signing in shows a loading card instead of leaving the sign-in form on screen'],
 ];
 const APP_VERSION = CHANGELOG[0][0];
 
@@ -3185,7 +3185,6 @@ function renderNotesList() {
     return;
   }
   const notes = Storage.listNotes();
-  const customersCount = Storage.listCustomers().length;
 
   // Customer/employee roles: simplified home — only the notes assigned to them.
   // (Admin and bookkeeper get the full home.)
@@ -3206,19 +3205,20 @@ function renderNotesList() {
     return;
   }
 
+  // The four nav cards are titles only — the counts they used to carry
+  // ("42 customers", "3 upcoming jobs") were never the reason anyone tapped
+  // them, and dropping them also drops per-render work: the calendar count
+  // walked every job and the hours line scanned every note looking for the
+  // "hours" note, on every home draw.
   const customersCard = `
     <article class="note-card nav-card" data-nav="customers">
       <div class="note-head">
         <p class="note-title">Customers</p>
         <span class="note-chevron">›</span>
       </div>
-      <p class="note-preview">${customersCount} ${customersCount === 1 ? 'customer' : 'customers'}</p>
     </article>
   `;
 
-  // Price table card — admins/bookkeepers always, employees only when shared
-  const priceItemCount = Storage.listPriceItems().length;
-  const priceVendorCount = Storage.getPriceConfig().vendors.length;
   // Calendar card — everyone except the read-only customer role
   const calendarCard = (isAdminRole() || isBookkeeperRole() || Storage.getRole() === 'employee') ? `
     <article class="note-card nav-card" data-nav="calendar">
@@ -3226,31 +3226,25 @@ function renderNotesList() {
         <p class="note-title">Calendar</p>
         <span class="note-chevron">›</span>
       </div>
-      <p class="note-preview">${(() => {
-        const upcoming = Storage.listJobs().filter(j => j.date >= ymd(new Date())).length;
-        return `${upcoming} upcoming job${upcoming === 1 ? '' : 's'}`;
-      })()}</p>
     </article>
   ` : '';
+  // Price table card — admins/bookkeepers always, employees only when shared
   const priceCard = Storage.canViewPriceTable() ? `
     <article class="note-card nav-card" data-nav="price">
       <div class="note-head">
         <p class="note-title">Price Table</p>
         <span class="note-chevron">›</span>
       </div>
-      <p class="note-preview">${priceItemCount} ${priceItemCount === 1 ? 'item' : 'items'} · ${priceVendorCount} ${priceVendorCount === 1 ? 'vendor' : 'vendors'}</p>
     </article>
   ` : '';
   // Hours card — same audience as the Settings entry: admin (full) and
-  // bookkeeper (read-only export). The preview only asks whether the note
-  // exists; counting entries would mean parsing it on every home render.
+  // bookkeeper (read-only export).
   const hoursCard = (isAdminRole() || isBookkeeperRole()) ? `
     <article class="note-card nav-card" data-nav="hours">
       <div class="note-head">
-        <p class="note-title">Process/enter hours</p>
+        <p class="note-title">Hours</p>
         <span class="note-chevron">›</span>
       </div>
-      <p class="note-preview">${findHoursNote() ? 'From your hours note' : 'No hours note yet'}</p>
     </article>
   ` : '';
 
@@ -5967,7 +5961,7 @@ if (changelogList) {
   `).join('');
 }
 
-// ---------- Process/enter hours ----------
+// ---------- Hours (parse the "hours" note, correct it, export) ----------
 // The parsed hours note rendered as an EDITABLE GRID that borrows the price
 // table's chrome (see index.html and styles.css). Same interaction: one cell
 // open at a time, the editor stacked inside the cell, tap elsewhere to move or
@@ -5982,7 +5976,6 @@ const iifGrid = document.getElementById('iif-grid');
 const iifScroll = document.getElementById('iif-scroll');
 const iifSrcBar = document.getElementById('iif-src-bar');
 const iifDownloadBtn = document.getElementById('iif-download-btn');
-const iifReviewNote = document.getElementById('iif-review-note');
 const editorIifBtn = document.getElementById('editor-iif-btn');
 
 let iifParsedEntries = [];
@@ -6103,9 +6096,10 @@ function iifCellHtml(row, col) {
     }
     const cls = emp ? '' : ' iif-empty-emp';
     const shown = emp || 'Nobody';
-    const issue = (first && e.issue) ? `<span class="iif-issue">⚠ ${escapeHtml(e.issue)}</span>` : '';
+    // No issue text here: the orange row already says "look at this", and a
+    // sentence under every uncertain name made the grid hard to read.
     return `<td class="price-cell" ${cellAttrs}>
-      <span class="iif-pick-value${cls}">${escapeHtml(shown)}</span>${issue}</td>`;
+      <span class="iif-pick-value${cls}">${escapeHtml(shown)}</span></td>`;
   }
   if (col === 'customer') {
     const name = e.customerMatched || '';
@@ -6173,8 +6167,7 @@ function renderIifSrcBar() {
   const idx = parseInt(openIifCell.split('|')[0].split(':')[0], 10);
   const e = iifParsedEntries[idx];
   if (!e) { iifSrcBar.hidden = true; return; }
-  const issue = e.issue ? ` <span class="iif-issue">⚠ ${escapeHtml(e.issue)}</span>` : '';
-  iifSrcBar.innerHTML = `<span class="iif-src-label">Note line:</span> ${escapeHtml(e.raw || '(blank)')}${issue}`;
+  iifSrcBar.innerHTML = `<span class="iif-src-label">Note line:</span> ${escapeHtml(e.raw || '(blank)')}`;
   iifSrcBar.hidden = false;
 }
 
@@ -6389,17 +6382,16 @@ function runIIFParse() {
   closeIifCell(false);                       // a re-parse invalidates row indexes
   if (iifGrid) iifGrid.innerHTML = '';
   if (iifDownloadBtn) iifDownloadBtn.hidden = true;
-  if (iifReviewNote) iifReviewNote.textContent = '';
 
   setTimeout(() => {
     const range = iifRangeFromInputs();
     iifParsedEntries = parseHoursNote(iifNoteBody, iifCustomerNames, getEmployeeNames(), range);
 
     const total = iifParsedEntries.length;
-    const reviewCount = iifParsedEntries.filter(e => e.needsReview).length;
-    const ranged = !!(range.from || range.to);
-    iifStatus.innerHTML = `${total} entr${total === 1 ? 'y' : 'ies'}${ranged ? ' in the selected date range' : ' parsed from your hours note'}.`;
-    if (iifReviewNote) iifReviewNote.textContent = reviewCount ? `⚠ ${reviewCount} entr${reviewCount === 1 ? 'y needs' : 'ies need'} review (orange rows)` : '';
+    // Status is for the WAIT and for failure, not for narrating the result —
+    // the chart itself already shows how many entries there are. Cleared here
+    // so the line collapses (.iif-status:empty) instead of leaving a gap.
+    iifStatus.textContent = '';
     renderIIFEntries(iifParsedEntries);
     if (iifDownloadBtn) iifDownloadBtn.hidden = total === 0;
   }, 30);
@@ -6418,7 +6410,7 @@ function showHoursView() {
   document.body.classList.add('hours-open');
   renderCrumbs('crumbs-hours', [
     { label: 'Home', go: 'home' },
-    { label: 'Process/enter hours' },
+    { label: 'Hours' },
   ]);
   applyIifZoomVar();
   if (!handlingPopstate) history.pushState({ screen: 'hours' }, '');
@@ -6429,7 +6421,6 @@ function showHoursView() {
     closeIifCell(false);
     if (iifGrid) iifGrid.innerHTML = '';
     if (iifDownloadBtn) iifDownloadBtn.hidden = true;
-    if (iifReviewNote) iifReviewNote.textContent = '';
     return;
   }
 
