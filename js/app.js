@@ -16,6 +16,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 10, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.08.02-0920', 'Hours grid: Cancel works on every cell, and picking a date no longer jumps to another row'],
   ['v2026.08.02-0846', 'Hours grid: tap the note line to fix it in your hours note without leaving the chart'],
   ['v2026.08.02-0839', 'Hours grid: Cancel and Save now work when the keyboard is open'],
   ['v2026.08.02-0745', 'Hours grid: no entry count and no warning text — the orange row is the only flag'],
@@ -25,7 +26,6 @@ const CHANGELOG = [
   ['v2026.08.01-0902', 'Process/enter hours is now its own screen like the Price Table, with the date range on it'],
   ['v2026.08.01-0802', 'Hours chart: searchable drop lists for employee and customer, note line pinned on top'],
   ['v2026.08.01-0707', 'Hours chart now looks and edits like the price table — every field editable'],
-  ['v2026.08.01-0401', 'Opening the app with an active session no longer flashes the sign-in screen'],
 ];
 const APP_VERSION = CHANGELOG[0][0];
 
@@ -6044,12 +6044,25 @@ function iifGridRows() {
   return rows;
 }
 function iifRowKey(idx, empIdx) { return `${idx}:${empIdx}`; }
+// ABOVE the field, not below it. The employee and customer cells open a
+// <datalist> drop list and the date cell opens the native date picker; both
+// render directly UNDER the input and covered these buttons, so the first tap
+// only dismissed the popup and Cancel looked dead. Hours was the one cell that
+// worked — the one cell with no popup.
 function iifCellActionsHtml() {
-  return `<div class="price-cell-actions">
+  return `<div class="price-cell-actions iif-cell-actions">
     <button class="price-save iif-save" type="button">Save</button>
     <button class="price-cancel iif-cancel" type="button">Cancel</button>
   </div>`;
 }
+// A native popup (date picker, drop list) closes by sending a tap THROUGH to
+// the page underneath. That tap landed on whatever grid cell happened to be
+// under it and opened it — "after I pick a date it goes to a random cell".
+// Same idea as the price table's pinch suppression: ignore cell-opening taps
+// for a moment after a popup has done its work.
+let iifTapSuppressedUntil = 0;
+function suppressIifTaps(ms = 400) { iifTapSuppressedUntil = Date.now() + ms; }
+function iifTapsSuppressed() { return Date.now() < iifTapSuppressedUntil; }
 // A parsed entry holds a real Date; the grid edits it as YYYY-MM-DD.
 function iifIsoDate(e) {
   return (e.date instanceof Date && !Number.isNaN(e.date.getTime())) ? ymd(e.date) : '';
@@ -6081,17 +6094,17 @@ function iifCellHtml(row, col) {
   if (col === 'date') {
     if (open) {
       return `<td class="price-cell price-cell-editing iif-date" ${cellAttrs}>
-        <input class="iif-edit-date" type="date" value="${escapeHtml(iifIsoDate(e))}" />
-        ${iifCellActionsHtml()}</td>`;
+        ${iifCellActionsHtml()}
+        <input class="iif-edit-date" type="date" value="${escapeHtml(iifIsoDate(e))}" /></td>`;
     }
     return `<td class="price-cell iif-date" ${cellAttrs}>${escapeHtml(iifShortDate(e))}</td>`;
   }
   if (col === 'employee') {
     if (open) {
       return `<td class="price-cell price-cell-editing" ${cellAttrs}>
+        ${iifCellActionsHtml()}
         <input class="iif-edit-emp" type="text" list="iif-emp-list" placeholder="Employee"
                autocomplete="off" value="${escapeHtml(emp)}" />
-        ${iifCellActionsHtml()}
         <span class="iif-cell-hint" hidden></span></td>`;
     }
     const cls = emp ? '' : ' iif-empty-emp';
@@ -6105,9 +6118,9 @@ function iifCellHtml(row, col) {
     const name = e.customerMatched || '';
     if (open) {
       return `<td class="price-cell price-cell-editing" ${cellAttrs}>
+        ${iifCellActionsHtml()}
         <input class="iif-edit-cust" type="text" list="iif-cust-list" placeholder="Customer"
-               autocomplete="off" value="${escapeHtml(name)}" />
-        ${iifCellActionsHtml()}</td>`;
+               autocomplete="off" value="${escapeHtml(name)}" /></td>`;
     }
     return `<td class="price-cell" ${cellAttrs}>
       <span class="iif-pick-value">${escapeHtml(name || 'Choose…')}</span></td>`;
@@ -6115,9 +6128,9 @@ function iifCellHtml(row, col) {
   if (col === 'hours') {
     if (open) {
       return `<td class="price-cell price-cell-editing" ${cellAttrs}>
+        ${iifCellActionsHtml()}
         <input class="iif-edit-hours" type="text" inputmode="decimal" placeholder="3.5 or 3:30"
-               value="${escapeHtml(e.hoursFormatted || '')}" />
-        ${iifCellActionsHtml()}</td>`;
+               value="${escapeHtml(e.hoursFormatted || '')}" /></td>`;
     }
     return `<td class="price-cell" ${cellAttrs}>${escapeHtml(e.hoursFormatted || '—')}</td>`;
   }
@@ -6204,8 +6217,7 @@ function renderIifSrcBar() {
   }
   const canEdit = isAdminRole();
   iifSrcBar.innerHTML =
-    `<span class="iif-src-label">Note line:</span> <span class="iif-src-text">${escapeHtml(e.raw || '(blank)')}</span>` +
-    (canEdit ? '<span class="iif-src-hint">tap to edit the note</span>' : '');
+    `<span class="iif-src-label">Note line:</span> <span class="iif-src-text">${escapeHtml(e.raw || '(blank)')}</span>`;
   iifSrcBar.classList.toggle('iif-src-tappable', canEdit);
   if (canEdit) {
     wireIifCellButton(iifSrcBar, () => { iifSrcEditing = true; renderIifSrcBar(); });
@@ -6318,6 +6330,7 @@ const iifOutsideTap = makeOutsideTapWatcher({
   cellSelector: '.iif-grid .price-cell',
   onCell: (other) => {
     if (!other.dataset.cellkey) return false;
+    if (iifTapsSuppressed()) return true;   // a popup closing, not a real tap
     openIifCellAt(other.dataset.cellkey);
     return true;
   },
@@ -6419,6 +6432,8 @@ function wireIifGrid() {
       const key = cell.dataset.cellkey;
       // Already open: the editor inside owns the tap.
       if (!key || openIifCell === key) return;
+      // That was a native popup closing, not a deliberate tap on this cell.
+      if (iifTapsSuppressed()) return;
       openIifCellAt(key);
     });
   });
@@ -6461,6 +6476,33 @@ function wireIifGrid() {
       else if (ev.key === 'Escape') { ev.preventDefault(); closeIifCell(); }
     });
   });
+
+  // Picking from a native popup IS the decision — commit and close rather than
+  // making you find Save afterwards, and suppress the tap the popup sends
+  // through to the page as it closes.
+  const dateInput = editing.querySelector('.iif-edit-date');
+  if (dateInput) {
+    dateInput.addEventListener('change', () => { suppressIifTaps(); save(); });
+  }
+  // For the drop lists, only an EXACT list entry counts as "picked" — a change
+  // event also fires for half-typed text, which must not close the editor.
+  const empInput = editing.querySelector('.iif-edit-emp');
+  if (empInput) {
+    empInput.addEventListener('change', () => {
+      if (!getEmployeeNames().some(n => n === empInput.value)) return;
+      suppressIifTaps();
+      save();
+    });
+  }
+  const custInput = editing.querySelector('.iif-edit-cust');
+  if (custInput) {
+    custInput.addEventListener('change', () => {
+      const opts = [...document.querySelectorAll('#iif-cust-list option')].map(o => o.value);
+      if (!opts.includes(custInput.value)) return;
+      suppressIifTaps();
+      save();
+    });
+  }
 }
 
 const iifZoomIn = document.getElementById('iif-zoom-in');
