@@ -16,6 +16,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 10, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.08.02-0943', 'Hours grid: Save/Cancel moved to the header so nothing can cover them; pinch to zoom'],
   ['v2026.08.02-0920', 'Hours grid: Cancel works on every cell, and picking a date no longer jumps to another row'],
   ['v2026.08.02-0846', 'Hours grid: tap the note line to fix it in your hours note without leaving the chart'],
   ['v2026.08.02-0839', 'Hours grid: Cancel and Save now work when the keyboard is open'],
@@ -25,7 +26,6 @@ const CHANGELOG = [
   ['v2026.08.02-0728', 'Hours card on the home screen; shorter dates; the note line now follows you down the chart'],
   ['v2026.08.01-0902', 'Process/enter hours is now its own screen like the Price Table, with the date range on it'],
   ['v2026.08.01-0802', 'Hours chart: searchable drop lists for employee and customer, note line pinned on top'],
-  ['v2026.08.01-0707', 'Hours chart now looks and edits like the price table — every field editable'],
 ];
 const APP_VERSION = CHANGELOG[0][0];
 
@@ -6044,17 +6044,11 @@ function iifGridRows() {
   return rows;
 }
 function iifRowKey(idx, empIdx) { return `${idx}:${empIdx}`; }
-// ABOVE the field, not below it. The employee and customer cells open a
-// <datalist> drop list and the date cell opens the native date picker; both
-// render directly UNDER the input and covered these buttons, so the first tap
-// only dismissed the popup and Cancel looked dead. Hours was the one cell that
-// worked — the one cell with no popup.
-function iifCellActionsHtml() {
-  return `<div class="price-cell-actions iif-cell-actions">
-    <button class="price-save iif-save" type="button">Save</button>
-    <button class="price-cancel iif-cancel" type="button">Cancel</button>
-  </div>`;
-}
+// Save/Cancel are NOT rendered inside the cell — see #iif-cell-bar in the
+// header and the comment there. Two earlier attempts (pointerdown instead of
+// click, then moving the buttons above the input) both failed because they
+// treated the wrong cause: the sticky tick/Date columns paint over the left
+// edge of whatever cell is being edited, which is where the buttons sat.
 // A native popup (date picker, drop list) closes by sending a tap THROUGH to
 // the page underneath. That tap landed on whatever grid cell happened to be
 // under it and opened it — "after I pick a date it goes to a random cell".
@@ -6094,7 +6088,6 @@ function iifCellHtml(row, col) {
   if (col === 'date') {
     if (open) {
       return `<td class="price-cell price-cell-editing iif-date" ${cellAttrs}>
-        ${iifCellActionsHtml()}
         <input class="iif-edit-date" type="date" value="${escapeHtml(iifIsoDate(e))}" /></td>`;
     }
     return `<td class="price-cell iif-date" ${cellAttrs}>${escapeHtml(iifShortDate(e))}</td>`;
@@ -6102,10 +6095,8 @@ function iifCellHtml(row, col) {
   if (col === 'employee') {
     if (open) {
       return `<td class="price-cell price-cell-editing" ${cellAttrs}>
-        ${iifCellActionsHtml()}
         <input class="iif-edit-emp" type="text" list="iif-emp-list" placeholder="Employee"
-               autocomplete="off" value="${escapeHtml(emp)}" />
-        <span class="iif-cell-hint" hidden></span></td>`;
+               autocomplete="off" value="${escapeHtml(emp)}" /></td>`;
     }
     const cls = emp ? '' : ' iif-empty-emp';
     const shown = emp || 'Nobody';
@@ -6118,7 +6109,6 @@ function iifCellHtml(row, col) {
     const name = e.customerMatched || '';
     if (open) {
       return `<td class="price-cell price-cell-editing" ${cellAttrs}>
-        ${iifCellActionsHtml()}
         <input class="iif-edit-cust" type="text" list="iif-cust-list" placeholder="Customer"
                autocomplete="off" value="${escapeHtml(name)}" /></td>`;
     }
@@ -6128,7 +6118,6 @@ function iifCellHtml(row, col) {
   if (col === 'hours') {
     if (open) {
       return `<td class="price-cell price-cell-editing" ${cellAttrs}>
-        ${iifCellActionsHtml()}
         <input class="iif-edit-hours" type="text" inputmode="decimal" placeholder="3.5 or 3:30"
                value="${escapeHtml(e.hoursFormatted || '')}" /></td>`;
     }
@@ -6283,6 +6272,7 @@ function closeIifCell(rerender = true) {
   iifOutsideTap.detach();
   openIifCell = null;
   iifSrcEditing = false;     // never strand a half-finished note edit
+  renderIifCellBar(null);    // retire the header Save/Cancel
   if (rerender) renderIIFEntries(iifParsedEntries);
   else renderIifSrcBar();     // no re-render: retire the pinned note line here
 }
@@ -6309,7 +6299,15 @@ function focusOpenIifCell() {
     const headH = (iifGrid.querySelector('thead') || { getBoundingClientRect: () => ({ height: 0 }) })
       .getBoundingClientRect().height;
     iifScroll.scrollTop += (c.top - s.top) - headH - 4;
-    if (c.left < s.left) iifScroll.scrollLeft += (c.left - s.left) - 8;
+    // Horizontally, "inside the scroller" isn't enough: the tick and Date
+    // columns are STICKY and paint over whatever is to their right, so a cell
+    // can be technically visible and still be underneath them. Clear the far
+    // edge of the last sticky column, not the edge of the scroller.
+    const stickyEnd = (() => {
+      const d = iifGrid.querySelector('tbody .iif-date');
+      return d ? d.getBoundingClientRect().right : s.left;
+    })();
+    if (c.left < stickyEnd) iifScroll.scrollLeft -= (stickyEnd - c.left) + 8;
     else if (c.right > s.right) iifScroll.scrollLeft += (c.right - s.right) + 8;
     const input = cell.querySelector('input');
     if (!input) return;
@@ -6404,12 +6402,16 @@ function commitIifCustomer(idx, name) {
 // The price table wires the identical buttons with a plain click and is fine —
 // #price-view isn't sized to the visible viewport, so it doesn't reflow when
 // the keyboard closes. Don't "fix" that one to match.
+// De-duped by TIME, not by a one-shot flag: these buttons now live in the
+// header and persist for the whole session, so a permanent "already fired"
+// flag would make them work exactly once.
 function wireIifCellButton(el, fn) {
   if (!el) return;
-  let done = false;
+  let last = 0;
   const run = (ev) => {
-    if (done) return;
-    done = true;
+    const now = Date.now();
+    if (now - last < 500) return;   // the click that follows our own pointerdown
+    last = now;
     ev.preventDefault();
     fn();
   };
@@ -6452,14 +6454,11 @@ function wireIifGrid() {
       const match = resolveEmployeeName(typed);
       if (!match) {
         // Stay open with the cursor where it is — silently dropping the value
-        // would look like it saved.
-        const hint = editing.querySelector('.iif-cell-hint');
-        if (hint) {
-          hint.textContent = typed.trim()
-            ? `No employee called “${typed.trim()}”. Pick one from the list.`
-            : 'Pick an employee from the list.';
-          hint.hidden = false;
-        }
+        // would look like it saved. The hint lives in the header bar with the
+        // buttons, so it can't be hidden behind the sticky columns either.
+        showIifCellHint(typed.trim()
+          ? `No employee called “${typed.trim()}”. Pick one from the list.`
+          : 'Pick an employee from the list.');
         return;
       }
       commitIifEmployee(idx, empIdx, match);
@@ -6468,8 +6467,10 @@ function wireIifGrid() {
     }
     closeIifCell();
   };
-  wireIifCellButton(editing.querySelector('.iif-save'), save);
-  wireIifCellButton(editing.querySelector('.iif-cancel'), () => closeIifCell());
+  // The buttons live in the header bar, not in the cell — point them at THIS
+  // cell's save for as long as it's open.
+  iifCellSaveFn = save;
+  renderIifCellBar(col);
   editing.querySelectorAll('input').forEach(input => {
     input.addEventListener('keydown', (ev) => {
       if (ev.key === 'Enter') { ev.preventDefault(); save(); }
@@ -6505,10 +6506,79 @@ function wireIifGrid() {
   }
 }
 
+// ---- Save / Cancel for the open cell, in the sticky header ----
+// Wired ONCE against elements that never get re-rendered, so no amount of grid
+// redrawing can detach them. iifCellSaveFn points at whichever cell is open.
+const iifCellBar = document.getElementById('iif-cell-bar');
+const iifCellWhat = document.getElementById('iif-cell-what');
+const iifCellHint = document.getElementById('iif-cell-hint');
+let iifCellSaveFn = null;
+const IIF_COL_LABEL = { date: 'Date', employee: 'Employee', customer: 'Customer', hours: 'Hours' };
+function showIifCellHint(msg) {
+  if (!iifCellHint) return;
+  iifCellHint.textContent = msg || '';
+  iifCellHint.hidden = !msg;
+}
+function renderIifCellBar(col) {
+  if (!iifCellBar) return;
+  if (!col) { iifCellBar.hidden = true; showIifCellHint(''); iifCellSaveFn = null; return; }
+  if (iifCellWhat) iifCellWhat.textContent = `Editing ${IIF_COL_LABEL[col] || col}`;
+  showIifCellHint('');
+  iifCellBar.hidden = false;
+}
+wireIifCellButton(document.getElementById('iif-cell-save'), () => {
+  if (iifCellSaveFn) iifCellSaveFn();
+});
+wireIifCellButton(document.getElementById('iif-cell-cancel'), () => closeIifCell());
+
 const iifZoomIn = document.getElementById('iif-zoom-in');
 const iifZoomOut = document.getElementById('iif-zoom-out');
 if (iifZoomIn) iifZoomIn.addEventListener('click', () => nudgeIifZoom(0.1));
 if (iifZoomOut) iifZoomOut.addEventListener('click', () => nudgeIifZoom(-0.1));
+
+// Two-finger pinch, same as the price table — it was never wired here, because
+// that code is bound by id to #price-scroll. Written as a helper rather than
+// copied so a future third grid doesn't get a third copy; the price table
+// keeps its own version, which is entangled with its long-press cancellation
+// and works.
+function wirePinchZoom(el, getZoom, setZoom, onGesture) {
+  if (!el) return;
+  const pts = new Map();
+  let startDist = 0, startZoom = 1;
+  const dist = () => {
+    const [a, b] = [...pts.values()];
+    return Math.hypot(a.x - b.x, a.y - b.y);
+  };
+  el.addEventListener('pointerdown', (e) => {
+    pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pts.size === 2) { startDist = dist(); startZoom = getZoom(); if (onGesture) onGesture(); }
+  });
+  el.addEventListener('pointermove', (e) => {
+    if (!pts.has(e.pointerId)) return;
+    pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pts.size === 2 && startDist > 0) {
+      e.preventDefault();
+      if (onGesture) onGesture();
+      setZoom(startZoom * (dist() / startDist));
+    }
+  });
+  const drop = (e) => {
+    // Keep suppressing past the release: lifting a pinch lands as a tap on
+    // whatever is underneath, which would otherwise open a cell editor.
+    if (pts.size >= 2 && onGesture) onGesture();
+    pts.delete(e.pointerId);
+    if (pts.size < 2) startDist = 0;
+  };
+  el.addEventListener('pointerup', drop);
+  el.addEventListener('pointercancel', drop);
+  el.addEventListener('pointerleave', drop);
+}
+function setIifZoom(z) {
+  iifZoom = Math.min(1.8, Math.max(0.7, z));
+  localStorage.setItem('na-hours-zoom', String(Math.round(iifZoom * 100) / 100));
+  applyIifZoomVar();
+}
+wirePinchZoom(iifScroll, () => iifZoom, setIifZoom, () => suppressIifTaps(400));
 
 let iifNoteBody = null;      // cached while the modal is open
 let iifCustomerNames = null; // cached while the modal is open

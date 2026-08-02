@@ -405,6 +405,18 @@
            pushed it off the top. You're correcting what the parser read, so it
            has to stay in front of you. -->
       <div id="iif-src-bar" class="iif-src-bar" hidden></div>
+      <!-- Save/Cancel for the open cell live UP HERE, not inside the cell.
+           Inside, they sat at the cell's left edge and the sticky tick/Date
+           columns (z-index 3, opaque) painted straight over them as soon as
+           the grid scrolled sideways — so Cancel worked only on Hours, the
+           column furthest from the sticky ones. Up here nothing can cover
+           them, and they're in the same place whichever column you're in. -->
+      <div id="iif-cell-bar" class="iif-cell-bar" hidden>
+        <span id="iif-cell-what" class="iif-cell-what"></span>
+        <span id="iif-cell-hint" class="iif-cell-hint" hidden></span>
+        <button id="iif-cell-save" class="primary" type="button">Save</button>
+        <button id="iif-cell-cancel" class="secondary" type="button">Cancel</button>
+      </div>
     </header>
     <main class="price-main hours-main">
       <div id="iif-status" class="iif-status"></div>

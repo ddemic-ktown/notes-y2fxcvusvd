@@ -1348,9 +1348,18 @@ body.dark-mode .iif-grid tbody tr.iif-needs-review td { background: #2d1a00; }
   background: var(--surface); color: var(--ink);
 }
 .iif-src-actions { margin-top: 6px; }
-/* Cell actions sit ABOVE the field in the hours grid (a drop list or date
-   picker opens below and would cover them), so the gap goes underneath. */
-.iif-grid .iif-cell-actions { margin-bottom: 6px; }
+/* Save/Cancel for the open cell, in the sticky header. NOT inside the cell:
+   the sticky tick/Date columns paint over the left edge of the cell being
+   edited, which is exactly where in-cell buttons ended up. */
+.iif-cell-bar {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  margin-top: 8px;
+}
+.iif-cell-bar[hidden] { display: none; }
+.iif-cell-what { font-size: 13px; font-weight: 600; color: var(--ink-soft); margin-right: auto; }
+.iif-cell-hint { flex: 1 1 100%; font-size: 12px; color: #d97706; }
+.iif-cell-hint[hidden] { display: none; }
+.iif-cell-bar button { padding: 8px 16px; font-size: 14px; border-radius: var(--radius); cursor: pointer; }
 .iif-src-error { margin: 6px 0 0; font-size: 12px; color: var(--danger, #dc2626); }
 .iif-src-error[hidden] { display: none; }
 .iif-cell-hint { display: block; margin-top: 4px; font-size: 12px; color: #d97706; }
