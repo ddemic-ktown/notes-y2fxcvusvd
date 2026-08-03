@@ -16,6 +16,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 10, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.08.02-1920', 'Ticking a checkbox no longer wakes the keyboard after you have put it away'],
   ['v2026.08.02-1800', 'Each screen’s ⋯ menu now explains that screen; new tours for the Calendar and Hours'],
   ['v2026.08.02-1736', 'Prices and notes catch up by themselves after the phone has been asleep'],
   ['v2026.08.02-1706', 'Hours grid: Cancel closes the cell instead of jumping to another one'],
@@ -25,7 +26,6 @@ const CHANGELOG = [
   ['v2026.08.02-1447', 'Proper undo and redo icons that look the same on every device'],
   ['v2026.08.02-1446', 'iPhone: the date picker stays open instead of closing and inserting today'],
   ['v2026.08.02-1433', 'iPhone: the keyboard no longer disappears when moving from a note title to the note'],
-  ['v2026.08.02-1428', 'Calendar day view: swiping to another day now works on top of a job too'],
 ];
 const APP_VERSION = CHANGELOG[0][0];
 
@@ -2034,6 +2034,26 @@ function keyboardInset(vv) {
   if (!(gap > 120)) return 0;                       // browser chrome, not a keyboard
   return Math.min(gap, window.innerHeight * 0.6);   // never more than 60% of the screen
 }
+
+// Is the on-screen keyboard ACTUALLY up right now?
+//
+// Not the same question as "is a field focused". Dismissing the keyboard with
+// Android's back button, iOS's Done key or a swipe-down leaves the field
+// focused with the keyboard gone, so focus over-reports. keyboardInset already
+// encodes the app's hard-won test for real keyboard occupancy (focus AND a gap
+// bigger than browser chrome), so this just asks it.
+//
+// The grace window covers the open animation: the gap grows from zero, so a
+// tap landing while the keyboard is sliding in would measure 0 and read as
+// "down". If it measured up a moment ago and focus hasn't left, it's up.
+// Cost: dismissing the keyboard and tapping a checkbox within 600ms still
+// reads as "up", since a dismissal and an opening look the same from one
+// sample. Shorten it before removing it — open animations run about 250ms.
+let kbLastUpAt = 0;
+function keyboardIsUp() {
+  if (keyboardInset(window.visualViewport) > 0) return true;
+  return editableFocused() && (Date.now() - kbLastUpAt) < 600;
+}
 function updateAppVh() {
   // visualViewport shrinks when the on-screen keyboard appears; innerHeight
   // does not. Modals sized in vh therefore ran under the keyboard, hiding
@@ -2050,7 +2070,9 @@ function updateAppVh() {
   // screen — mid-screen on one list, off the top on another. So require a
   // focused text field, ignore anything small enough to be chrome, and cap it
   // so a bad reading can never launch a control off-screen.
-  document.documentElement.style.setProperty('--kb-inset', keyboardInset(vv) + 'px');
+  const kb = keyboardInset(vv);
+  if (kb > 0) kbLastUpAt = Date.now();   // feeds keyboardIsUp's grace window
+  document.documentElement.style.setProperty('--kb-inset', kb + 'px');
 }
 updateAppVh();
 window.addEventListener('resize', updateAppVh);
@@ -4159,21 +4181,25 @@ function restoreBodyEditable() {
 }
 bodyInput.addEventListener('touchstart', () => {
   if (isReadOnlyRole() || bodyInput.readOnly) return;
-  // Skip the trick whenever the keyboard is ALREADY UP — body or TITLE.
-  //
-  // The guard used to check the body alone, and that cost the keyboard on
-  // iPhone: after typing a new note's title, focus is on the title and the
-  // keyboard is showing. Tapping the body then made it readonly first, so iOS
-  // dismissed the keyboard (a readonly field can't take input) and the
-  // blur()/focus() in the click handler, arriving mid-dismissal, was ignored.
-  // Focus was correct all along — which is why switching apps and back brought
-  // the keyboard straight back for the already-focused textarea.
+  // Skip the trick whenever the keyboard is ALREADY UP.
   //
   // The trick exists to stop a checkbox tap RAISING the keyboard. If it's
-  // already up there is nothing to prevent, so applying it can only do harm.
-  // Cost of this: tapping a checkbox while the title is focused now keeps the
-  // keyboard up. A small wrong in place of a large one.
-  if (document.activeElement === bodyInput || document.activeElement === titleInput) return;
+  // already up there is nothing to prevent, and applying it can only do harm:
+  // making a focused field readonly mid-session dismisses the keyboard on iOS
+  // (v2026.08.02-1433, when typing a title and then tapping the body lost it).
+  //
+  // ASK THE KEYBOARD, NOT THE FOCUS (v2026.08.02-1823). This used to test
+  // `activeElement === bodyInput || titleInput` as a stand-in for "keyboard is
+  // up", and the two are not the same thing. Dismissing the keyboard with
+  // Android's back button, iOS's Done key or a swipe-down leaves the field
+  // FOCUSED with the keyboard gone; the guard then skipped the trick and the
+  // tap brought the keyboard back — the exact behaviour the trick exists to
+  // prevent. The backup blur below was conditioned on the same stale
+  // assumption, so it didn't fire either.
+  //
+  // keyboardIsUp() measures occupancy instead, reusing the heuristics
+  // keyboardInset already had to work out for --kb-inset.
+  if (keyboardIsUp()) return;
   bodyTempReadonly = true;
   bodyInput.readOnly = true;
   // Safety net: a tap that never becomes a click (scroll/drag) must not leave
