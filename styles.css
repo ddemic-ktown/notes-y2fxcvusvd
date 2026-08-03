@@ -480,12 +480,17 @@ body.hours-open {
 .cal-daynum { font-size: 11px; font-weight: 700; color: var(--ink-soft); }
 .cal-cell.cal-today .cal-daynum { color: var(--accent); }
 .cal-job { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; min-width: 0; }
+/* No `color` here on purpose: the employee's colour is now arbitrary (Settings
+   → Time Logger has a picker), so white text is not always readable. Each chip
+   sets its own via chipStyle() / employeeTextColour(). */
 .cal-chip {
-  color: #fff; font-size: 9px; font-weight: 700; line-height: 1.4;
+  font-size: 9px; font-weight: 700; line-height: 1.4;
   padding: 1px 5px; border-radius: 999px; white-space: nowrap;
   max-width: 100%; overflow: hidden; text-overflow: ellipsis;
 }
-.cal-chip-none { background: var(--ink-soft); }
+/* The "nobody assigned" chip has no employee behind it, so it carries the text
+   colour the others now set inline. */
+.cal-chip-none { background: var(--ink-soft); color: #fff; }
 .cal-job-who { font-size: 10px; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cal-more { font-size: 10px; color: var(--ink-soft); font-weight: 600; }
 .cal-day-card .cal-day-chips { display: flex; flex-wrap: wrap; gap: 4px; margin: 4px 0; }
@@ -593,6 +598,17 @@ body.hours-open {
   padding-bottom: 2px;
 }
 .employee-pill { flex-wrap: wrap; }
+/* The employee's calendar colour. Sized as a small round swatch: browsers draw
+   a chunky bordered box by default, which would dominate the row on a phone.
+   flex-shrink:0 keeps it a circle when the name beside it is long. */
+.employee-colour {
+  width: 26px; height: 26px; flex-shrink: 0; padding: 0; cursor: pointer;
+  border: 1px solid var(--line); border-radius: 50%; background: none;
+  -webkit-appearance: none; appearance: none;
+}
+.employee-colour::-webkit-color-swatch-wrapper { padding: 0; }
+.employee-colour::-webkit-color-swatch { border: none; border-radius: 50%; }
+.employee-colour::-moz-color-swatch { border: none; border-radius: 50%; }
 .employee-link-select {
   padding: 4px 6px; border: 1px solid var(--line); border-radius: 6px;
   background: var(--bg); color: var(--ink); font-size: 12px; max-width: 45%;

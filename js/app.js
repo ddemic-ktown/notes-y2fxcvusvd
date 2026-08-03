@@ -16,6 +16,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 10, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.08.02-2125', 'Each employee has their own calendar colour, set in Settings'],
   ['v2026.08.02-1920', 'Ticking a checkbox no longer wakes the keyboard after you have put it away'],
   ['v2026.08.02-1800', 'Each screen’s ⋯ menu now explains that screen; new tours for the Calendar and Hours'],
   ['v2026.08.02-1736', 'Prices and notes catch up by themselves after the phone has been asleep'],
@@ -25,7 +26,6 @@ const CHANGELOG = [
   ['v2026.08.02-1456', 'Deleting a customer now says where the notes go; Trash is a button, not a long list'],
   ['v2026.08.02-1447', 'Proper undo and redo icons that look the same on every device'],
   ['v2026.08.02-1446', 'iPhone: the date picker stays open instead of closing and inserting today'],
-  ['v2026.08.02-1433', 'iPhone: the keyboard no longer disappears when moving from a note title to the note'],
 ];
 const APP_VERSION = CHANGELOG[0][0];
 
@@ -125,9 +125,17 @@ async function setKeywords(list) { await Storage.setSetting('keywords', list); }
 // ---------- employees (Time Logger) ----------
 // Employees are { name, type } where type is 'apprentice' or 'journeyman'.
 // Legacy entries were plain strings — normalized here as journeyman.
+// A stored colour is only honoured if it's a real #rrggbb — it goes straight
+// into a style attribute, and a junk value would either do nothing or, worse,
+// carry something unexpected into the markup.
+function validHex(c) { return typeof c === 'string' && /^#[0-9a-f]{6}$/i.test(c) ? c.toLowerCase() : null; }
 function normalizeEmployee(e) {
-  if (typeof e === 'string') return { name: e, type: 'journeyman' };
-  return { name: e.name, type: e.type === 'apprentice' ? 'apprentice' : 'journeyman' };
+  if (typeof e === 'string') return { name: e, type: 'journeyman', colour: null };
+  return {
+    name: e.name,
+    type: e.type === 'apprentice' ? 'apprentice' : 'journeyman',
+    colour: validHex(e.colour),
+  };
 }
 function getEmployees() {
   const arr = Storage.getSettings().employees;
@@ -148,7 +156,47 @@ async function addEmployee(name, type) {
   const list = getEmployees();
   if (list.some(e => e.name.toLowerCase() === n.toLowerCase())) return false;
   // Save exactly as typed — the name must match QuickBooks' employee list verbatim
-  await setEmployees([...list, { name: n, type: type === 'apprentice' ? 'apprentice' : 'journeyman' }]);
+  await setEmployees([...list, {
+    name: n,
+    type: type === 'apprentice' ? 'apprentice' : 'journeyman',
+    colour: pickNewEmployeeColour(list),
+  }]);
+  return true;
+}
+async function setEmployeeColour(name, hex) {
+  const c = validHex(hex);
+  if (!c) return;
+  await setEmployees(getEmployees().map(e => e.name === name ? { ...e, colour: c } : e));
+}
+// A colour nobody is using yet, picked at random from the seed set. NOT simply
+// random: with 12 seeds a plain random pick collides with the second employee
+// about 8% of the time and it climbs fast — which is the whole complaint that
+// started this. Once every seed is taken there's nothing left to avoid, so it
+// falls back to a random hex and the admin can adjust it.
+function pickNewEmployeeColour(list) {
+  const used = new Set((list || getEmployees()).map(e => e.colour).filter(Boolean));
+  const free = EMP_COLOURS.filter(c => !used.has(c));
+  if (free.length) return free[Math.floor(Math.random() * free.length)];
+  return '#' + Math.floor(Math.random() * 0xffffff).toString(16).padStart(6, '0');
+}
+// Existing employees predate stored colours. Give them distinct ones in list
+// order, in ONE write, the first time an admin opens Settings. Without this the
+// clash that prompted the feature would persist until each was set by hand.
+let colourBackfillDone = false;
+async function backfillEmployeeColours() {
+  if (colourBackfillDone || !isAdminRole()) return false;
+  const list = getEmployees();
+  if (!list.some(e => !e.colour)) { colourBackfillDone = true; return false; }
+  colourBackfillDone = true;   // set BEFORE awaiting: renderEmployeeList can run again
+  const used = new Set(list.map(e => e.colour).filter(Boolean));
+  const next = list.map(e => {
+    if (e.colour) return e;
+    const free = EMP_COLOURS.find(c => !used.has(c));
+    const colour = free || ('#' + Math.floor(Math.random() * 0xffffff).toString(16).padStart(6, '0'));
+    used.add(colour);
+    return { ...e, colour };
+  });
+  await setEmployees(next);
   return true;
 }
 async function removeEmployee(name) {
@@ -160,6 +208,9 @@ async function setEmployeeType(name, type) {
 function renderEmployeeList() {
   const list = getEmployees();
   if (!employeeListEl) return;
+  // One-time: give pre-existing employees distinct colours. Fire-and-forget —
+  // the settings listener re-renders this list when the write lands.
+  backfillEmployeeColours();
   if (list.length === 0) {
     employeeListEl.innerHTML = '<li class="keyword-empty">No employees yet.</li>';
     return;
@@ -171,6 +222,9 @@ function renderEmployeeList() {
   const members = Storage.listMembers().filter(m => m.role === 'employee' || m.role === 'admin');
   employeeListEl.innerHTML = list.map(e => `
     <li class="keyword-pill employee-pill">
+      <input type="color" class="employee-colour" data-emp-colour="${escapeHtml(e.name)}"
+             value="${e.colour || employeeColour(e.name)}"
+             aria-label="Calendar colour for ${escapeHtml(e.name)}" />
       <span>${escapeHtml(e.name)}</span>
       <select class="employee-type-select" data-emp-type="${escapeHtml(e.name)}" aria-label="Classification for ${escapeHtml(e.name)}">
         <option value="journeyman" ${e.type === 'journeyman' ? 'selected' : ''}>Journeyman</option>
@@ -189,6 +243,16 @@ function renderEmployeeList() {
       if (sel.value) next[sel.dataset.empLink] = sel.value;
       else delete next[sel.dataset.empLink];
       await Storage.setSetting('employeeLinks', next);
+    });
+  });
+  // 'change', NOT 'input'. A colour input fires continuously while the wheel is
+  // dragged, and on 'input' every frame of that drag would be a Firestore
+  // settings write — the same mistake the home-screen steppers made before they
+  // were debounced. 'change' fires once, when the picker is dismissed.
+  employeeListEl.querySelectorAll('input[data-emp-colour]').forEach(inp => {
+    inp.addEventListener('change', async () => {
+      await setEmployeeColour(inp.dataset.empColour, inp.value);
+      renderEmployeeList();
     });
   });
   employeeListEl.querySelectorAll('button[data-emp]').forEach(btn => {
@@ -528,11 +592,56 @@ const calendarDayView = document.getElementById('calendar-day-view');
 const calGrid = document.getElementById('cal-grid');
 // Stable per-name colours from a fixed palette — no setup, and a person keeps
 // their colour as employees come and go.
-const EMP_COLOURS = ['#2563eb', '#16a34a', '#d97706', '#9333ea', '#db2777', '#0891b2', '#65a30d', '#dc2626'];
+// SEED colours for new employees, not "the palette" — since v2026.08.02-2016
+// each employee stores their own colour and an admin can set it to anything.
+// Twelve rather than eight: these are handed out unused-first, so the count is
+// how many people get a distinct colour with no thought from anyone.
+// All are dark enough for white text; employeeTextColour handles custom picks.
+const EMP_COLOURS = [
+  '#2563eb', '#16a34a', '#d97706', '#9333ea', '#db2777', '#0891b2',
+  '#65a30d', '#dc2626', '#0d9488', '#4f46e5', '#ea580c', '#475569',
+];
+// The employee's OWN colour when they have one. The hash below is now only a
+// fallback for a name that appears on a job but isn't in Settings — a
+// subcontractor, or a name typed before it was added to the list.
+//
+// The hash was the whole story until v2026.08.02-2016, and it could not work:
+// eight buckets means two of four employees collide 59% of the time, and the
+// arithmetic was weaker still — 31 ≡ -1 (mod 8), so `h % 8` collapsed to an
+// alternating sum of character codes and clustered common names together.
+// Taking the high bits instead is WORSE, not better: short names never grow h
+// far enough for them to vary. Don't "fix" it that way.
 function employeeColour(name) {
+  const own = getEmployees().find(e => e.name === name);
+  if (own && own.colour) return own.colour;
   let h = 0;
   for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
   return EMP_COLOURS[h % EMP_COLOURS.length];
+}
+// White or near-black, whichever is readable on the given background.
+//
+// Needed because the colour is now arbitrary: .cal-chip used to hardcode
+// `color: #fff`, which was safe while all eight colours were dark, and stops
+// being safe the moment someone picks pale yellow. Standard sRGB relative
+// luminance with the usual 0.55 cut.
+function employeeTextColour(hex) {
+  const c = validHex(hex);
+  if (!c) return '#fff';
+  const lin = (v) => {
+    const s = v / 255;
+    return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+  };
+  const r = lin(parseInt(c.slice(1, 3), 16));
+  const g = lin(parseInt(c.slice(3, 5), 16));
+  const b = lin(parseInt(c.slice(5, 7), 16));
+  return (0.2126 * r + 0.7152 * g + 0.0722 * b) > 0.55 ? '#111827' : '#fff';
+}
+// Background and readable text for one employee's chip, in one place — three
+// call sites draw chips (month cell, day card, job editor) and all three would
+// otherwise have to remember the text colour.
+function chipStyle(name) {
+  const bg = employeeColour(name);
+  return `background:${bg};color:${employeeTextColour(bg)}`;
 }
 // A "crew" is a set of employees working a job. Several jobs often share the
 // same crew, and repeating the same names down a day (or a month cell) is
@@ -646,7 +755,7 @@ function renderCalendar() {
     const lines = groups.map(g => {
       if (shown >= MAX_CHIPS) return '';
       const chips = g.names.length
-        ? g.names.map(n => `<span class="cal-chip" style="background:${employeeColour(n)}">${escapeHtml(n.split(/[\s(]+/)[0])}</span>`).join('')
+        ? g.names.map(n => `<span class="cal-chip" style="${chipStyle(n)}">${escapeHtml(n.split(/[\s(]+/)[0])}</span>`).join('')
         : '<span class="cal-chip cal-chip-none">—</span>';
       const room = MAX_CHIPS - shown;
       const take = g.jobs.slice(0, room);
@@ -810,7 +919,7 @@ function renderCalendarDay() {
     untimedWrap.innerHTML = '<p class="cal-untimed-label">Any time</p>' + untimed.map(j => {
       const who = j.customerName || (j.customerId ? customerCrumbLabel(j.customerId) : 'No customer');
       const chips = (j.employeeNames || []).map(n =>
-        `<span class="cal-chip" style="background:${employeeColour(n)}">${escapeHtml(n)}</span>`).join('');
+        `<span class="cal-chip" style="${chipStyle(n)}">${escapeHtml(n)}</span>`).join('');
       return `<div class="cal-untimed-job" data-job="${j.id}">${escapeHtml(who)} ${chips}</div>`;
     }).join('');
   } else {
@@ -1152,7 +1261,7 @@ function renderJobEmployees(selected) {
     ? names.map(n => `<li class="member-item">
         <label style="display:flex;align-items:center;gap:8px;flex:1;min-width:0;cursor:pointer;">
           <input type="checkbox" data-emp-name="${escapeHtml(n)}" ${selected.includes(n) ? 'checked' : ''} />
-          <span class="cal-chip" style="background:${employeeColour(n)}">${escapeHtml(n)}</span>
+          <span class="cal-chip" style="${chipStyle(n)}">${escapeHtml(n)}</span>
         </label>
       </li>`).join('')
     : '<li class="member-item">Add employees in Settings → Time Logger first.</li>';
