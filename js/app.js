@@ -16,6 +16,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 10, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.08.02-1800', 'Each screen’s ⋯ menu now explains that screen; new tours for the Calendar and Hours'],
   ['v2026.08.02-1736', 'Prices and notes catch up by themselves after the phone has been asleep'],
   ['v2026.08.02-1706', 'Hours grid: Cancel closes the cell instead of jumping to another one'],
   ['v2026.08.02-1652', 'Back now closes an open pop-up instead of navigating the screen behind it'],
@@ -25,7 +26,6 @@ const CHANGELOG = [
   ['v2026.08.02-1446', 'iPhone: the date picker stays open instead of closing and inserting today'],
   ['v2026.08.02-1433', 'iPhone: the keyboard no longer disappears when moving from a note title to the note'],
   ['v2026.08.02-1428', 'Calendar day view: swiping to another day now works on top of a job too'],
-  ['v2026.08.02-1417', 'Every row in the hours chart can be exported; a conflict lets you tick only one side'],
 ];
 const APP_VERSION = CHANGELOG[0][0];
 
@@ -2152,6 +2152,39 @@ document.addEventListener('click', (e) => {
       && !priceMoreDropdown.contains(e.target) && e.target !== priceMoreBtn) closePriceMenu();
 });
 
+// ---------- calendar and hours: ⋯ menus ----------
+// Same shape as the price menu above. Dropdowns are NOT .modal-overlay, so the
+// MutationObserver that gives modals a back press doesn't cover them — closing
+// on navigation and on an outside tap has to be wired by hand.
+const moreMenus = [
+  ['cal-more-btn', 'cal-more-dropdown'],
+  ['hours-more-btn', 'hours-more-dropdown'],
+].map(([btnId, dropId]) => ({
+  btn: document.getElementById(btnId),
+  drop: document.getElementById(dropId),
+})).filter(m => m.btn && m.drop);
+
+moreMenus.forEach(({ btn, drop }) => {
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    drop.hidden = !drop.hidden;
+  });
+  drop.addEventListener('click', () => { drop.hidden = true; });
+  document.addEventListener('click', (e) => {
+    if (!drop.hidden && !drop.contains(e.target) && e.target !== btn) drop.hidden = true;
+  });
+});
+
+// Every ⋯ dropdown in the app, closed in one call — used on navigation and
+// before a tutorial starts, since an open menu would sit over the very thing
+// the first bubble points at.
+function closeAllMoreMenus() {
+  closePriceMenu();
+  moreMenus.forEach(({ drop }) => { drop.hidden = true; });
+  const editorDrop = document.getElementById('editor-more-dropdown');
+  if (editorDrop) editorDrop.hidden = true;
+}
+
 // ---------- price table: reorder mode ----------
 let priceFilter = '';
 let priceReorderMode = false;
@@ -2479,6 +2512,12 @@ function hideAllScreens() {
   if (fm) fm.hidden = true;
   const pm = document.getElementById('price-more-dropdown');
   if (pm) pm.hidden = true;
+  // The calendar and hours ⋯ menus, same reason — a dropdown left open would
+  // reappear over whatever screen you came back to.
+  ['cal-more-dropdown', 'hours-more-dropdown'].forEach(id => {
+    const d = document.getElementById(id);
+    if (d) d.hidden = true;
+  });
   detachOutsidePriceTap();
   listView.classList.remove('active');
   customersView.classList.remove('active');
@@ -5490,6 +5529,11 @@ function applyRoleUI(role) {
   document.querySelectorAll('[data-role-iif]').forEach(el => {
     el.style.display = (isAdminRole || role === 'bookkeeper') ? '' : 'none';
   });
+  // Calendar: everyone except the customer role (an employee sees their own
+  // jobs). No existing attribute covered "all but customer".
+  document.querySelectorAll('[data-role-cal]').forEach(el => {
+    el.style.display = isCustomer ? 'none' : '';
+  });
   // Orphan view write controls: admin only
   ['orphan-select-all-btn', 'orphan-delete-selected-btn'].forEach(id => {
     const el = document.getElementById(id);
@@ -7240,7 +7284,16 @@ const tutorialClose = document.getElementById('tutorial-close');
 let tutorialStepIndex = 0;
 let tutorialPart = 1;
 let tutorialStartPart = 1; // the part the user launched — back never goes before it
+// The LINEAR tour is 1→5, ending on "Install on your phone". Parts 6 (Calendar)
+// and 7 (Hours) sit outside it: one screen each, not daily reading for every
+// role, and reached from that screen's own ⋯ menu. They always end on
+// themselves, which is what tutorialSolo does.
 const TUTORIAL_PARTS = 5;
+const SOLO_PARTS = [6, 7];
+let tutorialSolo = false;
+// The step the user launched from. Normally 0; a skip-home launch starts
+// later, and Back must not reverse into a step we just said doesn't apply.
+let tutorialFloorIndex = 0;
 
 // The tutorial is split into three short parts, each startable from Settings.
 // The last bubble of parts 1 and 2 offers to continue into the next part.
@@ -7431,6 +7484,169 @@ function tutorialSteps(part) {
     ];
   }
 
+  // part 6 — the calendar. OUTSIDE the 1→5 chain: one screen, and not daily
+  // reading for every role. Reached from the calendar's own ⋯ menu or Settings.
+  if (part === 6) {
+    const canEditJobs = () => Storage.getRole() === 'admin';
+    const aDayWithJobs = () => {
+      const jobs = Storage.listJobs();
+      return jobs.length ? jobs[0].date : null;
+    };
+    // Navigate only when we're not already there. showCalendar/showCalendarDay
+    // each push a history entry, so calling them once per step would bury the
+    // back button under one entry per bubble.
+    const goMonth = () => {
+      if (!calendarView.classList.contains('active')) showCalendar();
+      return true;
+    };
+    const goDay = () => {
+      const d = aDayWithJobs();
+      if (!d) return false;
+      if (!calendarDayView.classList.contains('active')) showCalendarDay(d);
+      return true;
+    };
+    return [
+      {
+        screen: 'home',
+        setup: () => { goHome(); return true; },
+        target: () => document.querySelector('#notes-list .note-card[data-nav="calendar"]'),
+        text: 'The calendar is who is working where, and when. It’s a plan — hours you actually worked are recorded separately.',
+      },
+      {
+        screen: 'calendar',
+        setup: goMonth,
+        target: () => document.querySelector('#cal-grid .cal-cells'),
+        text: 'A month at a time. Each day lists its jobs, and everyone on a job gets a coloured tag — the same colour every time, so you can read the week without reading the names.',
+      },
+      {
+        screen: 'calendar',
+        setup: goMonth,
+        target: () => document.querySelector('#cal-grid .cal-cue-down'),
+        text: 'Swipe up for next month and down for last, the way the page moves. These strips name the month you’re heading to, and you can tap them instead.',
+      },
+      {
+        screen: 'calendar',
+        setup: goMonth,
+        target: () => document.getElementById('cal-today'),
+        text: 'Today brings you back to this month from wherever you’ve wandered.',
+      },
+      {
+        screen: 'calendar',
+        requires: canEditJobs,
+        setup: goMonth,
+        target: () => document.getElementById('cal-fab'),
+        text: 'Add a job with +. Only the date is required — customer, address, times and who’s going can all come later. Tapping an empty day starts one on that day.',
+      },
+      {
+        screen: 'calendar-day',
+        group: 'caljobs',
+        requires: () => Storage.listJobs().length > 0,
+        fallback: {
+          target: () => document.getElementById('cal-fab'),
+          text: 'Schedule a job first, then run this part again to see the day view.',
+        },
+        setup: goDay,
+        target: () => document.querySelector('#calendar-day-view .cal-block'),
+        text: 'Tap a day to open it as a timeline. Each job sits at its start time and is as tall as it is long, so a clash is something you can see rather than work out.',
+      },
+      {
+        screen: 'calendar-day',
+        group: 'caljobs',
+        requires: () => Storage.listJobs().length > 0,
+        setup: goDay,
+        target: () => document.querySelector('#calendar-day-view .cal-day-cues .cal-cue-side'),
+        text: 'Swipe sideways for the next or previous day. The cue on each side names the day you’re going to.',
+      },
+      {
+        screen: 'calendar-day',
+        group: 'caljobs',
+        requires: () => Storage.listJobs().length > 0 && canEditJobs(),
+        setup: goDay,
+        target: () => document.querySelector('#calendar-day-view .cal-block'),
+        text: 'Press and hold a job to pick it up and drag it to a new time; drag the corner to change how long it runs. Both snap to quarter hours. A quick tap opens it for editing.',
+      },
+      {
+        screen: 'settings',
+        requires: () => Storage.getRole() === 'admin',
+        setup: () => { showSettings(); return true; },
+        target: () => document.getElementById('employee-list'),
+        text: 'Names you schedule come from this list. Link a name to someone’s account and they can open JobPilot and see their own jobs — leave it unlinked for a subcontractor who doesn’t use the app.',
+      },
+    ];
+  }
+
+  // part 7 — the hours chart. Also outside the chain, and admin/bookkeeper
+  // only in practice: the home card and Settings entry are already gated.
+  if (part === 7) {
+    const hasHoursNote = () => !!findHoursNote();
+    // Two reasons this is async and guarded. showHoursView pushes history, so
+    // it must run once for the part, not once per bubble. And its parse waits
+    // on a fetch of already-saved hours, so 120ms later the grid is still
+    // empty and the footer buttons are still hidden — a step measuring then
+    // would find nothing and skip itself.
+    const goHours = async () => {
+      if (!isAdminRole() && !isBookkeeperRole()) return false;
+      if (!hoursView.classList.contains('active')) showHoursView();
+      for (let i = 0; i < 20 && !document.querySelector('#iif-grid .price-cell'); i++) {
+        await new Promise(r => setTimeout(r, 50));
+      }
+      return true;
+    };
+    const noNoteFallback = {
+      target: () => document.querySelector('#notes-list .note-card[data-nav="hours"]'),
+      text: 'This reads a general note titled “hours”. Make one, write your days into it, then run this part again.',
+    };
+    return [
+      {
+        screen: 'home',
+        setup: () => { goHome(); return true; },
+        target: () => document.querySelector('#notes-list .note-card[data-nav="hours"]'),
+        text: 'Hours turns the note you scribble your days into — “July 20 / davor 9-4 tamarack cres” — into something you can check and send to QuickBooks.',
+      },
+      {
+        screen: 'hours',
+        group: 'hoursnote',
+        requires: hasHoursNote,
+        fallback: noNoteFallback,
+        setup: goHours,
+        target: () => document.getElementById('iif-from-date'),
+        text: 'From and To decide how much of the note is read. It opens on the last two weeks; widen it when you’re catching up.',
+      },
+      {
+        screen: 'hours',
+        group: 'hoursnote',
+        requires: hasHoursNote,
+        setup: goHours,
+        target: () => document.getElementById('iif-grid'),
+        text: 'One row per person per line of the note. An orange row means the reader wasn’t sure — usually which customer you meant. Check those first.',
+      },
+      {
+        screen: 'hours',
+        group: 'hoursnote',
+        requires: hasHoursNote,
+        setup: goHours,
+        target: () => document.querySelector('#iif-grid .price-cell'),
+        text: 'Tap any cell to correct it. The line from your note appears at the top while you work, so you can see what it actually said — and tapping that line fixes the note itself, so next fortnight reads correctly.',
+      },
+      {
+        screen: 'hours',
+        group: 'hoursnote',
+        requires: () => hasHoursNote() && Storage.getRole() === 'admin',
+        setup: goHours,
+        target: () => document.getElementById('iif-save-hours-btn'),
+        text: 'Save hours records the ticked rows. Saved rows turn green. If you later change the note, the record stays green and the note’s new version appears in red beside it — tick whichever one is right.',
+      },
+      {
+        screen: 'hours',
+        group: 'hoursnote',
+        requires: hasHoursNote,
+        setup: goHours,
+        target: () => document.getElementById('iif-download-btn'),
+        text: 'Download .iif writes the ticked rows as a QuickBooks import file. Untick anything you’re not ready to send.',
+      },
+    ];
+  }
+
   // part 3 — editor & extras (the default)
   return [
     {
@@ -7442,6 +7658,9 @@ function tutorialSteps(part) {
         text: 'Add a note first — tap + — and run this part again to see the editor tools.',
       },
       setup: () => {
+        // Launched from the editor's own ⋯ menu, the note in front of you IS
+        // the subject — switching to a different one would be baffling.
+        if (editorView.classList.contains('active') && currentType === 'note' && currentId) return true;
         const recent = Storage.listRecentCustomerNotes(1);
         if (!recent.length) return false;
         // Ensure the "Go to: customer" link is shown (it hides when the
@@ -7647,8 +7866,11 @@ function isTargetVisible(el) {
 function tutorialSkipStep(index) {
   const steps = tutorialSteps(tutorialPart);
   const next = index + tutorialDirection;
-  if (next >= 0 && next < steps.length) { runTutorialStep(next); return; }
-  if (tutorialDirection > 0 && tutorialPart < TUTORIAL_PARTS) {
+  // Reversing must respect the launch floor too — skipping backwards past it
+  // would land on the very step a skip-home launch left out.
+  const floor = tutorialPart === tutorialStartPart ? tutorialFloorIndex : 0;
+  if (next >= floor && next < steps.length) { runTutorialStep(next); return; }
+  if (tutorialDirection > 0 && !tutorialSolo && tutorialPart < TUTORIAL_PARTS) {
     tutorialPart++;
     runTutorialStep(0);
     return;
@@ -7684,9 +7906,11 @@ async function runTutorialStep(index) {
     return;
   }
 
-  // Navigate if needed
+  // Navigate if needed. Awaited, so a setup may wait for an async render
+  // (the hours grid parses before it draws) — a plain setup returning false
+  // still skips exactly as before.
   if (step.setup) {
-    const ok = step.setup();
+    const ok = await step.setup();
     if (ok === false) { tutorialSkipStep(index); return; }
   } else if (step.screen === 'home') {
     goHome();
@@ -7712,19 +7936,25 @@ async function showTutorialBubble(target, text, index, stepCount) {
   await waitForScrollSettle(target);
 
   tutorialText.textContent = text;
-  if (tutorialProgress) tutorialProgress.textContent = `Part ${tutorialPart} \u00b7 ${index + 1} of ${stepCount}`;
+  // Counted from the step you STARTED on, so a skip-home launch reads
+  // "1 of 5" rather than opening on "2 of 6" and looking like it lost one.
+  if (tutorialProgress) {
+    const floor = tutorialPart === tutorialStartPart ? tutorialFloorIndex : 0;
+    tutorialProgress.textContent = `Part ${tutorialPart} \u00b7 ${index + 1 - floor} of ${stepCount - floor}`;
+  }
   // Back is always visible, greyed when there's nothing before this step
   // (step 1 of the part the user launched).
   if (tutorialBack) {
     tutorialBack.hidden = false;
     tutorialBack.textContent = '\u2190';
-    tutorialBack.disabled = (index === 0 && tutorialPart === tutorialStartPart);
+    tutorialBack.disabled = (index <= tutorialFloorIndex && tutorialPart === tutorialStartPart);
   }
-  // Last bubble of parts 1 and 2 chains into the next part
+  // Last bubble of parts 1 and 2 chains into the next part \u2014 unless this is a
+  // solo run, which ends on its own part.
   if (tutorialNext) {
     const last = index === stepCount - 1;
     tutorialNext.textContent = !last ? 'Got it \u2192'
-      : (tutorialPart < TUTORIAL_PARTS ? 'Next part \u2192' : 'Done \u2713');
+      : ((!tutorialSolo && tutorialPart < TUTORIAL_PARTS) ? 'Next part \u2192' : 'Done \u2713');
     tutorialNext.disabled = false;
   }
   tutorialOverlay.hidden = false;
@@ -7769,17 +7999,31 @@ function endTutorial() {
   tutorialPart = 1;
   tutorialStartPart = 1;
   tutorialGroupShown = {};
+  tutorialSolo = false;
+  tutorialFloorIndex = 0;
 }
 
 // Start a tutorial part programmatically (welcome modal, sample-data flow)
-function startTutorial(part) {
+function startTutorial(part, opts = {}) {
   tutorialPart = part || 1;
   tutorialStartPart = tutorialPart;
   tutorialDirection = 1;
-  tutorialStepIndex = 0;
   tutorialGroupShown = {};
+  // Solo either because the caller said so, or because the part isn't in the
+  // linear chain at all.
+  tutorialSolo = !!opts.solo || SOLO_PARTS.includes(tutorialPart);
+  // Launched from inside the feature: drop the opening step that points at the
+  // home card, since you're looking at the thing it points to. Found by SCREEN
+  // rather than by a fixed index, so reordering steps can't silently break it.
+  tutorialStepIndex = 0;
+  if (opts.skipHome) {
+    const steps = tutorialSteps(tutorialPart);
+    const firstOnScreen = steps.findIndex(s => s.screen !== 'home');
+    if (firstOnScreen > 0) tutorialStepIndex = firstOnScreen;
+  }
+  tutorialFloorIndex = tutorialStepIndex;
   clearAllSearches();
-  runTutorialStep(0);
+  runTutorialStep(tutorialStepIndex);
 }
 
 if (tutorialNext) tutorialNext.addEventListener('click', () => {
@@ -7787,7 +8031,7 @@ if (tutorialNext) tutorialNext.addEventListener('click', () => {
   tutorialDirection = 1;
   const steps = tutorialSteps(tutorialPart);
   if (tutorialStepIndex + 1 >= steps.length) {
-    if (tutorialPart < TUTORIAL_PARTS) {
+    if (!tutorialSolo && tutorialPart < TUTORIAL_PARTS) {
       tutorialPart++;
       tutorialStepIndex = 0;
       runTutorialStep(0);
@@ -7802,7 +8046,7 @@ if (tutorialNext) tutorialNext.addEventListener('click', () => {
 
 if (tutorialBack) tutorialBack.addEventListener('click', () => {
   tutorialDirection = -1;
-  if (tutorialStepIndex === 0) {
+  if (tutorialStepIndex <= tutorialFloorIndex) {
     // Step back into the previous part's last step (never before the part the
     // user launched from Settings)
     if (tutorialPart <= tutorialStartPart) return;
@@ -7819,15 +8063,17 @@ if (tutorialBack) tutorialBack.addEventListener('click', () => {
 
 if (tutorialClose) tutorialClose.addEventListener('click', endTutorial);
 
+// Any button carrying data-tutorial-part starts that part — Settings' Help
+// list, and the "How this works" item in a feature's own ⋯ menu. The two
+// optional attributes are what make an in-feature launch behave differently;
+// the Settings buttons carry neither, so their behaviour is unchanged.
 document.querySelectorAll('[data-tutorial-part]').forEach(btn => {
   btn.addEventListener('click', () => {
-    tutorialPart = parseInt(btn.dataset.tutorialPart, 10) || 1;
-    tutorialStartPart = tutorialPart;
-    tutorialDirection = 1;
-    tutorialStepIndex = 0;
-    tutorialGroupShown = {};
-    clearAllSearches();
-    runTutorialStep(0);
+    closeAllMoreMenus();          // the tour is about to point at things behind it
+    startTutorial(parseInt(btn.dataset.tutorialPart, 10) || 1, {
+      solo: btn.hasAttribute('data-tutorial-solo'),
+      skipHome: btn.hasAttribute('data-tutorial-skip-home'),
+    });
   });
 });
 
