@@ -16,6 +16,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 10, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.08.02-1706', 'Hours grid: Cancel closes the cell instead of jumping to another one'],
   ['v2026.08.02-1652', 'Back now closes an open pop-up instead of navigating the screen behind it'],
   ['v2026.08.02-1506', 'Diagnostic build: reports what the hours Cancel button actually receives'],
   ['v2026.08.02-1456', 'Deleting a customer now says where the notes go; Trash is a button, not a long list'],
@@ -25,7 +26,6 @@ const CHANGELOG = [
   ['v2026.08.02-1428', 'Calendar day view: swiping to another day now works on top of a job too'],
   ['v2026.08.02-1417', 'Every row in the hours chart can be exported; a conflict lets you tick only one side'],
   ['v2026.08.02-1407', 'Save hours from the chart — saved lines show green, and disagreements show red'],
-  ['v2026.08.02-1353', 'Hours grid: Cancel now closes the note-line editor instead of reopening it'],
 ];
 const APP_VERSION = CHANGELOG[0][0];
 
@@ -6588,6 +6588,16 @@ function refreshIifDatalists() {
 }
 
 function closeIifCell(rerender = true) {
+  // Closing removes the Save/Cancel bar from the header, so everything below
+  // SHIFTS UP — and the tail of the very tap that closed it (the click that
+  // follows pointerdown) then lands on whatever cell has moved under the
+  // finger, opening that one. It presented as "Cancel does nothing"
+  // (reopened the same cell), "jumps to another cell", or working fine,
+  // depending on where the layout settled: not reproducible, because it
+  // depended on finger position. Suppress cell-opening taps for a moment so
+  // the tap that closed a cell cannot open the next one. Cell-to-cell moves
+  // are unaffected — those call openIifCellAt directly, not through here.
+  suppressIifTaps(500);
   iifOutsideTap.detach();
   openIifCell = null;
   iifSrcEditing = false;     // never strand a half-finished note edit
@@ -6597,7 +6607,6 @@ function closeIifCell(rerender = true) {
 }
 
 function openIifCellAt(cellKey) {
-  iifTrace = [];              // TEMP: diagnostic trace, reset per cell opened
   openIifCell = cellKey;
   renderIIFEntries(iifParsedEntries);
   focusOpenIifCell();
@@ -6842,21 +6851,9 @@ function renderIifCellBar(col) {
   showIifCellHint('');
   iifCellBar.hidden = false;
 }
-// ---- TEMPORARY DIAGNOSTIC (v2026.08.02-1512) ----
-// Cancel reportedly does nothing, and three readings of this code have not
-// explained why. Rather than guess a fourth time, record what the button
-// actually receives and show it on screen — there is no console on a phone.
-// REMOVE once the cause is known: this block, iifTrace/iifDiag, and the
-// window.onerror hook below.
-// Written to #iif-status, NOT to the hint inside the bar: closing the cell
-// hides that bar, which would erase the very evidence we're collecting.
-let iifTrace = [];
-function iifDiag(step) {
-  iifTrace.push(step);
-  if (iifStatus) iifStatus.textContent = 'cancel: ' + iifTrace.join(' ');
-}
-// An exception thrown inside a re-render used to vanish silently, which looks
-// exactly like a dead button. Surface it on screen instead.
+// An exception thrown inside a re-render used to vanish into a console nobody
+// can see on a phone, which looks identical to a dead button. Kept from the
+// v2026.08.02-1506 diagnostic build: errors on this screen now say so.
 window.addEventListener('error', (e) => {
   if (!hoursView || !hoursView.classList.contains('active')) return;
   if (iifStatus) iifStatus.textContent = 'error: ' + (e.message || 'unknown');
@@ -6869,21 +6866,11 @@ wireIifCellButton(document.getElementById('iif-cell-save'), () => {
     if (iifStatus) iifStatus.textContent = 'save failed: ' + (err && err.message ? err.message : String(err));
   }
 });
-// Raw listeners, independent of wireIifCellButton, so we can tell "the button
-// never received the event" from "it received it and the handler didn't run".
-const iifCancelEl = document.getElementById('iif-cell-cancel');
-if (iifCancelEl) {
-  ['touchstart', 'pointerdown', 'mousedown', 'click'].forEach(t => {
-    iifCancelEl.addEventListener(t, () => iifDiag(t), true);
-  });
-}
-wireIifCellButton(iifCancelEl, () => {
-  iifDiag('handler');
+wireIifCellButton(document.getElementById('iif-cell-cancel'), () => {
   try {
     closeIifCell();
-    iifDiag('done');
   } catch (err) {
-    iifDiag('THREW:' + (err && err.message ? err.message : String(err)));
+    if (iifStatus) iifStatus.textContent = 'close failed: ' + (err && err.message ? err.message : String(err));
   }
 });
 
