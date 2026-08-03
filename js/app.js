@@ -16,6 +16,8 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 10, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.08.03-0053', 'Tap anything during a tutorial and it waits with a Resume button instead of getting in the way'],
+  ['v2026.08.03-0021', 'One date option in the note menu instead of two: Insert a date'],
   ['v2026.08.02-2214', 'Users list shows full email addresses instead of cutting them short'],
   ['v2026.08.02-2211', 'Employees in Settings are readable cards instead of a crowded, truncated row'],
   ['v2026.08.02-2125', 'Each employee has their own calendar colour, set in Settings'],
@@ -24,8 +26,6 @@ const CHANGELOG = [
   ['v2026.08.02-1736', 'Prices and notes catch up by themselves after the phone has been asleep'],
   ['v2026.08.02-1706', 'Hours grid: Cancel closes the cell instead of jumping to another one'],
   ['v2026.08.02-1652', 'Back now closes an open pop-up instead of navigating the screen behind it'],
-  ['v2026.08.02-1506', 'Diagnostic build: reports what the hours Cancel button actually receives'],
-  ['v2026.08.02-1456', 'Deleting a customer now says where the notes go; Trash is a button, not a long list'],
 ];
 const APP_VERSION = CHANGELOG[0][0];
 
@@ -91,7 +91,6 @@ const importCsvBtn = document.getElementById('import-csv-btn');
 const importHasHeader = document.getElementById('import-has-header');
 const importStatus = document.getElementById('import-status');
 const checkboxBtn = document.getElementById('checkbox-btn');
-const dateTodayBtn = document.getElementById('date-today-btn');
 const datePickerBtn = document.getElementById('date-picker-btn');
 const editorMoreBtn = document.getElementById('editor-more-btn');
 const editorMoreDropdown = document.getElementById('editor-more-dropdown');
@@ -4154,9 +4153,6 @@ if (datePickerInput) datePickerInput.addEventListener('pointerdown', () => {
   datePickerInput.value = '';
 });
 
-dateTodayBtn.addEventListener('click', () => {
-  insertDateAtCursor(formatDateForInsert(new Date()));
-});
 datePickerInput.addEventListener('change', () => {
   if (!datePickerInput.value) return;
   const [y, m, d] = datePickerInput.value.split('-').map(Number);
@@ -4620,6 +4616,10 @@ function commitAndCleanupEditor() {
 
 // Android/browser back button support
 window.addEventListener('popstate', (e) => {
+  // Navigating away with the system back button is you going off to do
+  // something, same as tapping — but it isn't a tap, so the watcher won't see
+  // it. Step aside and leave the resume pill.
+  if (tutorialOverlay && !tutorialOverlay.hidden) pauseTutorial();
   // Our own history.back(), issued because a sheet was closed by its ✕ / a tap
   // outside / a Save. Consume it and do nothing — the screen must not move.
   if (modalBackSwallow > 0) { modalBackSwallow--; return; }
@@ -7442,6 +7442,14 @@ const tutorialNext = document.getElementById('tutorial-next');
 const tutorialBack = document.getElementById('tutorial-back');
 const tutorialProgress = document.getElementById('tutorial-progress');
 const tutorialClose = document.getElementById('tutorial-close');
+// Resume pill (see "pausing the tour" below). Declared UP HERE with the other
+// tutorial refs rather than beside its own functions: endTutorial reads them
+// and is defined much earlier, and a const in the temporal dead zone would be
+// a hard crash rather than a quiet miss. Same reasoning as hoursView.
+const tutorialResume = document.getElementById('tutorial-resume');
+const tutorialResumeBtn = document.getElementById('tutorial-resume-btn');
+const tutorialResumeClose = document.getElementById('tutorial-resume-close');
+let tutorialPaused = false;
 
 let tutorialStepIndex = 0;
 let tutorialPart = 1;
@@ -8120,6 +8128,11 @@ async function showTutorialBubble(target, text, index, stepCount) {
     tutorialNext.disabled = false;
   }
   tutorialOverlay.hidden = false;
+  showResumePill(false);
+  // Live only while a step is on screen, so nothing is listening once the tour
+  // is paused or finished. Attached AFTER the tap that got us here has fully
+  // finished (setup + two frames), so it can't pause on its own arrival.
+  attachTutorialTapWatch();
   // Render bubble off-screen first to measure height
   tutorialBubble.style.top = '-9999px';
   tutorialBubble.style.left = '-9999px';
@@ -8156,13 +8169,75 @@ function clearHighlights() {
 
 function endTutorial() {
   clearHighlights();
+  detachTutorialTapWatch();
   if (tutorialOverlay) tutorialOverlay.hidden = true;
+  showResumePill(false);
+  tutorialPaused = false;
   tutorialStepIndex = 0;
   tutorialPart = 1;
   tutorialStartPart = 1;
   tutorialGroupShown = {};
   tutorialSolo = false;
   tutorialFloorIndex = 0;
+}
+
+// ---------- pausing the tour so people can actually try things ----------
+//
+// The overlay has always been `pointer-events: none`, so the app was never
+// blocked during a tour — people tapped things and the tour simply didn't
+// notice: the spotlight (an inline box-shadow) stayed painted on a screen they
+// had left, the bubble hung over unrelated content, and Next then yanked them
+// back to wherever the tour wanted them.
+//
+// So: touch anything outside the bubble and the tour steps aside, leaving one
+// unobtrusive "Resume tutorial" pill. Resuming re-runs the current step, which
+// already navigates and re-measures, so you land back exactly where you were.
+function showResumePill(on) {
+  if (tutorialResume) tutorialResume.hidden = !on;
+}
+function pauseTutorial() {
+  if (tutorialPaused || !tutorialOverlay || tutorialOverlay.hidden) return;
+  tutorialPaused = true;
+  detachTutorialTapWatch();
+  clearHighlights();
+  tutorialOverlay.hidden = true;
+  showResumePill(true);
+}
+function resumeTutorial() {
+  if (!tutorialPaused) return;
+  tutorialPaused = false;
+  showResumePill(false);
+  runTutorialStep(tutorialStepIndex);
+}
+if (tutorialResumeBtn) tutorialResumeBtn.addEventListener('click', resumeTutorial);
+if (tutorialResumeClose) tutorialResumeClose.addEventListener('click', endTutorial);
+
+// Judged on pointer-UP with a tap threshold, never on pointer-down: putting a
+// finger on the screen to SCROLL would otherwise pause the tour on every
+// swipe. Reading a long screen is part of following a step; only a deliberate
+// tap counts as "doing something". Same reasoning (and the same constants) as
+// the price table's outside-tap watcher.
+let tutorialTapStart = null;
+function tutorialTapDown(e) {
+  tutorialTapStart = { x: e.clientX, y: e.clientY, t: Date.now() };
+}
+function tutorialTapUp(e) {
+  const s = tutorialTapStart;
+  tutorialTapStart = null;
+  if (!s || !tutorialOverlay || tutorialOverlay.hidden) return;
+  if (Math.hypot(e.clientX - s.x, e.clientY - s.y) > TAP_SLOP_PX) return;  // a drag
+  if (Date.now() - s.t > TAP_MAX_MS) return;                              // a long press
+  if (e.target.closest && e.target.closest('#tutorial-bubble')) return;   // tour's own controls
+  pauseTutorial();
+}
+function attachTutorialTapWatch() {
+  document.addEventListener('pointerdown', tutorialTapDown, true);
+  document.addEventListener('pointerup', tutorialTapUp, true);
+}
+function detachTutorialTapWatch() {
+  document.removeEventListener('pointerdown', tutorialTapDown, true);
+  document.removeEventListener('pointerup', tutorialTapUp, true);
+  tutorialTapStart = null;
 }
 
 // Start a tutorial part programmatically (welcome modal, sample-data flow)

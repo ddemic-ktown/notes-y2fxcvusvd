@@ -1212,6 +1212,29 @@ body.dark-mode .customer-link-btn { background: #2d2a1e; border-color: #78600a; 
   pointer-events: none;
 }
 .tutorial-overlay[hidden] { display: none; }
+/* Paused tour. Bottom-LEFT because the + FAB owns bottom-right, and lifted by
+   --kb-inset like every other fixed bottom control — position:fixed anchors to
+   the layout viewport, which does not shrink for the keyboard. */
+.tutorial-resume {
+  position: fixed;
+  left: 12px;
+  bottom: calc(12px + var(--kb-inset, 0px));
+  z-index: 999;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  background: var(--accent, #2563eb);
+  border-radius: 999px;
+  box-shadow: 0 6px 18px rgba(0,0,0,0.28);
+}
+.tutorial-resume[hidden] { display: none; }
+.tutorial-resume button {
+  background: transparent; border: 0; color: #fff; cursor: pointer;
+  font-family: inherit; font-size: 13px; font-weight: 600;
+}
+#tutorial-resume-btn { padding: 10px 6px 10px 16px; }
+#tutorial-resume-close { padding: 10px 14px 10px 6px; font-size: 15px; opacity: 0.85; }
+#tutorial-resume-close:hover { opacity: 1; }
 .tutorial-bubble {
   position: fixed;
   background: var(--accent, #2563eb);
