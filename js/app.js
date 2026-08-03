@@ -16,6 +16,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 10, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.08.03-0142', 'Leave a note and come straight back — undo still remembers'],
   ['v2026.08.03-0053', 'Tap anything during a tutorial and it waits with a Resume button instead of getting in the way'],
   ['v2026.08.03-0021', 'One date option in the note menu instead of two: Insert a date'],
   ['v2026.08.02-2214', 'Users list shows full email addresses instead of cutting them short'],
@@ -25,7 +26,6 @@ const CHANGELOG = [
   ['v2026.08.02-1800', 'Each screen’s ⋯ menu now explains that screen; new tours for the Calendar and Hours'],
   ['v2026.08.02-1736', 'Prices and notes catch up by themselves after the phone has been asleep'],
   ['v2026.08.02-1706', 'Hours grid: Cancel closes the cell instead of jumping to another one'],
-  ['v2026.08.02-1652', 'Back now closes an open pop-up instead of navigating the screen behind it'],
 ];
 const APP_VERSION = CHANGELOG[0][0];
 
@@ -3210,7 +3210,9 @@ function showEditor(record, type, cursorHint) {
   currentId = record.id;
   currentType = type;
   currentIsDefault = !!record.isDefault;
-  resetUndo();
+  // Hand back the stack if this is the note we just left and nothing has
+  // changed it since; otherwise start clean.
+  if (!restoreUndoForNote(record, type)) resetUndo();
   lastKnownRemoteBody = type === 'note' ? (record.body || '') : null;
 
   if (type === 'note') {
@@ -4391,6 +4393,40 @@ function updateUndoBtn() {
   if (redoBtn) redoBtn.disabled = redoStack.length === 0;
 }
 function resetUndo() { undoStack = []; redoStack = []; undoLastRunType = null; updateUndoBtn(); }
+
+// Leaving a note used to throw its undo history away, so stepping out and
+// straight back in lost it. The stack is now parked for the note you just
+// left — ONE note, replaced on every exit, so opening anything else drops it.
+//
+// The body check on restore is the load-bearing part, not a nicety. Undo
+// restores whole-text snapshots and the app is last-write-wins; if the note
+// changed while it was closed (another device, another person), replaying a
+// snapshot from before that change would silently erase it. That's the same
+// reason an open note's undo clears when a sync touches it. Body only, because
+// the stack only ever covered the body.
+let undoStash = null;
+function stashUndoForNote() {
+  // Storage.getNote guards the emptied-note case: leaving a note with nothing
+  // in it DELETES it a few lines above this call, and parking a stack for a
+  // record that no longer exists is just litter.
+  if (currentType === 'note' && currentId && undoStack.length && Storage.getNote(currentId)) {
+    undoStash = { id: currentId, undo: undoStack, redo: redoStack, body: bodyInput.value };
+  } else {
+    undoStash = null;
+  }
+}
+// True when the parked stack was handed back, so the caller skips resetUndo.
+function restoreUndoForNote(record, type) {
+  const s = undoStash;
+  undoStash = null;                        // one-shot; exiting again re-parks it
+  if (!s || type !== 'note' || record.id !== s.id) return false;
+  if (splitTitleAndBody(record.body || '').body !== s.body) return false;
+  undoStack = s.undo;
+  redoStack = s.redo;
+  undoLastRunType = null;                  // a fresh run starts on the next key
+  updateUndoBtn();
+  return true;
+}
 function snapshotState() {
   return { text: bodyInput.value, selStart: bodyInput.selectionStart, selEnd: bodyInput.selectionEnd };
 }
@@ -4604,6 +4640,7 @@ function commitAndCleanupEditor() {
       }
     }
   }
+  stashUndoForNote();     // park it before currentId/currentType are cleared
   currentId = null;
   currentType = null;
   currentIsDefault = false;
