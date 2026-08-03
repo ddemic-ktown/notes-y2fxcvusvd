@@ -597,7 +597,34 @@ body.hours-open {
   opacity: 0.6;
   padding-bottom: 2px;
 }
-.employee-pill { flex-wrap: wrap; }
+/* Employees are cards, not pills — see renderEmployeeList. The list overrides
+   .keyword-list's wrapping row so each card gets the full width. */
+.employee-list { flex-direction: column; align-items: stretch; gap: 8px; }
+.employee-card {
+  display: flex; flex-direction: column; gap: 8px;
+  background: var(--bg); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 10px 12px;
+  font-size: 13px; color: var(--ink);
+}
+.employee-card-top { display: flex; align-items: center; gap: 8px; }
+/* min-width:0 is what lets the name ellipsis instead of forcing the row wider
+   than the card — a flex item's default min-width is its content. */
+.employee-name { flex: 1; min-width: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.employee-remove {
+  background: transparent; border: 0; color: var(--ink-soft);
+  font-size: 20px; line-height: 1; cursor: pointer; padding: 0 6px;
+  border-radius: 999px; flex-shrink: 0;
+}
+.employee-remove:hover { color: var(--danger); }
+/* Side by side when there's room, stacked on a narrow phone (below). */
+.employee-card-fields { display: flex; gap: 8px; }
+.employee-field { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.employee-field-label { font-size: 11px; color: var(--ink-soft); text-transform: uppercase; letter-spacing: 0.04em; }
+.employee-field select {
+  width: 100%; min-width: 0; padding: 6px 8px; font-size: 13px;
+  border: 1px solid var(--line); border-radius: 6px;
+  background: var(--bg); color: var(--ink);
+}
 /* The employee's calendar colour. Sized as a small round swatch: browsers draw
    a chunky bordered box by default, which would dominate the row on a phone.
    flex-shrink:0 keeps it a circle when the name beside it is long. */
@@ -609,10 +636,6 @@ body.hours-open {
 .employee-colour::-webkit-color-swatch-wrapper { padding: 0; }
 .employee-colour::-webkit-color-swatch { border: none; border-radius: 50%; }
 .employee-colour::-moz-color-swatch { border: none; border-radius: 50%; }
-.employee-link-select {
-  padding: 4px 6px; border: 1px solid var(--line); border-radius: 6px;
-  background: var(--bg); color: var(--ink); font-size: 12px; max-width: 45%;
-}
 
 /* ---- Price table ---- */
 .price-main { flex: 1; min-height: 0; display: flex; flex-direction: column; }
@@ -1913,7 +1936,20 @@ input[type="search"]::-webkit-search-cancel-button {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.member-item select { flex-shrink: 0; max-width: 42%; }
+/* Users list — cards, so the email gets a line to itself and shows in full.
+   Separate from .member-item, which eight other lists still use as a row. */
+.member-card {
+  display: flex; flex-direction: column; gap: 8px;
+  padding: 10px 12px; background: var(--bg);
+  border: 1px solid var(--line); border-radius: var(--radius);
+  font-size: 14px;
+}
+.member-card-top { display: flex; align-items: flex-start; gap: 8px; }
+/* anywhere, not ellipsis: an address with no spaces still has to break. */
+.member-card-email { flex: 1; min-width: 0; font-weight: 600; overflow-wrap: anywhere; }
+.member-field { display: flex; flex-direction: column; gap: 3px; }
+.member-field-label { font-size: 11px; color: var(--ink-soft); text-transform: uppercase; letter-spacing: 0.04em; }
+.member-field select { width: 100%; min-width: 0; }
 
 .member-email {
   flex: 1;
@@ -1991,7 +2027,8 @@ input[type="search"]::-webkit-search-cancel-button {
   /* From/To live in the hours screen header now — keep them side by side so
      the chart doesn't lose a second row of height on a narrow phone. */
   .iif-range-label { flex: 1 1 45%; min-width: 0; }
-  .member-item select { max-width: 38%; font-size: 13px; padding: 6px 8px; }
+  /* Two dropdowns side by side leave neither readable on a small phone. */
+  .employee-card-fields { flex-direction: column; }
 }
 
 .keyword-add { display: flex; gap: 8px; margin-bottom: 10px; }

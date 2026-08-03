@@ -16,6 +16,8 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 10, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.08.02-2214', 'Users list shows full email addresses instead of cutting them short'],
+  ['v2026.08.02-2211', 'Employees in Settings are readable cards instead of a crowded, truncated row'],
   ['v2026.08.02-2125', 'Each employee has their own calendar colour, set in Settings'],
   ['v2026.08.02-1920', 'Ticking a checkbox no longer wakes the keyboard after you have put it away'],
   ['v2026.08.02-1800', 'Each screen’s ⋯ menu now explains that screen; new tours for the Calendar and Hours'],
@@ -24,8 +26,6 @@ const CHANGELOG = [
   ['v2026.08.02-1652', 'Back now closes an open pop-up instead of navigating the screen behind it'],
   ['v2026.08.02-1506', 'Diagnostic build: reports what the hours Cancel button actually receives'],
   ['v2026.08.02-1456', 'Deleting a customer now says where the notes go; Trash is a button, not a long list'],
-  ['v2026.08.02-1447', 'Proper undo and redo icons that look the same on every device'],
-  ['v2026.08.02-1446', 'iPhone: the date picker stays open instead of closing and inserting today'],
 ];
 const APP_VERSION = CHANGELOG[0][0];
 
@@ -220,21 +220,36 @@ function renderEmployeeList() {
   // member lets that person see their schedule; unlinked names still schedule.
   const links = Storage.getSettings().employeeLinks || {};
   const members = Storage.listMembers().filter(m => m.role === 'employee' || m.role === 'admin');
+  // A CARD, not a .keyword-pill. The pill was built to hold one keyword and an
+  // ✕; an employee carries a colour, a name, two dropdowns and a delete, and
+  // squeezing all that into an inline pill is what truncated the account name.
+  // The labels are visible now too — two unlabelled dropdowns side by side gave
+  // no clue which was which.
   employeeListEl.innerHTML = list.map(e => `
-    <li class="keyword-pill employee-pill">
-      <input type="color" class="employee-colour" data-emp-colour="${escapeHtml(e.name)}"
-             value="${e.colour || employeeColour(e.name)}"
-             aria-label="Calendar colour for ${escapeHtml(e.name)}" />
-      <span>${escapeHtml(e.name)}</span>
-      <select class="employee-type-select" data-emp-type="${escapeHtml(e.name)}" aria-label="Classification for ${escapeHtml(e.name)}">
-        <option value="journeyman" ${e.type === 'journeyman' ? 'selected' : ''}>Journeyman</option>
-        <option value="apprentice" ${e.type === 'apprentice' ? 'selected' : ''}>Apprentice</option>
-      </select>
-      <select class="employee-link-select" data-emp-link="${escapeHtml(e.name)}" aria-label="App account for ${escapeHtml(e.name)}">
-        <option value="">No app account</option>
-        ${members.map(m => `<option value="${m.uid}" ${links[e.name] === m.uid ? 'selected' : ''}>${escapeHtml(m.name || m.email || m.uid)}</option>`).join('')}
-      </select>
-      <button data-emp="${escapeHtml(e.name)}" aria-label="Remove ${escapeHtml(e.name)}">×</button>
+    <li class="employee-card">
+      <div class="employee-card-top">
+        <input type="color" class="employee-colour" data-emp-colour="${escapeHtml(e.name)}"
+               value="${e.colour || employeeColour(e.name)}"
+               aria-label="Calendar colour for ${escapeHtml(e.name)}" />
+        <span class="employee-name">${escapeHtml(e.name)}</span>
+        <button data-emp="${escapeHtml(e.name)}" class="employee-remove" aria-label="Remove ${escapeHtml(e.name)}">×</button>
+      </div>
+      <div class="employee-card-fields">
+        <label class="employee-field">
+          <span class="employee-field-label">Classification</span>
+          <select class="employee-type-select" data-emp-type="${escapeHtml(e.name)}" aria-label="Classification for ${escapeHtml(e.name)}">
+            <option value="journeyman" ${e.type === 'journeyman' ? 'selected' : ''}>Journeyman</option>
+            <option value="apprentice" ${e.type === 'apprentice' ? 'selected' : ''}>Apprentice</option>
+          </select>
+        </label>
+        <label class="employee-field">
+          <span class="employee-field-label">App account</span>
+          <select class="employee-link-select" data-emp-link="${escapeHtml(e.name)}" aria-label="App account for ${escapeHtml(e.name)}">
+            <option value="">No app account</option>
+            ${members.map(m => `<option value="${m.uid}" ${links[e.name] === m.uid ? 'selected' : ''}>${escapeHtml(m.name || m.email || m.uid)}</option>`).join('')}
+          </select>
+        </label>
+      </div>
     </li>
   `).join('');
   employeeListEl.querySelectorAll('select[data-emp-link]').forEach(sel => {
@@ -5763,16 +5778,26 @@ function renderMembersList() {
 
   const members = Storage.listMembers();
   const currentUid = Storage.getUid();
+  // .member-card, NOT .member-item — that class is shared with eight other
+  // lists (customer pickers, share list, trash), so it can't be restructured
+  // here. An email is the only thing identifying a user, and squeezing it
+  // beside a role select meant it was always the part that got clipped; on its
+  // own line it wraps in full.
   membersList.innerHTML = members.map(m => `
-    <li class="member-item">
-      <span class="member-email">${escapeHtml(m.email || m.uid)}</span>
-      <select class="member-role-select" data-uid="${m.uid}" ${m.uid === currentUid ? 'disabled' : ''}>
-        <option value="admin" ${m.role === 'admin' ? 'selected' : ''}>Admin</option>
-        <option value="employee" ${m.role === 'employee' ? 'selected' : ''}>Employee</option>
-        <option value="bookkeeper" ${m.role === 'bookkeeper' ? 'selected' : ''}>Bookkeeper</option>
-        <option value="customer" ${m.role === 'customer' ? 'selected' : ''}>Customer</option>
-      </select>
-      ${m.uid !== currentUid ? `<button class="member-remove-btn" data-uid="${m.uid}" title="Remove">✕</button>` : ''}
+    <li class="member-card">
+      <div class="member-card-top">
+        <span class="member-card-email">${escapeHtml(m.email || m.uid)}</span>
+        ${m.uid !== currentUid ? `<button class="member-remove-btn" data-uid="${m.uid}" title="Remove">✕</button>` : ''}
+      </div>
+      <label class="member-field">
+        <span class="member-field-label">Role</span>
+        <select class="member-role-select" data-uid="${m.uid}" ${m.uid === currentUid ? 'disabled' : ''}>
+          <option value="admin" ${m.role === 'admin' ? 'selected' : ''}>Admin</option>
+          <option value="employee" ${m.role === 'employee' ? 'selected' : ''}>Employee</option>
+          <option value="bookkeeper" ${m.role === 'bookkeeper' ? 'selected' : ''}>Bookkeeper</option>
+          <option value="customer" ${m.role === 'customer' ? 'selected' : ''}>Customer</option>
+        </select>
+      </label>
     </li>
   `).join('');
 
@@ -5795,10 +5820,12 @@ function renderMembersList() {
     invitesList.innerHTML = invites.length === 0
       ? '<li style="font-size:13px;color:var(--ink-soft)">No pending invites</li>'
       : invites.map(inv => `
-        <li class="member-item">
-          <span class="member-email">${escapeHtml(inv.email)}</span>
-          <span style="font-size:12px;color:var(--ink-soft)">${inv.role}</span>
-          <button class="member-remove-btn" data-email="${escapeHtml(inv.email)}" title="Cancel">✕</button>
+        <li class="member-card">
+          <div class="member-card-top">
+            <span class="member-card-email">${escapeHtml(inv.email)}</span>
+            <button class="member-remove-btn" data-email="${escapeHtml(inv.email)}" title="Cancel">✕</button>
+          </div>
+          <span class="member-field-label">Invited as ${escapeHtml(inv.role)}</span>
         </li>
       `).join('');
     invitesList.querySelectorAll('.member-remove-btn').forEach(btn => {
