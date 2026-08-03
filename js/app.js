@@ -16,6 +16,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 10, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.08.02-1736', 'Prices and notes catch up by themselves after the phone has been asleep'],
   ['v2026.08.02-1706', 'Hours grid: Cancel closes the cell instead of jumping to another one'],
   ['v2026.08.02-1652', 'Back now closes an open pop-up instead of navigating the screen behind it'],
   ['v2026.08.02-1506', 'Diagnostic build: reports what the hours Cancel button actually receives'],
@@ -25,7 +26,6 @@ const CHANGELOG = [
   ['v2026.08.02-1433', 'iPhone: the keyboard no longer disappears when moving from a note title to the note'],
   ['v2026.08.02-1428', 'Calendar day view: swiping to another day now works on top of a job too'],
   ['v2026.08.02-1417', 'Every row in the hours chart can be exported; a conflict lets you tick only one side'],
-  ['v2026.08.02-1407', 'Save hours from the chart — saved lines show green, and disagreements show red'],
 ];
 const APP_VERSION = CHANGELOG[0][0];
 
@@ -1420,6 +1420,11 @@ function showPriceTable() {
   renderCrumbs('crumbs-price', [{ label: 'Home', go: 'home' }, { label: 'Price Table' }]);
   renderPriceTable();
   restoreScroll('price');
+  // Draw from cache first (instant), then confirm against the server. If the
+  // realtime stream died while the app was frozen, the cache can be hours
+  // stale and nothing else on this screen would ever notice. The fetch emits,
+  // which redraws through rerenderCurrent.
+  Storage.refreshPriceTable();
   if (!handlingPopstate) history.pushState({ screen: 'price' }, '');
 }
 
@@ -5774,7 +5779,10 @@ function rerenderCurrent() {
   } else if (calendarDayView && calendarDayView.classList.contains('active')) {
     renderCalendarDay();
   } else if (priceView && priceView.classList.contains('active')) {
-    renderPriceTable();
+    // An open cell holds text nobody has saved yet, and re-rendering rebuilds
+    // the cell empty. A background sync must not eat a half-typed price —
+    // same rule as #hours-view being left out of this function entirely.
+    if (!openCellKey) renderPriceTable();
   } else if (orphanView && orphanView.classList.contains('active')) {
     renderOrphanList();
   } else if (settingsView.classList.contains('active')) {
@@ -7867,7 +7875,37 @@ async function checkDeployedVersion() {
 }
 // iOS restores a suspended PWA without firing visibilitychange, so pageshow is
 // the event that catches a phone coming back after days in the background.
-window.addEventListener('pageshow', () => { checkDeployedVersion(); });
+window.addEventListener('pageshow', () => { checkDeployedVersion(); wakeSync(); });
+
+// --- Reviving the data connection after the OS froze us -----------------
+//
+// checkDeployedVersion above asks "is there newer CODE?". This asks the other
+// half of the question: "is there newer DATA?" — which nothing used to ask.
+//
+// Android Chrome discards backgrounded tabs and PWAs; iOS suspends them. Either
+// way the Firestore websocket dies, the listeners stay attached to nothing, and
+// the cache keeps serving the last thing it saw. The app looks perfectly
+// healthy while showing stale data. Reported as: prices entered on a desktop
+// didn't appear on an Android until the home ⟳ (a full reload) was pressed.
+//
+// Only after a real absence — a glance at a notification and back is not a
+// freeze, and reconnecting on every tab switch would churn the connection for
+// nothing. Storage.reconnect() throttles again on its own side, because a
+// single wake-up can fire pageshow AND visibilitychange.
+let lastHiddenAt = 0;
+const WAKE_AFTER_MS = 30000;
+function wakeSync() {
+  if (!lastHiddenAt || Date.now() - lastHiddenAt < WAKE_AFTER_MS) return;
+  lastHiddenAt = 0;
+  Storage.reconnect();
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') lastHiddenAt = Date.now();
+  else wakeSync();
+});
+// A phone coming back from a dead zone has the same broken stream as one
+// coming back from the background, and fires neither of the events above.
+window.addEventListener('online', () => { Storage.reconnect(); });
 
 // Manual refresh — replaces the browser's pull-to-refresh, which fired by
 // accident on non-scrolling screens. Checks for a new app version first: if

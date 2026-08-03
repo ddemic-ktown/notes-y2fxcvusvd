@@ -3,7 +3,7 @@
 import { db } from "./firebase-init.js";
 import {
   collection, doc, onSnapshot, setDoc, deleteDoc, getDocs,
-  writeBatch, getDoc, query, where,
+  writeBatch, getDoc, query, where, disableNetwork, enableNetwork,
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
 
 const DEFAULT_SETTINGS = {
@@ -30,6 +30,8 @@ const _cache = {
   timelogs: [],
 };
 const _listeners = new Set();
+let _lastReconnect = 0;      // throttles Storage.reconnect()
+let _lastPriceFetch = 0;     // throttles Storage.refreshPriceTable()
 let _onRoleChange = null;
 let _uid = null;
 let _orgId = null;
@@ -298,6 +300,30 @@ export const Storage = {
   // cb(newRole, previousRole); newRole is null if they were removed.
   onRoleChange(cb) { _onRoleChange = cb; },
   isReady() { return _ready; },
+
+  // Revive the realtime stream after the OS froze the app.
+  //
+  // Android Chrome discards backgrounded tabs and PWAs (and iOS suspends them),
+  // which kills the Firestore websocket. The listeners are still attached and
+  // the cache still serves reads, so the app looks fine and quietly shows
+  // yesterday's data — the symptom that started this: prices entered on a
+  // desktop never reached a phone until the home ⟳ forced a full reload.
+  //
+  // disableNetwork/enableNetwork tears the connection down and builds it again.
+  // Listeners resume from their RESUME TOKENS, so the server sends only what
+  // changed while we were away — this is not a re-read of the collection.
+  // Throttled because resume events can arrive in bursts (pageshow AND
+  // visibilitychange for the same wake-up).
+  async reconnect() {
+    if (!_orgId) return;                                  // not signed in yet
+    if (Date.now() - _lastReconnect < 10000) return;
+    _lastReconnect = Date.now();
+    try {
+      await disableNetwork(db);
+      await enableNetwork(db);
+    } catch (e) { console.warn('reconnect', e); }
+  },
+
   getNotesError() { return _notesError; },
   getRole() { return _role; },
   getOrgId() { return _orgId; },
@@ -620,6 +646,29 @@ export const Storage = {
   },
   listPriceItems() {
     return _cache.priceItems.slice().sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+  },
+  // Belt to reconnect()'s braces: a one-off authoritative fetch when the price
+  // screen opens, so entering it always shows what the server has rather than
+  // whatever the cache was left holding.
+  //
+  // This is NOT free — it costs one read per row, unlike reconnect(), which
+  // resumes from a token. Hence the throttle, and hence it runs only on this
+  // screen rather than on every navigation.
+  async refreshPriceTable() {
+    if (!_orgId || !this.canViewPriceTable()) return;
+    if (Date.now() - _lastPriceFetch < 15000) return;
+    _lastPriceFetch = Date.now();
+    try {
+      const [cfgSnap, itemSnap] = await Promise.all([
+        getDoc(priceConfigDoc()),
+        getDocs(priceItemsCol()),
+      ]);
+      _cache.priceConfig = cfgSnap.exists()
+        ? { vendors: [], sharedWith: [], ...cfgSnap.data() }
+        : { vendors: [], sharedWith: [] };
+      _cache.priceItems = itemSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+      emit();
+    } catch (e) { console.warn('refreshPriceTable', e); }
   },
   // Admins always; employees when the table is shared with them.
   canEditPriceTable() {
