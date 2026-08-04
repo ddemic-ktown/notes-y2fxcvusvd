@@ -16,6 +16,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 10, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.08.03-2344', 'Home search finds customers too, listed above the matching notes'],
   ['v2026.08.03-0142', 'Leave a note and come straight back — undo still remembers'],
   ['v2026.08.03-0053', 'Tap anything during a tutorial and it waits with a Resume button instead of getting in the way'],
   ['v2026.08.03-0021', 'One date option in the note menu instead of two: Insert a date'],
@@ -25,7 +26,6 @@ const CHANGELOG = [
   ['v2026.08.02-1920', 'Ticking a checkbox no longer wakes the keyboard after you have put it away'],
   ['v2026.08.02-1800', 'Each screen’s ⋯ menu now explains that screen; new tours for the Calendar and Hours'],
   ['v2026.08.02-1736', 'Prices and notes catch up by themselves after the phone has been asleep'],
-  ['v2026.08.02-1706', 'Hours grid: Cancel closes the cell instead of jumping to another one'],
 ];
 const APP_VERSION = CHANGELOG[0][0];
 
@@ -3377,14 +3377,45 @@ function renderHomeSearchResults(term) {
     ...Storage.listCustomers().flatMap(c => Storage.listNotesByCustomer(c.id)),
   ];
 
-  const results = allNotes.filter(n => noteMatchesSearch(n, words));
+  // Customers first — when you search a name you almost always want the
+  // person, not one of their notes. Matched on their DEFAULT note, so the
+  // address counts too, exactly like the Customers screen's own search.
+  // Employees and customers never have this collection in cache, so the group
+  // is naturally empty for them without a role check.
+  const lowerTerm = term.trim().toLowerCase();
+  const customerHits = Storage.listCustomers().filter(c => customerMatchesSearch(c, lowerTerm));
+  const customerIds = new Set(customerHits.map(c => c.id));
 
-  if (results.length === 0) {
-    notesList.innerHTML = `<p class="empty-state">No notes match "${escapeHtml(term)}".</p>`;
+  // A customer's default note IS that customer, so it matches whenever they
+  // do. Showing both would double every name you search for.
+  const results = allNotes.filter(n =>
+    noteMatchesSearch(n, words) && !(n.isDefault && customerIds.has(n.customerId)));
+
+  if (results.length === 0 && customerHits.length === 0) {
+    notesList.innerHTML = `<p class="empty-state">Nothing matches "${escapeHtml(term)}".</p>`;
     return;
   }
 
-  notesList.innerHTML = results.map(n => {
+  const customerHtml = customerHits.length ? '<p class="section-label">Customers:</p>' + customerHits.map(c => {
+    const def = Storage.getDefaultNoteForCustomer(c.id);
+    const { title, body } = splitTitleAndBody(def ? def.body : '');
+    const safeTitle = title.trim()
+      ? escapeHtml(title)
+      : '<span style="color:var(--ink-soft);font-style:italic">Untitled</span>';
+    const firstBodyLine = (body.split('\n').find(l => l.trim() !== '') || '').trim();
+    return `
+      <article class="note-card pinned" data-id="${c.id}" data-kind="customer">
+        <div class="note-head">
+          <p class="note-title">${safeTitle}</p>
+          <span class="note-date">${formatDateTime(c.updated)}</span>
+        </div>
+        ${firstBodyLine ? `<p class="note-preview">${escapeHtml(firstBodyLine)}</p>` : ''}
+      </article>
+    `;
+  }).join('') : '';
+
+  const notesHtml = results.length
+    ? (customerHits.length ? '<p class="section-label">Notes:</p>' : '') + results.map(n => {
     const { title, body } = splitTitleAndBody(n.body);
     const safeTitle = title.trim()
       ? escapeHtml(title)
@@ -3407,10 +3438,15 @@ function renderHomeSearchResults(term) {
         ${safePreview ? `<p class="note-preview">${safePreview}</p>` : ''}
       </article>
     `;
-  }).join('');
+  }).join('') : '';
+
+  notesList.innerHTML = customerHtml + notesHtml;
 
   notesList.querySelectorAll('.note-card').forEach(card => {
     card.addEventListener('click', () => {
+      // A customer row goes to their note list, the same as tapping them on
+      // the Customers screen — not into an editor.
+      if (card.dataset.kind === 'customer') { showCustomerNotes(card.dataset.id); return; }
       const note = Storage.getNote(card.dataset.id);
       if (note) {
         returnScreen = note.customerId ? 'customer-notes' : 'notes';
