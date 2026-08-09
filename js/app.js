@@ -16,6 +16,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 10, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.08.08-2000', 'Finishing a new customer opens their file; finishing a new note returns home'],
   ['v2026.08.03-2344', 'Home search finds customers too, listed above the matching notes'],
   ['v2026.08.03-0142', 'Leave a note and come straight back — undo still remembers'],
   ['v2026.08.03-0053', 'Tap anything during a tutorial and it waits with a Resume button instead of getting in the way'],
@@ -25,7 +26,6 @@ const CHANGELOG = [
   ['v2026.08.02-2125', 'Each employee has their own calendar colour, set in Settings'],
   ['v2026.08.02-1920', 'Ticking a checkbox no longer wakes the keyboard after you have put it away'],
   ['v2026.08.02-1800', 'Each screen’s ⋯ menu now explains that screen; new tours for the Calendar and Hours'],
-  ['v2026.08.02-1736', 'Prices and notes catch up by themselves after the phone has been asleep'],
 ];
 const APP_VERSION = CHANGELOG[0][0];
 
@@ -4826,10 +4826,43 @@ function updateCancelBtn() {
 // completely empty, so anything typed survives.
 const editorDoneBtn = document.getElementById('editor-done-btn');
 if (editorDoneBtn) editorDoneBtn.addEventListener('click', () => {
+  // Captured now: commitAndCleanupEditor clears pendingNewRecord on the way out.
+  const rec = pendingNewRecord;
   // Drop the keyboard first: leaving it up over the destination screen looks
   // broken, and blur() also commits any in-flight IME composition.
   if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
-  if (appHistoryDepth > 0) history.back();
+
+  // Where "done" should leave you. Back alone returns you to where you came
+  // FROM, which for a just-created record is rarely where you want to be:
+  // finishing a new customer and landing on the home screen means hunting for
+  // the customer you just made.
+  //
+  //   new customer            → that customer's note list
+  //   new GENERAL note        → home
+  //   note made in a customer → unchanged; back already lands on their list
+  let go = null;
+  if (rec && rec.kind === 'customer') {
+    // Skipped when the record was discarded for being empty — back has already
+    // put us somewhere sensible and there's no customer to show.
+    go = () => { if (Storage.getCustomer(rec.id)) showCustomerNotes(rec.id); };
+  } else if (rec && rec.kind === 'note' && !rec.customerId) {
+    go = () => goHome();
+  }
+
+  if (appHistoryDepth > 0) {
+    // back() still does the real work — flushing the save, discarding an empty
+    // record, tearing down the editor — so none of that is duplicated here.
+    // The destination has to wait until that has finished: this listener is
+    // registered after the main popstate handler, which is synchronous, and
+    // the timeout puts us on a later task so handlingPopstate is back to false.
+    // Registered only when a back is actually issued, so it can never be left
+    // waiting for a popstate that isn't coming.
+    if (go) window.addEventListener('popstate', () => setTimeout(go, 0), { once: true });
+    history.back();
+  } else {
+    commitAndCleanupEditor();
+    if (go) go();
+  }
 });
 
 if (editorCancelBtn) editorCancelBtn.addEventListener('click', () => {
