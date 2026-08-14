@@ -20,6 +20,20 @@
     </div>
   </div>
 
+  <!-- BOOT SPLASH
+       Shown until onAuthStateChanged has actually decided. Without it the app
+       had no "auth not resolved yet" state, so a slow session restore on iOS
+       looked identical to being signed out and flashed the sign-in form. -->
+  <section id="boot-view" class="screen active">
+    <div class="signin-card">
+      <h1>JobPilot</h1>
+      <p class="signin-message" role="status">
+        <span class="nav-spinner" style="width:18px;height:18px;border-width:3px;vertical-align:-3px;"></span>
+        Loading…
+      </p>
+    </div>
+  </section>
+
   <!-- SIGN-IN VIEW -->
   <section id="signin-view" class="screen">
     <!-- Finishing an emailed sign-in link: shown instead of the sign-in form
@@ -84,7 +98,7 @@
   </div>
 
   <!-- LIST VIEW -->
-  <section id="list-view" class="screen active">
+  <section id="list-view" class="screen">
     <header class="app-header home-header">
       <div class="home-header-top">
         <h1>JobPilot</h1>

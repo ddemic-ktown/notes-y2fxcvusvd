@@ -101,6 +101,9 @@ body.hours-open {
 .screen { display: none; min-height: 100vh; flex-direction: column; }
 .screen.active { display: flex; }
 
+/* Boot splash — borrows .signin-card so it matches the "Signing you in…" card */
+#boot-view.active { display: flex; align-items: center; justify-content: center; padding: 20px; }
+
 /* Sign-in screen */
 #signin-view.active { display: flex; align-items: center; justify-content: center; padding: 20px; }
 .signin-card {

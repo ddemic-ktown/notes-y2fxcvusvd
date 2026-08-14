@@ -13,9 +13,10 @@ import { LocalFiles } from "./files.js";
 
 // Version format: vYYYY.MM.DD-HHMM (Pacific time).
 // On every change: add a new entry at the TOP of CHANGELOG (APP_VERSION follows automatically),
-// delete entries beyond 10, and set sw.js VERSION to match.
+// delete entries beyond 20, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.08.14-0150', 'The app no longer flashes the sign-in screen while your session is loading'],
   ['v2026.08.08-2000', 'Finishing a new customer opens their file; finishing a new note returns home'],
   ['v2026.08.03-2344', 'Home search finds customers too, listed above the matching notes'],
   ['v2026.08.03-0142', 'Leave a note and come straight back — undo still remembers'],
@@ -46,6 +47,23 @@ const editorView = document.getElementById('editor-view');
 // dead zone when navigation runs.
 const hoursView = document.getElementById('hours-view');
 const signinView = document.getElementById('signin-view');
+const bootView = document.getElementById('boot-view');
+
+// Restoring a session is asynchronous, and on iOS it is slow. These track
+// whether we are still waiting for it, so a not-resolved-yet auth state stops
+// being mistaken for a signed-out one. Used by onAuthStateChanged below.
+const SESSION_FLAG = 'jp-had-session';
+const RESTORE_GRACE_MS = 6000;
+let firstAuthEmission = true;
+let restoreTimer = null;
+function hadSession() { try { return localStorage.getItem(SESSION_FLAG) === '1'; } catch (e) { return false; } }
+function markSession() { try { localStorage.setItem(SESSION_FLAG, '1'); } catch (e) {} }
+function clearSessionFlag() { try { localStorage.removeItem(SESSION_FLAG); } catch (e) {} }
+function showBoot() {
+  if (!bootView) return;
+  hideAllScreens();
+  bootView.classList.add('active');
+}
 const signinBtn = document.getElementById('signin-btn');
 const signinError = document.getElementById('signin-error');
 const signinMessage = document.getElementById('signin-message');
@@ -2685,6 +2703,7 @@ function hideAllScreens() {
   if (jm) jm.hidden = true;
   editorView.classList.remove('active');
   if (signinView) signinView.classList.remove('active');
+  if (bootView) bootView.classList.remove('active');
   // Body class controls page-level scroll lock for the editor and hours screens
   document.body.classList.remove('editor-open');
   document.body.classList.remove('hours-open');
@@ -5502,7 +5521,9 @@ wirePasswordToggle('set-password-toggle', ['set-password-input', 'set-password-c
 
 const emailLinkSigninReady = completeEmailLinkSignin();
 if (signoutBtn) {
-  signoutBtn.addEventListener('click', async () => { await signOut(auth); });
+  // Clear the flag first: a deliberate sign-out must show the form at once,
+  // not sit through the restore grace period below.
+  signoutBtn.addEventListener('click', async () => { clearSessionFlag(); await signOut(auth); });
 }
 
 // ---------- backup export ----------
@@ -6109,6 +6130,13 @@ let unsubStorage = null;
 onAuthStateChanged(auth, async (user) => {
   if (unsubStorage) { unsubStorage(); unsubStorage = null; }
   if (user) showLoadingCard(true);     // before the awaits below, not after
+  if (user) {
+    // A real user arrived — stop any pending restore wait and remember that
+    // this browser has a session, so the next cold start knows to wait.
+    if (restoreTimer) { clearTimeout(restoreTimer); restoreTimer = null; }
+    firstAuthEmission = false;
+    markSession();
+  }
   if (!user) {
     showLoadingCard(false);            // signing out returns to the form
     // Give a pending magic-link sign-in a chance to complete before showing the sign-in screen.
@@ -6116,6 +6144,27 @@ onAuthStateChanged(auth, async (user) => {
     if (auth.currentUser) return; // link sign-in succeeded; a new auth event will follow
     Storage.signedOut();
     prefsLoaded = false;     // don't write this account's prefs under the next
+    // iOS Safari opens IndexedDB slowly during page load, so Firebase's FIRST
+    // callback can be a spurious null even when a session is stored — the real
+    // user turns up a beat later. Committing to the sign-in form on that null
+    // is what made every app open flash the sign-in screen. When this browser
+    // is known to have had a session, hold the boot splash and wait for the
+    // second emission instead. A deliberate sign-out clears the flag, so this
+    // never costs anyone a wait.
+    // A link sign-in in flight owns the screen — never paint over its card.
+    const linkinUp = !!(linkinCard && !linkinCard.hidden);
+    if (firstAuthEmission && hadSession() && !linkinUp) {
+      firstAuthEmission = false;
+      showBoot();
+      if (restoreTimer) clearTimeout(restoreTimer);
+      restoreTimer = setTimeout(() => {
+        restoreTimer = null;
+        clearSessionFlag();   // the session really is gone — don't stall again
+        showSignin();
+      }, RESTORE_GRACE_MS);
+      return;
+    }
+    firstAuthEmission = false;
     showSignin();
     return;
   }
@@ -6134,6 +6183,7 @@ onAuthStateChanged(auth, async (user) => {
   } catch (err) {
     console.error('Account load failed:', err);
     showLoadingCard(false);
+    if (bootView) bootView.classList.remove('active');
     showInitError(user, err);
     return;
   }
@@ -6207,6 +6257,7 @@ if (initErrorRetry) initErrorRetry.addEventListener('click', () => window.locati
 const initErrorSignout = document.getElementById('init-error-signout');
 if (initErrorSignout) initErrorSignout.addEventListener('click', async () => {
   hideInitError();
+  clearSessionFlag();
   await signOut(auth);
 });
 
@@ -6419,7 +6470,7 @@ if (fileLightbox) {
 // "What's new" list in Settings — shows at most the 10 latest changelog entries.
 const changelogList = document.getElementById('changelog-list');
 if (changelogList) {
-  changelogList.innerHTML = CHANGELOG.slice(0, 10).map(([ver, desc]) => `
+  changelogList.innerHTML = CHANGELOG.slice(0, 20).map(([ver, desc]) => `
     <li class="changelog-item"><span class="changelog-ver">${ver}</span> ${desc}</li>
   `).join('');
 }
