@@ -16,6 +16,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 20, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.08.16-1431', 'Photos: double-tap or pinch to zoom, drag to pan, and a share button while viewing'],
   ['v2026.08.14-0150', 'The app no longer flashes the sign-in screen while your session is loading'],
   ['v2026.08.08-2000', 'Finishing a new customer opens their file; finishing a new note returns home'],
   ['v2026.08.03-2344', 'Home search finds customers too, listed above the matching notes'],
@@ -4733,6 +4734,8 @@ window.addEventListener('popstate', (e) => {
   // Lightbox and file gallery sit above everything — back closes them first.
   if (fileLightbox && !fileLightbox.hidden) {
     fileLightbox.hidden = true;
+    resetLightboxZoom();
+    lightboxRecId = null;
     fileLightboxImg.src = '';
     handlingPopstate = false; return;
   }
@@ -6283,10 +6286,67 @@ const galleryCols2Btn = document.getElementById('gallery-cols-2');
 const galleryCols3Btn = document.getElementById('gallery-cols-3');
 const fileLightbox = document.getElementById('file-lightbox');
 const fileLightboxImg = document.getElementById('file-lightbox-img');
+const fileLightboxShare = document.getElementById('file-lightbox-share');
 let fileObjectUrls = [];
 let galleryCols = localStorage.getItem('jp-gallery-cols') === '2' ? 2 : 3;
 let galleryImageIds = []; // ordered ids of image files in the current grid
 let lightboxIndex = -1;   // position in galleryImageIds of the shown image
+let lightboxRecId = null; // file record currently shown (for the share button)
+
+// ---------- lightbox zoom ----------
+// The image is laid out at fit size by CSS; zoom is a transform on top of it,
+// with transform-origin at 0 0 so translate is in un-scaled pixels.
+const LB_MAX_SCALE = 6;
+const LB_TAP_SCALE = 2.5;
+let lbScale = 1, lbX = 0, lbY = 0;
+
+function applyLightboxTransform() {
+  if (!fileLightboxImg) return;
+  fileLightboxImg.style.transform =
+    `translate(${lbX}px, ${lbY}px) scale(${lbScale})`;
+  fileLightboxImg.classList.toggle('zoomed', lbScale > 1.01);
+}
+
+function resetLightboxZoom() {
+  lbScale = 1; lbX = 0; lbY = 0;
+  if (fileLightboxImg) {
+    fileLightboxImg.style.transform = '';
+    fileLightboxImg.classList.remove('zoomed');
+  }
+}
+
+// Keeps the image inside the viewport: at 1x it stays put, when zoomed it may
+// not be dragged past its own edges.
+function clampLightboxPan() {
+  if (!fileLightboxImg) return;
+  const w = fileLightboxImg.clientWidth, h = fileLightboxImg.clientHeight;
+  const vw = fileLightbox.clientWidth, vh = fileLightbox.clientHeight;
+  // Position of the un-transformed image inside the flex-centred container.
+  const baseX = (vw - w) / 2, baseY = (vh - h) / 2;
+  const sw = w * lbScale, sh = h * lbScale;
+  if (sw <= vw) lbX = 0; else lbX = Math.min(-baseX, Math.max(vw - sw - baseX, lbX));
+  if (sh <= vh) lbY = 0; else lbY = Math.min(-baseY, Math.max(vh - sh - baseY, lbY));
+}
+
+// Scale around a viewport point so whatever is under the finger stays there.
+function lightboxZoomTo(newScale, clientX, clientY) {
+  const prev = lbScale;
+  lbScale = Math.max(1, Math.min(LB_MAX_SCALE, newScale));
+  const r = fileLightboxImg.getBoundingClientRect();
+  // Point in un-scaled image coordinates that currently sits under (x, y).
+  const ix = (clientX - r.left) / prev;
+  const iy = (clientY - r.top) / prev;
+  lbX += ix * (prev - lbScale);
+  lbY += iy * (prev - lbScale);
+  if (lbScale <= 1.01) { lbScale = 1; lbX = 0; lbY = 0; }
+  clampLightboxPan();
+  applyLightboxTransform();
+}
+
+function toggleLightboxZoom(clientX, clientY) {
+  if (lbScale > 1.01) resetLightboxZoom();
+  else lightboxZoomTo(LB_TAP_SCALE, clientX, clientY);
+}
 
 function fmtFileSize(bytes) {
   if (bytes < 1024) return `${bytes} B`;
@@ -6325,6 +6385,8 @@ async function openFileGallery(customerId) {
 function openFileLightbox(url, recId) {
   history.pushState({ screen: 'file-lightbox' }, '');
   lightboxIndex = galleryImageIds.indexOf(recId);
+  lightboxRecId = recId;
+  resetLightboxZoom();
   fileLightboxImg.src = url;
   fileLightbox.hidden = false;
 }
@@ -6339,6 +6401,8 @@ async function lightboxStep(dir) {
   const url = URL.createObjectURL(rec.blob);
   fileObjectUrls.push(url);
   lightboxIndex = nextIndex;
+  lightboxRecId = rec.id;
+  resetLightboxZoom();
   fileLightboxImg.src = url;
 }
 
@@ -6452,19 +6516,142 @@ if (fileInput) fileInput.addEventListener('change', () => addFilesFromInput(file
 if (galleryFileInput) galleryFileInput.addEventListener('change', () => addFilesFromInput(galleryFileInput));
 
 if (fileLightbox) {
-  fileLightbox.addEventListener('click', () => history.back());
+  // A plain tap closes, but it has to wait long enough for a second tap to
+  // arrive — that second tap is a zoom, not a close.
+  const CLOSE_DELAY = 260;
+  let closeTimer = null;
+  // A touch double-tap is followed by a synthetic click ~300ms later; without
+  // this guard, double-tapping back to fit size would also close the lightbox.
+  let suppressClickUntil = 0;
+  function cancelPendingClose() {
+    if (closeTimer) { clearTimeout(closeTimer); closeTimer = null; }
+  }
+  function requestClose() {
+    cancelPendingClose();
+    closeTimer = setTimeout(() => { closeTimer = null; history.back(); }, CLOSE_DELAY);
+  }
+
+  // Mouse: the browser gives us dblclick directly.
+  fileLightbox.addEventListener('click', (e) => {
+    if (e.target.closest('.lightbox-btn')) return;
+    if (Date.now() < suppressClickUntil) return;
+    if (lbScale > 1.01) return;   // zoomed — tapping pans/zooms, never closes
+    requestClose();
+  });
+  fileLightbox.addEventListener('dblclick', (e) => {
+    cancelPendingClose();
+    toggleLightboxZoom(e.clientX, e.clientY);
+  });
+
+  // Touch: phones don't fire dblclick reliably, so detect the double tap here.
   let touchX = 0, touchY = 0;
+  let lastTapAt = 0, lastTapX = 0, lastTapY = 0;
+  let panning = false, panStartX = 0, panStartY = 0, panOriginX = 0, panOriginY = 0;
+  let pinching = false, pinchStartDist = 0, pinchStartScale = 1;
+  let movedDuringTouch = false;
+
+  function dist(t) {
+    return Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+  }
+  function mid(t) {
+    return { x: (t[0].clientX + t[1].clientX) / 2, y: (t[0].clientY + t[1].clientY) / 2 };
+  }
+
   fileLightbox.addEventListener('touchstart', (e) => {
+    if (e.target.closest('.lightbox-btn')) return;
+    cancelPendingClose();
+    movedDuringTouch = false;
+    if (e.touches.length === 2) {
+      pinching = true;
+      panning = false;
+      pinchStartDist = dist(e.touches) || 1;
+      pinchStartScale = lbScale;
+      return;
+    }
     touchX = e.touches[0].clientX;
     touchY = e.touches[0].clientY;
+    if (lbScale > 1.01) {
+      panning = true;
+      panStartX = touchX; panStartY = touchY;
+      panOriginX = lbX; panOriginY = lbY;
+    }
   }, { passive: true });
+
+  fileLightbox.addEventListener('touchmove', (e) => {
+    if (pinching && e.touches.length === 2) {
+      movedDuringTouch = true;
+      const m = mid(e.touches);
+      suppressClickUntil = Date.now() + 500;   // a pinch is never a close-tap
+      lightboxZoomTo(pinchStartScale * (dist(e.touches) / pinchStartDist), m.x, m.y);
+      e.preventDefault();
+      return;
+    }
+    if (panning && e.touches.length === 1) {
+      const dx = e.touches[0].clientX - panStartX;
+      const dy = e.touches[0].clientY - panStartY;
+      if (Math.abs(dx) > 4 || Math.abs(dy) > 4) movedDuringTouch = true;
+      lbX = panOriginX + dx;
+      lbY = panOriginY + dy;
+      clampLightboxPan();
+      applyLightboxTransform();
+      e.preventDefault();
+    }
+  }, { passive: false });
+
   fileLightbox.addEventListener('touchend', (e) => {
-    const dx = e.changedTouches[0].clientX - touchX;
-    const dy = e.changedTouches[0].clientY - touchY;
+    if (e.target.closest('.lightbox-btn')) return;
+    if (pinching) {
+      if (e.touches.length === 0) pinching = false;
+      return;   // fingers lifting off a pinch — not a tap, not a swipe
+    }
+    const endX = e.changedTouches[0].clientX;
+    const endY = e.changedTouches[0].clientY;
+    const dx = endX - touchX;
+    const dy = endY - touchY;
+    const wasPanning = panning;
+    panning = false;
+
+    // Double tap: two taps close together in time and place.
+    const now = Date.now();
+    const isTap = Math.abs(dx) < 20 && Math.abs(dy) < 20 && !movedDuringTouch;
+    if (isTap && now - lastTapAt < 300 &&
+        Math.abs(endX - lastTapX) < 30 && Math.abs(endY - lastTapY) < 30) {
+      lastTapAt = 0;
+      cancelPendingClose();
+      suppressClickUntil = now + 500;
+      toggleLightboxZoom(endX, endY);
+      return;
+    }
+    if (isTap) {
+      lastTapAt = now; lastTapX = endX; lastTapY = endY;
+      // A single tap at fit size closes; the click handler runs the timer.
+      return;
+    }
+    if (wasPanning || lbScale > 1.01) return;   // dragging a zoomed photo, not swiping
     // Horizontal swipe only: needs 50px+ of travel, mostly sideways.
     if (Math.abs(dx) < 50 || Math.abs(dx) < Math.abs(dy) * 1.5) return;
     lightboxStep(dx < 0 ? 1 : -1); // swipe left → next, right → previous
   }, { passive: true });
+}
+
+// Share the photo currently open in the lightbox (same behaviour as the grid's
+// per-tile share button, including the desktop download fallback).
+if (fileLightboxShare) {
+  fileLightboxShare.addEventListener('click', async (ev) => {
+    ev.stopPropagation();
+    if (!lightboxRecId) return;
+    const rec = await LocalFiles.get(lightboxRecId);
+    if (!rec) return;
+    const result = await LocalFiles.share(rec);
+    if (result === 'unsupported') {
+      const url = URL.createObjectURL(rec.blob);
+      fileObjectUrls.push(url);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = rec.name;
+      a.click();
+    }
+  });
 }
 
 // "What's new" list in Settings — shows at most the 10 latest changelog entries.

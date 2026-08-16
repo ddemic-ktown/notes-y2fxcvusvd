@@ -321,9 +321,43 @@ body.hours-open {
   align-items: center;
   justify-content: center;
   padding: 16px;
+  overflow: hidden;
+  /* We handle pinch/pan ourselves — keep the browser from page-zooming. */
+  touch-action: none;
 }
 .file-lightbox[hidden] { display: none; }
-.file-lightbox img { max-width: 100%; max-height: 100%; border-radius: 6px; }
+.file-lightbox img {
+  max-width: 100%;
+  max-height: 100%;
+  border-radius: 6px;
+  transform-origin: 0 0;
+  will-change: transform;
+  transition: transform 160ms ease;
+  user-select: none;
+  -webkit-user-drag: none;
+  -webkit-user-select: none;
+}
+/* While zoomed the transform follows the finger, so no easing. */
+.file-lightbox img.zoomed { transition: none; cursor: grab; }
+.lightbox-btn {
+  position: absolute;
+  top: calc(12px + env(safe-area-inset-top, 0px));
+  right: calc(12px + env(safe-area-inset-right, 0px));
+  z-index: 1210;
+  width: 40px;
+  height: 40px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(0,0,0,0.55);
+  color: #fff;
+  font-size: 20px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.lightbox-btn:active { background: rgba(0,0,0,0.75); }
 
 .employee-type-select, #employee-type-input {
   background: var(--bg);
