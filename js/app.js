@@ -16,6 +16,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 20, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.08.16-1929', 'Fixed double-tap zoom snapping straight back out on phones'],
   ['v2026.08.16-1923', 'The Files card now fills its full width — tap the left side to open, + Add on the right'],
   ['v2026.08.16-1808', 'Photos close with an X in the corner, double-tap zoom is more reliable, and the Files card is easier to tap'],
   ['v2026.08.16-1755', 'Photo viewer: share and delete buttons now sit at the bottom, with clearer icons'],
@@ -6529,9 +6530,13 @@ if (fileLightbox) {
   const TAP_SLOP = 16;         // how far a finger may travel and still be a tap
   const TAP_MATCH = 40;        // how far apart the two taps may land
 
-  // Mouse: the browser gives us dblclick directly.
+  // Android Chrome fires dblclick after a double TAP as well, which would undo
+  // the zoom the touch handler below just applied. Anything close in time to a
+  // touch is therefore ignored here; mouse-only double-clicks still work.
+  let lastTouchAt = 0;
   fileLightbox.addEventListener('dblclick', (e) => {
     if (e.target.closest('.lightbox-btn, .lightbox-bar')) return;
+    if (Date.now() - lastTouchAt < 1000) return;
     toggleLightboxZoom(e.clientX, e.clientY);
   });
 
@@ -6549,6 +6554,7 @@ if (fileLightbox) {
   }
 
   fileLightbox.addEventListener('touchstart', (e) => {
+    lastTouchAt = Date.now();
     if (e.target.closest('.lightbox-btn, .lightbox-bar')) return;
     if (e.touches.length === 2) {
       pinching = true;
@@ -6584,6 +6590,7 @@ if (fileLightbox) {
   }, { passive: false });
 
   fileLightbox.addEventListener('touchend', (e) => {
+    lastTouchAt = Date.now();
     if (e.target.closest('.lightbox-btn, .lightbox-bar')) return;
     if (pinching) {
       if (e.touches.length === 0) pinching = false;
