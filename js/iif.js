@@ -154,17 +154,59 @@ function parseHoursDuration(s) {
 }
 
 // ---------- Date parsing ----------
+// Builds a real Date, rejecting anything that would silently roll over
+// (Feb 30 becoming Mar 2, month 13 becoming next January, and so on).
+function makeDate(year, monthIndex, day) {
+  if (!(monthIndex >= 0 && monthIndex <= 11)) return null;
+  if (!(day >= 1 && day <= 31)) return null;
+  const d = new Date(year, monthIndex, day);
+  if (d.getFullYear() !== year || d.getMonth() !== monthIndex || d.getDate() !== day) return null;
+  return d;
+}
+
+// Two-digit years are this century: 26 -> 2026.
+function fullYear(n) {
+  return n < 100 ? 2000 + n : n;
+}
+
+// A whole line that is nothing but a date. Recognised forms:
+//   August 14 | august 14th | Aug 14 | Aug. 14 | Sept 14 | August 14, 2026
+//   Thu Aug 14 | Thursday, August 14        (leading weekday optional)
+//   8/14 | 8/14/26 | 8/14/2026              (month/day, North American order)
+//   2026-08-14                              (ISO)
+// Dash-separated numerics like "8-14" are deliberately NOT dates — that is the
+// time-range syntax used on work lines ("davor 8-4 smith").
 function parseDate(line) {
-  const clean = line.trim().replace(/,/g, '');
+  const clean = line.trim().replace(/,/g, ' ').replace(/\s+/g, ' ').trim();
+
+  // ISO: 2026-08-14
+  const iso = clean.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if (iso) {
+    return makeDate(parseInt(iso[1], 10), parseInt(iso[2], 10) - 1, parseInt(iso[3], 10));
+  }
+
+  // Slash: 8/14, 8/14/26, 8/14/2026
+  const slash = clean.match(/^(\d{1,2})\/(\d{1,2})(?:\/(\d{2}|\d{4}))?$/);
+  if (slash) {
+    const year = slash[3] ? fullYear(parseInt(slash[3], 10)) : new Date().getFullYear();
+    return makeDate(year, parseInt(slash[1], 10) - 1, parseInt(slash[2], 10));
+  }
+
+  // Month name, full or abbreviated, with an optional leading weekday.
+  const WEEKDAY = '(?:mon|tues?|wed(?:nes)?|thur?s?|fri|sat(?:ur)?|sun)(?:day)?\\.?';
   const re = new RegExp(
-    `^(${MONTH_NAMES.join('|')})\\.?\\s+(\\d{1,2})(?:st|nd|rd|th)?(?:[,\\s]+(\\d{4}))?$`, 'i'
+    `^(?:${WEEKDAY}\\s+)?([a-z]{3,})\\.?\\s+(\\d{1,2})(?:st|nd|rd|th)?(?:\\s+(\\d{2}|\\d{4}))?$`,
+    'i'
   );
   const m = clean.match(re);
   if (!m) return null;
-  const month = MONTH_NAMES.indexOf(m[1].toLowerCase());
+  // The word must be a real month or a truncation of one — "aug"/"sept" yes,
+  // "augustus" no.
+  const word = m[1].toLowerCase();
+  const month = MONTH_NAMES.findIndex(name => name.startsWith(word));
   const day = parseInt(m[2], 10);
-  const year = m[3] ? parseInt(m[3], 10) : new Date().getFullYear();
-  return new Date(year, month, day);
+  const year = m[3] ? fullYear(parseInt(m[3], 10)) : new Date().getFullYear();
+  return makeDate(year, month, day);
 }
 
 export function formatDate(d) {

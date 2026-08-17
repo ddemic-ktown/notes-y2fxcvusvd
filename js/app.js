@@ -16,6 +16,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 20, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.08.16-1951', 'The hours note now understands Aug 14, Thu Aug 14, 8/14 and 2026-08-14 as date lines, not just August 14'],
   ['v2026.08.16-1929', 'Fixed double-tap zoom snapping straight back out on phones'],
   ['v2026.08.16-1923', 'The Files card now fills its full width — tap the left side to open, + Add on the right'],
   ['v2026.08.16-1808', 'Photos close with an X in the corner, double-tap zoom is more reliable, and the Files card is easier to tap'],
