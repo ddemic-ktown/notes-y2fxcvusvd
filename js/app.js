@@ -16,6 +16,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 20, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.08.16-1755', 'Photo viewer: share and delete buttons now sit at the bottom, with clearer icons'],
   ['v2026.08.16-1431', 'Photos: double-tap or pinch to zoom, drag to pan, and a share button while viewing'],
   ['v2026.08.14-0150', 'The app no longer flashes the sign-in screen while your session is loading'],
   ['v2026.08.08-2000', 'Finishing a new customer opens their file; finishing a new note returns home'],
@@ -6348,6 +6349,10 @@ function toggleLightboxZoom(clientX, clientY) {
   else lightboxZoomTo(LB_TAP_SCALE, clientX, clientY);
 }
 
+// One definition of each icon so the grid tiles and the photo viewer match.
+const ICON_SHARE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="18" cy="5" r="2.6"/><circle cx="6" cy="12" r="2.6"/><circle cx="18" cy="19" r="2.6"/><line x1="8.3" y1="10.8" x2="15.7" y2="6.2"/><line x1="8.3" y1="13.2" x2="15.7" y2="17.8"/></svg>';
+const ICON_TRASH = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6.5h16"/><path d="M9.5 6.5V4.5h5v2"/><path d="M6.5 6.5l1 13h9l1-13"/><path d="M10.5 10v6M13.5 10v6"/></svg>';
+
 function fmtFileSize(bytes) {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
@@ -6436,8 +6441,8 @@ async function renderFileGallery(customerId) {
     return `
       <li class="gallery-tile" data-open="${r.id}" title="${escapeHtml(r.name)} · ${fmtFileSize(r.size)} · ${formatDateTime(r.addedAt)}">
         ${preview}
-        <button class="gallery-tile-btn gallery-share-btn" data-share="${r.id}" aria-label="Share file">⇪</button>
-        <button class="gallery-tile-btn gallery-delete-btn" data-del="${r.id}" aria-label="Delete file">✕</button>
+        <button class="gallery-tile-btn gallery-share-btn" data-share="${r.id}" aria-label="Share file">${ICON_SHARE}</button>
+        <button class="gallery-tile-btn gallery-delete-btn" data-del="${r.id}" aria-label="Delete file">${ICON_TRASH}</button>
       </li>
     `;
   }).join('');
@@ -6533,7 +6538,7 @@ if (fileLightbox) {
 
   // Mouse: the browser gives us dblclick directly.
   fileLightbox.addEventListener('click', (e) => {
-    if (e.target.closest('.lightbox-btn')) return;
+    if (e.target.closest('.lightbox-btn, .lightbox-bar')) return;
     if (Date.now() < suppressClickUntil) return;
     if (lbScale > 1.01) return;   // zoomed — tapping pans/zooms, never closes
     requestClose();
@@ -6558,7 +6563,7 @@ if (fileLightbox) {
   }
 
   fileLightbox.addEventListener('touchstart', (e) => {
-    if (e.target.closest('.lightbox-btn')) return;
+    if (e.target.closest('.lightbox-btn, .lightbox-bar')) return;
     cancelPendingClose();
     movedDuringTouch = false;
     if (e.touches.length === 2) {
@@ -6599,7 +6604,7 @@ if (fileLightbox) {
   }, { passive: false });
 
   fileLightbox.addEventListener('touchend', (e) => {
-    if (e.target.closest('.lightbox-btn')) return;
+    if (e.target.closest('.lightbox-btn, .lightbox-bar')) return;
     if (pinching) {
       if (e.touches.length === 0) pinching = false;
       return;   // fingers lifting off a pinch — not a tap, not a swipe
@@ -6632,6 +6637,21 @@ if (fileLightbox) {
     if (Math.abs(dx) < 50 || Math.abs(dx) < Math.abs(dy) * 1.5) return;
     lightboxStep(dx < 0 ? 1 : -1); // swipe left → next, right → previous
   }, { passive: true });
+}
+
+// Delete the photo currently open in the lightbox, then drop back to the grid.
+const fileLightboxDelete = document.getElementById('file-lightbox-delete');
+if (fileLightboxDelete) {
+  fileLightboxDelete.addEventListener('click', async (ev) => {
+    ev.stopPropagation();
+    if (!lightboxRecId) return;
+    if (!confirm('Delete this file from this device?')) return;
+    const customerId = activeCustomerId;
+    await LocalFiles.remove(lightboxRecId);
+    lightboxRecId = null;
+    history.back();                       // closes the viewer via the popstate handler
+    if (customerId) renderFileGallery(customerId);
+  });
 }
 
 // Share the photo currently open in the lightbox (same behaviour as the grid's

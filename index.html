@@ -202,8 +202,11 @@
 
   <!-- IMAGE LIGHTBOX (local customer files) -->
   <div id="file-lightbox" class="file-lightbox" hidden>
-    <button id="file-lightbox-share" class="lightbox-btn" aria-label="Share photo">&#8686;</button>
     <img id="file-lightbox-img" alt="" />
+    <div class="lightbox-bar">
+      <button id="file-lightbox-share" class="lightbox-btn" aria-label="Share photo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="18" cy="5" r="2.6"/><circle cx="6" cy="12" r="2.6"/><circle cx="18" cy="19" r="2.6"/><line x1="8.3" y1="10.8" x2="15.7" y2="6.2"/><line x1="8.3" y1="13.2" x2="15.7" y2="17.8"/></svg></button>
+      <button id="file-lightbox-delete" class="lightbox-btn lightbox-btn-danger" aria-label="Delete photo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6.5h16"/><path d="M9.5 6.5V4.5h5v2"/><path d="M6.5 6.5l1 13h9l1-13"/><path d="M10.5 10v6M13.5 10v6"/></svg></button>
+    </div>
   </div>
 
   <!-- SHARED PILL TOOLTIP (who a note is shared with) -->

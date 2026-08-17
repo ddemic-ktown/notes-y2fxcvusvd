@@ -310,8 +310,9 @@ body.hours-open {
   align-items: center;
   justify-content: center;
 }
+.gallery-tile-btn svg { width: 15px; height: 15px; }
 .gallery-share-btn { right: 34px; }
-.gallery-delete-btn { right: 4px; }
+.gallery-delete-btn { right: 4px; color: #ff6b6b; }
 .file-lightbox {
   position: fixed;
   inset: 0;
@@ -339,25 +340,34 @@ body.hours-open {
 }
 /* While zoomed the transform follows the finger, so no easing. */
 .file-lightbox img.zoomed { transition: none; cursor: grab; }
-.lightbox-btn {
+.lightbox-bar {
   position: absolute;
-  top: calc(12px + env(safe-area-inset-top, 0px));
-  right: calc(12px + env(safe-area-inset-right, 0px));
+  left: 0;
+  right: 0;
+  bottom: calc(20px + env(safe-area-inset-bottom, 0px));
   z-index: 1210;
-  width: 40px;
-  height: 40px;
+  display: flex;
+  justify-content: center;
+  gap: 24px;
+  pointer-events: none;   /* only the buttons themselves are tappable */
+}
+.lightbox-btn {
+  pointer-events: auto;
+  width: 44px;
+  height: 44px;
   border: none;
   border-radius: 50%;
   background: rgba(0,0,0,0.55);
   color: #fff;
-  font-size: 20px;
   line-height: 1;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
 }
+.lightbox-btn svg { width: 22px; height: 22px; }
 .lightbox-btn:active { background: rgba(0,0,0,0.75); }
+.lightbox-btn-danger { color: #ff6b6b; }
 
 .employee-type-select, #employee-type-input {
   background: var(--bg);
