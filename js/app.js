@@ -16,6 +16,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 20, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.08.16-1808', 'Photos close with an X in the corner, double-tap zoom is more reliable, and the Files card is easier to tap'],
   ['v2026.08.16-1755', 'Photo viewer: share and delete buttons now sit at the bottom, with clearer icons'],
   ['v2026.08.16-1431', 'Photos: double-tap or pinch to zoom, drag to pan, and a share button while viewing'],
   ['v2026.08.14-0150', 'The app no longer flashes the sign-in screen while your session is loading'],
@@ -6521,30 +6522,15 @@ if (fileInput) fileInput.addEventListener('change', () => addFilesFromInput(file
 if (galleryFileInput) galleryFileInput.addEventListener('change', () => addFilesFromInput(galleryFileInput));
 
 if (fileLightbox) {
-  // A plain tap closes, but it has to wait long enough for a second tap to
-  // arrive — that second tap is a zoom, not a close.
-  const CLOSE_DELAY = 260;
-  let closeTimer = null;
-  // A touch double-tap is followed by a synthetic click ~300ms later; without
-  // this guard, double-tapping back to fit size would also close the lightbox.
-  let suppressClickUntil = 0;
-  function cancelPendingClose() {
-    if (closeTimer) { clearTimeout(closeTimer); closeTimer = null; }
-  }
-  function requestClose() {
-    cancelPendingClose();
-    closeTimer = setTimeout(() => { closeTimer = null; history.back(); }, CLOSE_DELAY);
-  }
+  // Tapping the photo no longer closes it — the X button does. That leaves a
+  // single tap doing nothing, so a double tap can never lose a race with it.
+  const DOUBLE_TAP_MS = 400;   // gap allowed between the two taps
+  const TAP_SLOP = 16;         // how far a finger may travel and still be a tap
+  const TAP_MATCH = 40;        // how far apart the two taps may land
 
   // Mouse: the browser gives us dblclick directly.
-  fileLightbox.addEventListener('click', (e) => {
-    if (e.target.closest('.lightbox-btn, .lightbox-bar')) return;
-    if (Date.now() < suppressClickUntil) return;
-    if (lbScale > 1.01) return;   // zoomed — tapping pans/zooms, never closes
-    requestClose();
-  });
   fileLightbox.addEventListener('dblclick', (e) => {
-    cancelPendingClose();
+    if (e.target.closest('.lightbox-btn, .lightbox-bar')) return;
     toggleLightboxZoom(e.clientX, e.clientY);
   });
 
@@ -6553,7 +6539,6 @@ if (fileLightbox) {
   let lastTapAt = 0, lastTapX = 0, lastTapY = 0;
   let panning = false, panStartX = 0, panStartY = 0, panOriginX = 0, panOriginY = 0;
   let pinching = false, pinchStartDist = 0, pinchStartScale = 1;
-  let movedDuringTouch = false;
 
   function dist(t) {
     return Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
@@ -6564,11 +6549,10 @@ if (fileLightbox) {
 
   fileLightbox.addEventListener('touchstart', (e) => {
     if (e.target.closest('.lightbox-btn, .lightbox-bar')) return;
-    cancelPendingClose();
-    movedDuringTouch = false;
     if (e.touches.length === 2) {
       pinching = true;
       panning = false;
+      lastTapAt = 0;              // a pinch is never half of a double tap
       pinchStartDist = dist(e.touches) || 1;
       pinchStartScale = lbScale;
       return;
@@ -6584,19 +6568,14 @@ if (fileLightbox) {
 
   fileLightbox.addEventListener('touchmove', (e) => {
     if (pinching && e.touches.length === 2) {
-      movedDuringTouch = true;
       const m = mid(e.touches);
-      suppressClickUntil = Date.now() + 500;   // a pinch is never a close-tap
       lightboxZoomTo(pinchStartScale * (dist(e.touches) / pinchStartDist), m.x, m.y);
       e.preventDefault();
       return;
     }
     if (panning && e.touches.length === 1) {
-      const dx = e.touches[0].clientX - panStartX;
-      const dy = e.touches[0].clientY - panStartY;
-      if (Math.abs(dx) > 4 || Math.abs(dy) > 4) movedDuringTouch = true;
-      lbX = panOriginX + dx;
-      lbY = panOriginY + dy;
+      lbX = panOriginX + (e.touches[0].clientX - panStartX);
+      lbY = panOriginY + (e.touches[0].clientY - panStartY);
       clampLightboxPan();
       applyLightboxTransform();
       e.preventDefault();
@@ -6616,27 +6595,36 @@ if (fileLightbox) {
     const wasPanning = panning;
     panning = false;
 
-    // Double tap: two taps close together in time and place.
+    // A tap is judged only on where the finger started and finished, so a
+    // wobble part-way through (common when zoomed in) still counts.
     const now = Date.now();
-    const isTap = Math.abs(dx) < 20 && Math.abs(dy) < 20 && !movedDuringTouch;
-    if (isTap && now - lastTapAt < 300 &&
-        Math.abs(endX - lastTapX) < 30 && Math.abs(endY - lastTapY) < 30) {
-      lastTapAt = 0;
-      cancelPendingClose();
-      suppressClickUntil = now + 500;
-      toggleLightboxZoom(endX, endY);
-      return;
-    }
+    const isTap = Math.hypot(dx, dy) < TAP_SLOP;
     if (isTap) {
-      lastTapAt = now; lastTapX = endX; lastTapY = endY;
-      // A single tap at fit size closes; the click handler runs the timer.
-      return;
+      if (now - lastTapAt < DOUBLE_TAP_MS &&
+          Math.abs(endX - lastTapX) < TAP_MATCH && Math.abs(endY - lastTapY) < TAP_MATCH) {
+        lastTapAt = 0;
+        toggleLightboxZoom(endX, endY);
+      } else {
+        lastTapAt = now; lastTapX = endX; lastTapY = endY;
+      }
+      return;   // single taps do nothing; close with the X
     }
+    lastTapAt = 0;
     if (wasPanning || lbScale > 1.01) return;   // dragging a zoomed photo, not swiping
     // Horizontal swipe only: needs 50px+ of travel, mostly sideways.
     if (Math.abs(dx) < 50 || Math.abs(dx) < Math.abs(dy) * 1.5) return;
     lightboxStep(dx < 0 ? 1 : -1); // swipe left → next, right → previous
   }, { passive: true });
+}
+
+// The X in the corner is now the only way to dismiss the photo by tapping
+// (Back / the phone's back gesture still work).
+const fileLightboxClose = document.getElementById('file-lightbox-close');
+if (fileLightboxClose) {
+  fileLightboxClose.addEventListener('click', (ev) => {
+    ev.stopPropagation();
+    history.back();
+  });
 }
 
 // Delete the photo currently open in the lightbox, then drop back to the grid.

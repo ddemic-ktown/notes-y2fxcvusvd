@@ -207,9 +207,30 @@ body.hours-open {
   padding: 10px 12px;
   margin-bottom: 12px;
 }
-.files-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-.files-toggle { background: none; border: 0; color: var(--ink); font-size: 14px; font-weight: 600; cursor: pointer; padding: 4px 0; }
+.files-header { display: flex; align-items: stretch; gap: 0; }
+/* Left ~75% opens the gallery, right ~25% adds a file — both full-height so
+   the whole card is a target rather than just the words. */
+.files-toggle {
+  flex: 1 1 auto;
+  background: none;
+  border: 0;
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 4px 0;
+  text-align: left;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+}
 .files-add-btn {
+  flex: 0 0 25%;
+  min-width: 96px;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   background: var(--bg);
   color: var(--ink);
   border: 1px solid var(--line);
@@ -368,6 +389,12 @@ body.hours-open {
 .lightbox-btn svg { width: 22px; height: 22px; }
 .lightbox-btn:active { background: rgba(0,0,0,0.75); }
 .lightbox-btn-danger { color: #ff6b6b; }
+.lightbox-close {
+  position: absolute;
+  top: calc(12px + env(safe-area-inset-top, 0px));
+  right: calc(12px + env(safe-area-inset-right, 0px));
+  z-index: 1210;
+}
 
 .employee-type-select, #employee-type-input {
   background: var(--bg);
