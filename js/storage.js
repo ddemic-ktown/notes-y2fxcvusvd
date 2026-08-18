@@ -210,7 +210,7 @@ function mergeHotJobs(docs) {
 }
 function attachJobsListener() {
   if (_jobsUnsub) { try { _jobsUnsub(); } catch (e) {} _jobsUnsub = null; }
-  if (_role === 'customer' || !_role) return;
+  if (!_role) return;
   const w = hotWindow();
   _hotFrom = w.from; _hotTo = w.to;
   // Employees keep an unbounded array-contains query: adding a date range on
@@ -218,7 +218,9 @@ function attachJobsListener() {
   // until it exists), for little gain — they only match their own jobs.
   const q = (_role === 'admin' || _role === 'bookkeeper')
     ? query(jobsCol(), where('date', '>=', _hotFrom), where('date', '<=', _hotTo))
-    : query(jobsCol(), where('employeeUids', 'array-contains', _uid));
+    : _role === 'customer'
+      ? query(jobsCol(), where('customerUids', 'array-contains', _uid))
+      : query(jobsCol(), where('employeeUids', 'array-contains', _uid));
   _jobsUnsub = onSnapshot(q, (snap) => {
     const docs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     if (_role === 'admin' || _role === 'bookkeeper') mergeHotJobs(docs);
@@ -883,6 +885,13 @@ export const Storage = {
     const links = _cache.settings.employeeLinks || {};
     return [...new Set((names || []).map(n => links[n]).filter(Boolean))];
   },
+  // settings.customerLinks: { [customerId]: uid } — same idea for the customer
+  // role, so a customer can be shown the jobs booked for them.
+  customerUidsFor(customerId) {
+    const links = _cache.settings.customerLinks || {};
+    const u = customerId ? links[customerId] : null;
+    return u ? [u] : [];
+  },
   async saveJob(job) {
     const id = job.id || uid();
     const now = nowIso();
@@ -895,6 +904,7 @@ export const Storage = {
       description: job.description || '',
       employeeNames: Array.isArray(job.employeeNames) ? job.employeeNames : [],
       employeeUids: this.employeeUidsFor(job.employeeNames),
+      customerUids: this.customerUidsFor(job.customerId),
       customerId: job.customerId || null,
       customerName: job.customerName || '',
       address: job.address || '',
@@ -921,11 +931,13 @@ export const Storage = {
       if (data.deletedAt) continue;
       const want = this.employeeUidsFor(data.employeeNames || []);
       const have = Array.isArray(data.employeeUids) ? data.employeeUids : [];
-      if (same(want, have)) continue;
-      await tracked(setDoc(doc(jobsCol(), d.id), { employeeUids: want }, { merge: true }))
+      const wantCust = this.customerUidsFor(data.customerId || null);
+      const haveCust = Array.isArray(data.customerUids) ? data.customerUids : [];
+      if (same(want, have) && same(wantCust, haveCust)) continue;
+      await tracked(setDoc(doc(jobsCol(), d.id), { employeeUids: want, customerUids: wantCust }, { merge: true }))
         .catch(err => console.warn('relinkJobEmployeeUids', err));
       const i = _cache.jobs.findIndex(j => j.id === d.id);
-      if (i !== -1) _cache.jobs[i] = { ..._cache.jobs[i], employeeUids: want };
+      if (i !== -1) _cache.jobs[i] = { ..._cache.jobs[i], employeeUids: want, customerUids: wantCust };
       updated++;
     }
     if (updated) emit();

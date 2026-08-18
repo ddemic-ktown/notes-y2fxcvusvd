@@ -16,6 +16,8 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 20, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.08.17-2140', 'Customers linked to an app account can see their own scheduled jobs — date, time and who is coming'],
+  ['v2026.08.17-2030', 'Employees can reach the Calendar (and a shared Price Table) from their home screen'],
   ['v2026.08.17-1714', 'The scrollbar in a note stays visible instead of fading out'],
   ['v2026.08.17-1712', 'Editing a job has a Duplicate button — same job, next day, change the date before saving'],
   ['v2026.08.17-1706', 'Accepting a keyboard suggestion mid-paragraph no longer pulls the next line up into it'],
@@ -987,7 +989,8 @@ function renderCalendarDay() {
     const chips = names.length
       ? names.map(n => `<span class="cal-chip" style="${chipStyle(n)}">${escapeHtml(n.split(/[\s(]+/)[0])}</span>`).join('')
       : '<span class="cal-chip cal-chip-none">—</span>';
-    const note = (j.description || '').trim();
+    // The note often carries internal remarks, so customers don't get it.
+    const note = isCustomerRole() ? '' : (j.description || '').trim();
     const roomForNote = height >= 76;
     return `<div class="cal-block" data-job="${j.id}" style="top:${top}px;height:${height}px;left:${left};width:${width}">
       <span class="cal-block-bar" style="${crewBarStyle(names)}"></span>
@@ -3161,6 +3164,7 @@ function showSettings() {
   window.scrollTo(0, 0);
   renderKeywordList();
   renderEmployeeList();
+  renderCustomerLinks();
   if (accountEmailEl && auth.currentUser) accountEmailEl.textContent = auth.currentUser.email || '';
   refreshSeedButtons();
   refreshTrashUi();
@@ -3515,9 +3519,28 @@ function renderNotesList() {
     const emptyState = isCustomerRole()
       ? '<p class="empty-state">No notes have been shared with you yet.</p>'
       : '<p class="empty-state">No notes yet. Tap <strong>+</strong> to add one.</p>';
-    notesList.innerHTML = assigned.length === 0
+    // Nav cards an employee is entitled to. This branch returns before the
+    // full home is built, so anything not repeated here is invisible to them —
+    // which is exactly how the Calendar card went missing for employees even
+    // though the card itself was role-gated to include them.
+    const navCards = [
+      `<article class="note-card nav-card" data-nav="calendar">
+        <div class="note-head"><p class="note-title">Calendar</p><span class="note-chevron">›</span></div>
+      </article>`,
+      // Price table is staff-only; a customer never sees it.
+      (!isCustomerRole() && Storage.canViewPriceTable()) ? `<article class="note-card nav-card" data-nav="price">
+        <div class="note-head"><p class="note-title">Price Table</p><span class="note-chevron">›</span></div>
+      </article>` : '',
+    ].join('');
+    notesList.innerHTML = navCards + (assigned.length === 0
       ? emptyState
-      : '<p class="section-label">Your notes:</p>' + assigned.map(n => renderNoteCard(n)).join('');
+      : '<p class="section-label">Your notes:</p>' + assigned.map(n => renderNoteCard(n)).join(''));
+    notesList.querySelectorAll('.note-card[data-nav]').forEach(card => {
+      card.addEventListener('click', () => {
+        if (card.dataset.nav === 'calendar') showCalendar();
+        else if (card.dataset.nav === 'price') showPriceTable();
+      });
+    });
     notesList.querySelectorAll('.note-card[data-id]').forEach(card => {
       card.addEventListener('click', () => {
         const note = Storage.getNote(card.dataset.id);
@@ -5879,6 +5902,58 @@ function applyRoleUI(role) {
     const el = document.getElementById(id);
     if (el) el.style.display = isAdminRole ? '' : 'none';
   });
+}
+
+// Customer -> app account links, so a customer can be shown their own jobs.
+// Same shape as employeeLinks, keyed by customer id rather than by name.
+function renderCustomerLinks() {
+  const custSel = document.getElementById('customer-link-customer');
+  const acctSel = document.getElementById('customer-link-account');
+  const listEl = document.getElementById('customer-link-list');
+  const addBtn = document.getElementById('customer-link-add');
+  if (!custSel || !acctSel || !listEl) return;
+  const links = Storage.getSettings().customerLinks || {};
+  const customers = Storage.liveCustomers();
+  const accounts = Storage.listMembers().filter(m => m.role === 'customer');
+
+  custSel.innerHTML = customers.length
+    ? customers.map(c => `<option value="${c.id}">${escapeHtml(customerCrumbLabel(c.id))}</option>`).join('')
+    : '<option value="">No customers yet</option>';
+  acctSel.innerHTML = accounts.length
+    ? accounts.map(m => `<option value="${m.uid}">${escapeHtml(m.name || m.email || m.uid)}</option>`).join('')
+    : '<option value="">No customer accounts yet</option>';
+
+  const entries = Object.entries(links);
+  listEl.innerHTML = entries.length
+    ? entries.map(([cid, uid]) => {
+        const acct = accounts.find(m => m.uid === uid);
+        return `<li class="employee-card">
+          <div class="employee-card-top">
+            <span class="employee-name">${escapeHtml(customerCrumbLabel(cid))} → ${escapeHtml(acct ? (acct.name || acct.email || uid) : uid)}</span>
+            <button data-unlink="${escapeHtml(cid)}" class="employee-remove" aria-label="Remove link">×</button>
+          </div>
+        </li>`;
+      }).join('')
+    : '<li class="keyword-empty">No customers linked yet.</li>';
+
+  listEl.querySelectorAll('[data-unlink]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const next = { ...(Storage.getSettings().customerLinks || {}) };
+      delete next[btn.dataset.unlink];
+      await Storage.setSetting('customerLinks', next);
+      renderCustomerLinks();
+    });
+  });
+  if (addBtn && !addBtn.dataset.wired) {
+    addBtn.dataset.wired = '1';
+    addBtn.addEventListener('click', async () => {
+      if (!custSel.value || !acctSel.value) return;
+      const next = { ...(Storage.getSettings().customerLinks || {}) };
+      next[custSel.value] = acctSel.value;
+      await Storage.setSetting('customerLinks', next);
+      renderCustomerLinks();
+    });
+  }
 }
 
 // Linking a name to an account only stamps jobs saved afterwards. This walks

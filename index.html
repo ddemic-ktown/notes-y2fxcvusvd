@@ -563,6 +563,15 @@
           <p class="muted setting-hint">Jobs scheduled before a name was linked to an app account don't carry that account, so the person can't see them. Run this once after linking.</p>
           <button id="employee-relink-btn" class="secondary setting-wide-btn">Re-link accounts to existing jobs</button>
           <p id="employee-relink-status" class="muted setting-hint"></p>
+
+          <h4 class="setting-sub-title">Customer accounts</h4>
+          <p class="muted setting-hint">Link a customer to their app account and they can see their own scheduled jobs — date, time and who's coming. Nothing else.</p>
+          <div class="keyword-add employee-add">
+            <select id="customer-link-customer" class="employee-type-select" aria-label="Customer"></select>
+            <select id="customer-link-account" class="employee-type-select" aria-label="App account"></select>
+            <button id="customer-link-add">Link</button>
+          </div>
+          <ul id="customer-link-list" class="keyword-list employee-list"></ul>
         </div>
 
         <div data-role-iif>

@@ -97,11 +97,17 @@ service cloud.firestore {
       // derives uids from the name→account links in settings; a name with no
       // linked account simply can't be filtered by, so that person sees no
       // calendar (they schedule fine, they just aren't an app user).
+      // Customers work the same way: customerUids is derived from the
+      // customer->account links in settings, so a customer sees the jobs
+      // booked for them and nothing else.
       match /jobs/{jobId} {
         allow read: if isAdmin() || isBookkeeper();
         allow read: if isEmployee() &&
           ('employeeUids' in resource.data) &&
           request.auth.uid in resource.data.employeeUids;
+        allow read: if isCustomer() &&
+          ('customerUids' in resource.data) &&
+          request.auth.uid in resource.data.customerUids;
         allow create, update, delete: if isAdmin();
       }
 
