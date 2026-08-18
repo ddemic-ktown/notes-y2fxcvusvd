@@ -401,6 +401,17 @@ body.hours-open {
   z-index: 1210;
 }
 
+.job-emp-hours {
+  width: 64px;
+  flex: 0 0 auto;
+  background: var(--bg);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 4px 6px;
+  font-size: 13px;
+  text-align: right;
+}
 .employee-type-select, #employee-type-input {
   background: var(--bg);
   color: var(--ink);

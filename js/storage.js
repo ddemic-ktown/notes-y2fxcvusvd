@@ -903,6 +903,10 @@ export const Storage = {
       end: job.end || '',
       description: job.description || '',
       employeeNames: Array.isArray(job.employeeNames) ? job.employeeNames : [],
+      // { [employeeName]: hours } — only for people actually on the job, and
+      // only when a number was entered. A plan, not a timelog: this is what you
+      // jotted on the job, separate from the hours note records.
+      employeeHours: (job.employeeHours && typeof job.employeeHours === 'object') ? job.employeeHours : {},
       employeeUids: this.employeeUidsFor(job.employeeNames),
       customerUids: this.customerUidsFor(job.customerId),
       customerId: job.customerId || null,

@@ -16,6 +16,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 20, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.08.18-1029', 'Note hours worked per person on a job; the day view pills show them as Name: 4'],
   ['v2026.08.17-2140', 'Customers linked to an app account can see their own scheduled jobs — date, time and who is coming'],
   ['v2026.08.17-2030', 'Employees can reach the Calendar (and a shared Price Table) from their home screen'],
   ['v2026.08.17-1714', 'The scrollbar in a note stays visible instead of fading out'],
@@ -958,8 +959,9 @@ function renderCalendarDay() {
     untimedWrap.hidden = false;
     untimedWrap.innerHTML = '<p class="cal-untimed-label">Any time</p>' + untimed.map(j => {
       const who = j.customerName || (j.customerId ? customerCrumbLabel(j.customerId) : 'No customer');
+      const jh = j.employeeHours || {};
       const chips = (j.employeeNames || []).map(n =>
-        `<span class="cal-chip" style="${chipStyle(n)}">${escapeHtml(n)}</span>`).join('');
+        `<span class="cal-chip" style="${chipStyle(n)}">${escapeHtml(n + (jh[n] ? `: ${jh[n]}` : ''))}</span>`).join('');
       return `<div class="cal-untimed-job" data-job="${j.id}">${escapeHtml(who)} ${chips}</div>`;
     }).join('');
   } else {
@@ -986,8 +988,13 @@ function renderCalendarDay() {
     // Who's on the job is shown on the block itself now (the legend that used
     // to carry it is gone). The note follows only when the block is tall
     // enough to hold a line without slicing it.
+    const jobHours = j.employeeHours || {};
     const chips = names.length
-      ? names.map(n => `<span class="cal-chip" style="${chipStyle(n)}">${escapeHtml(n.split(/[\s(]+/)[0])}</span>`).join('')
+      ? names.map(n => {
+          const h = jobHours[n];
+          const label = n.split(/[\s(]+/)[0] + (h ? `: ${h}` : '');
+          return `<span class="cal-chip" style="${chipStyle(n)}">${escapeHtml(label)}</span>`;
+        }).join('')
       : '<span class="cal-chip cal-chip-none">—</span>';
     // The note often carries internal remarks, so customers don't get it.
     const note = isCustomerRole() ? '' : (j.description || '').trim();
@@ -1271,7 +1278,7 @@ function openJobModal(jobId, dateStr) {
   jobChosenCustomer = job && job.customerId
     ? { id: job.customerId, name: job.customerName || customerCrumbLabel(job.customerId) }
     : null;
-  renderJobEmployees(job ? (job.employeeNames || []) : []);
+  renderJobEmployees(job ? (job.employeeNames || []) : [], job ? (job.employeeHours || {}) : {});
   renderJobCustomer('');
   document.getElementById('job-address-wrap').hidden = !jobChosenCustomer && !(job && job.address);
   const delBtn = document.getElementById('job-delete');
@@ -1282,18 +1289,30 @@ function openJobModal(jobId, dateStr) {
   jobModal.hidden = false;
 }
 
-function renderJobEmployees(selected) {
+function renderJobEmployees(selected, hours) {
   const ul = document.getElementById('job-employees');
   if (!ul) return;
   const names = getEmployeeNames();
+  const hrs = hours || {};
   ul.innerHTML = names.length
     ? names.map(n => `<li class="member-item">
         <label style="display:flex;align-items:center;gap:8px;flex:1;min-width:0;cursor:pointer;">
           <input type="checkbox" data-emp-name="${escapeHtml(n)}" ${selected.includes(n) ? 'checked' : ''} />
           <span class="cal-chip" style="${chipStyle(n)}">${escapeHtml(n)}</span>
         </label>
+        <input type="number" class="job-emp-hours" data-emp-hours="${escapeHtml(n)}"
+               min="0" step="0.25" inputmode="decimal" placeholder="hrs"
+               value="${hrs[n] != null ? hrs[n] : ''}" aria-label="Hours worked by ${escapeHtml(n)}" />
       </li>`).join('')
     : '<li class="member-item">Add employees in Settings → Time Logger first.</li>';
+  // Typing hours implies the person was there — tick them automatically.
+  ul.querySelectorAll('[data-emp-hours]').forEach(inp => {
+    inp.addEventListener('input', () => {
+      if (!inp.value) return;
+      const cb = ul.querySelector(`input[data-emp-name="${CSS.escape(inp.dataset.empHours)}"]`);
+      if (cb) cb.checked = true;
+    });
+  });
 }
 
 // How tall the match list can be: whatever is left between the bottom of the
@@ -1503,7 +1522,15 @@ if (jobSave) jobSave.addEventListener('click', async () => {
   if (!date) { alert('A job needs a date.'); return; }
   const names = [...document.querySelectorAll('#job-employees input[data-emp-name]:checked')]
     .map(cb => cb.dataset.empName);
+  // Hours are kept only for people on the job — unticking someone drops theirs.
+  const employeeHours = {};
+  document.querySelectorAll('#job-employees input[data-emp-hours]').forEach(inp => {
+    const n = inp.dataset.empHours;
+    const v = parseFloat(inp.value);
+    if (names.includes(n) && !isNaN(v) && v > 0) employeeHours[n] = v;
+  });
   await Storage.saveJob({
+    employeeHours,
     id: jobEditingId,
     date,
     start: document.getElementById('job-start').value,
