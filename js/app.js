@@ -16,6 +16,11 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 20, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.08.17-1714', 'The scrollbar in a note stays visible instead of fading out'],
+  ['v2026.08.17-1712', 'Editing a job has a Duplicate button — same job, next day, change the date before saving'],
+  ['v2026.08.17-1706', 'Accepting a keyboard suggestion mid-paragraph no longer pulls the next line up into it'],
+  ['v2026.08.17-1701', 'The vendor row in the price table now stays put while you scroll, like the item column'],
+  ['v2026.08.17-1651', 'Day view shows who is on each job and the job note on the block itself; the crew legend is gone'],
   ['v2026.08.16-1951', 'The hours note now understands Aug 14, Thu Aug 14, 8/14 and 2026-08-14 as date lines, not just August 14'],
   ['v2026.08.16-1929', 'Fixed double-tap zoom snapping straight back out on phones'],
   ['v2026.08.16-1923', 'The Files card now fills its full width — tap the left side to open, + Add on the right'],
@@ -275,6 +280,7 @@ function renderEmployeeList() {
       </div>
     </li>
   `).join('');
+  wireEmployeeRelink();
   employeeListEl.querySelectorAll('select[data-emp-link]').forEach(sel => {
     sel.addEventListener('change', async () => {
       const next = { ...(Storage.getSettings().employeeLinks || {}) };
@@ -687,10 +693,6 @@ function chipStyle(name) {
 function crewKey(job) {
   return (job.employeeNames || []).slice().sort().join('|');
 }
-function crewLabel(job) {
-  const names = (job.employeeNames || []);
-  return names.length ? names.join(' + ') : 'Unassigned';
-}
 // One colour for a solo crew; a stripe of colours for a pair or more, so the
 // bar on a block matches the legend at a glance.
 function crewBarStyle(names) {
@@ -715,7 +717,6 @@ const MONTH_NAMES = ['January','February','March','April','May','June','July','A
 const MAX_CHIPS = 3; // then "+N"
 let calCursor = new Date();      // any date inside the displayed month
 let calSelectedDate = null;      // 'YYYY-MM-DD' for the day view
-let calCrewFocus = null;         // crew key to highlight in the day view
 
 function ymd(d) {
   const y = d.getFullYear();
@@ -829,7 +830,6 @@ function renderCalendar() {
 
 function showCalendarDay(dateStr) {
   Storage.ensureJobMonth(dateStr);
-  if (calSelectedDate !== dateStr) calCrewFocus = null;
   calSelectedDate = dateStr;
   hideAllScreens();
   calendarDayView.classList.add('active');
@@ -965,26 +965,6 @@ function renderCalendarDay() {
     untimedWrap.innerHTML = '';
   }
 
-  // Crew legend: each distinct crew once, with its colour bar. Tapping one
-  // focuses that crew and dims the rest.
-  const crews = groupByCrew(timed);
-  const legend = document.getElementById('cal-day-legend');
-  if (legend) {
-    legend.hidden = crews.length === 0;
-    legend.innerHTML = crews.map(g => `
-      <button type="button" class="cal-crew${calCrewFocus === g.key ? ' cal-crew-active' : ''}" data-crew="${escapeHtml(g.key)}">
-        <span class="cal-crew-bar" style="${crewBarStyle(g.names)}"></span>
-        <span class="cal-crew-names">${escapeHtml(crewLabel({ employeeNames: g.names }))}</span>
-        <span class="cal-crew-count">${g.jobs.length}</span>
-      </button>`).join('');
-    legend.querySelectorAll('.cal-crew').forEach(btn => {
-      btn.addEventListener('click', () => {
-        calCrewFocus = calCrewFocus === btn.dataset.crew ? null : btn.dataset.crew;
-        renderCalendarDay();
-      });
-    });
-  }
-
   const spans = timed.map(jobSpan);
   const lanes = layoutLanes(spans);
   const hours = Array.from({ length: 24 }, (_, h) => `
@@ -1001,15 +981,21 @@ function renderCalendarDay() {
     const who = j.customerName || (j.customerId ? customerCrumbLabel(j.customerId) : 'No customer');
     const names = (j.employeeNames || []);
     const timeTxt = `${fmtClock(start)}–${fmtClock(end)}`;
-    // The crew is identified by the coloured bar and the legend above, so the
-    // block itself doesn't repeat the names — that space goes to the job.
-    const key = crewKey(j);
-    const dim = calCrewFocus && calCrewFocus !== key ? ' cal-block-dim' : '';
-    return `<div class="cal-block${dim}" data-job="${j.id}" style="top:${top}px;height:${height}px;left:${left};width:${width}">
+    // Who's on the job is shown on the block itself now (the legend that used
+    // to carry it is gone). The note follows only when the block is tall
+    // enough to hold a line without slicing it.
+    const chips = names.length
+      ? names.map(n => `<span class="cal-chip" style="${chipStyle(n)}">${escapeHtml(n.split(/[\s(]+/)[0])}</span>`).join('')
+      : '<span class="cal-chip cal-chip-none">—</span>';
+    const note = (j.description || '').trim();
+    const roomForNote = height >= 76;
+    return `<div class="cal-block" data-job="${j.id}" style="top:${top}px;height:${height}px;left:${left};width:${width}">
       <span class="cal-block-bar" style="${crewBarStyle(names)}"></span>
       <div class="cal-block-time">${escapeHtml(timeTxt)}</div>
       <div class="cal-block-who">${escapeHtml(who)}</div>
       ${j.address ? `<div class="cal-block-addr">${escapeHtml(j.address)}</div>` : ''}
+      <div class="cal-block-chips">${chips}</div>
+      ${note && roomForNote ? `<div class="cal-block-note">${escapeHtml(note)}</div>` : ''}
       ${canEdit ? '<div class="cal-resize" aria-hidden="true"></div>' : ''}
     </div>`;
   }).join('');
@@ -1210,7 +1196,6 @@ function calShiftDay(delta) {
   if (!calSelectedDate) return;
   calSelectedDate = shiftYmd(calSelectedDate, delta);
   Storage.ensureJobMonth(calSelectedDate);       // swiping can cross a month
-  calCrewFocus = null;                    // a new day's crews are different
   renderCalendarDay();
   const dir = delta > 0 ? 'left' : 'right';
   calSlide(document.getElementById('cal-day-scroll'), dir);
@@ -1288,6 +1273,9 @@ function openJobModal(jobId, dateStr) {
   document.getElementById('job-address-wrap').hidden = !jobChosenCustomer && !(job && job.address);
   const delBtn = document.getElementById('job-delete');
   if (delBtn) delBtn.hidden = !job;
+  // Duplicate only makes sense for a job that exists — a new one isn't saved yet.
+  const dupBtn = document.getElementById('job-duplicate');
+  if (dupBtn) dupBtn.hidden = !job;
   jobModal.hidden = false;
 }
 
@@ -1528,6 +1516,22 @@ if (jobSave) jobSave.addEventListener('click', async () => {
   if (calendarDayView.classList.contains('active')) { calSelectedDate = date; renderCalendarDay(); }
   else renderCalendar();
 });
+// Duplicate: keep everything on screen, drop the id so Save writes a NEW job,
+// and move the date on a day. Nothing is written until Save, so the original is
+// untouched and the date can still be changed first.
+const jobDuplicate = document.getElementById('job-duplicate');
+if (jobDuplicate) jobDuplicate.addEventListener('click', () => {
+  if (!jobEditingId) return;
+  jobEditingId = null;
+  const dateEl = document.getElementById('job-date');
+  if (dateEl && dateEl.value) dateEl.value = shiftYmd(dateEl.value, 1);
+  document.getElementById('job-modal-title').textContent = 'New job (copy)';
+  jobDuplicate.hidden = true;
+  const delBtn = document.getElementById('job-delete');
+  if (delBtn) delBtn.hidden = true;
+  if (dateEl) { dateEl.focus(); }
+});
+
 const jobDelete = document.getElementById('job-delete');
 if (jobDelete) jobDelete.addEventListener('click', async () => {
   if (!jobEditingId) return;
@@ -4529,6 +4533,57 @@ function doRedo() {
   restoreSnapshot(snap);
 }
 
+// ---------- autocorrect newline repair ----------
+// Accepting a keyboard suggestion fires inputType 'insertReplacementText'. On
+// Android the range the keyboard asks to replace sometimes runs one character
+// past the word, and mid-paragraph that character is the line break — so the
+// next line jumps up into the current one. Replacing a word must never change
+// how many line breaks the note has, so when one goes missing we put it back.
+//
+// Exported shape kept pure and testable: given the text before and after, it
+// returns the repaired text and where the caret belongs, or null when the edit
+// was legitimate.
+function repairReplacementNewlines(prev, next, caret) {
+  const lost = (prev.split('\n').length - 1) - (next.split('\n').length - 1);
+  if (lost <= 0) return null;
+  // Narrow the edit to the part that actually differs.
+  let p = 0;
+  const max = Math.min(prev.length, next.length);
+  while (p < max && prev[p] === next[p]) p++;
+  let s = 0;
+  while (s < max - p && prev[prev.length - 1 - s] === next[next.length - 1 - s]) s++;
+  const removed = prev.slice(p, prev.length - s);
+  let inserted = next.slice(p, next.length - s);
+  if (!inserted) return null;                                  // a deletion, not a replacement
+  if (!removed.includes('\n') || inserted.includes('\n')) return null;
+  // The keyboard usually substitutes a space for the break it swallowed
+  // ("teh\n" becomes "the "). Drop those, or the restored line ends in spaces.
+  const trailingSpaces = inserted.length - inserted.replace(/ +$/, '').length;
+  const strip = Math.min(lost, trailingSpaces);
+  if (strip > 0) inserted = inserted.slice(0, inserted.length - strip);
+  const end = p + inserted.length;
+  return {
+    text: next.slice(0, p) + inserted + '\n'.repeat(lost) + next.slice(p + inserted.length + strip),
+    caret: (caret == null ? end : Math.min(caret, end)),
+  };
+}
+
+let replacementPrev = null;   // text as it stood just before a suggestion landed
+bodyInput.addEventListener('beforeinput', (e) => {
+  replacementPrev = (e.inputType === 'insertReplacementText') ? bodyInput.value : null;
+});
+bodyInput.addEventListener('input', (e) => {
+  if (e.inputType !== 'insertReplacementText' || replacementPrev === null) return;
+  const fix = repairReplacementNewlines(replacementPrev, bodyInput.value, bodyInput.selectionStart);
+  replacementPrev = null;
+  if (!fix) return;
+  // No pushUndo here: beforeinput already snapshotted this as a chunk edit, so
+  // the suggestion and its repair undo together as one step.
+  bodyInput.value = fix.text;
+  bodyInput.setSelectionRange(fix.caret, fix.caret);
+  scheduleSave();
+});
+
 // Typing granularity: snapshot at word boundaries, on insert/delete direction
 // changes, and before chunk operations (paste, newline, autocorrect).
 bodyInput.addEventListener('beforeinput', (e) => {
@@ -5823,6 +5878,34 @@ function applyRoleUI(role) {
   ['orphan-select-all-btn', 'orphan-delete-selected-btn'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.style.display = isAdminRole ? '' : 'none';
+  });
+}
+
+// Linking a name to an account only stamps jobs saved afterwards. This walks
+// every job and re-stamps the ones whose links have since changed.
+let relinkWired = false;
+function wireEmployeeRelink() {
+  const btn = document.getElementById('employee-relink-btn');
+  const status = document.getElementById('employee-relink-status');
+  if (!btn) return;
+  btn.style.display = isAdminRole() ? '' : 'none';
+  if (relinkWired) return;
+  relinkWired = true;
+  btn.addEventListener('click', async () => {
+    btn.disabled = true;
+    if (status) status.textContent = 'Checking every job…';
+    try {
+      const { scanned, updated } = await Storage.relinkJobEmployeeUids();
+      if (status) {
+        status.textContent = updated
+          ? `Updated ${updated} of ${scanned} jobs — those people can see them now.`
+          : `Checked ${scanned} jobs — all already linked correctly.`;
+      }
+    } catch (e) {
+      console.warn('relink', e);
+      if (status) status.textContent = 'Could not finish — check your connection and try again.';
+    }
+    btn.disabled = false;
   });
 }
 

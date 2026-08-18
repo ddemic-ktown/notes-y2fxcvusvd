@@ -590,29 +590,7 @@ body.hours-open {
   background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius);
   cursor: pointer;
 }
-/* Crew legend — each set of people once, instead of repeating names per job */
-.cal-legend {
-  flex-shrink: 0;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--line);
-  background: var(--surface);
-}
-.cal-crew {
-  display: flex; align-items: center; gap: 6px;
-  border: 1px solid var(--line); border-radius: 999px;
-  background: var(--bg); color: var(--ink);
-  font-family: inherit; font-size: 12px; font-weight: 600;
-  padding: 4px 10px 4px 4px; cursor: pointer;
-}
-.cal-crew-active { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(37,99,235,0.18); }
-.cal-crew-bar { width: 10px; height: 18px; border-radius: 3px; flex-shrink: 0; }
-.cal-crew-names { max-width: 42vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.cal-crew-count { color: var(--ink-soft); font-weight: 700; }
 .cal-block-bar { position: absolute; left: 0; top: 0; bottom: 0; width: 4px; border-radius: 6px 0 0 6px; }
-.cal-block-dim { opacity: 0.35; }
 .cal-block-addr { font-size: 10px; color: var(--ink-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .cal-day-scroll { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; }
@@ -645,6 +623,16 @@ body.hours-open {
 .cal-block-who { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cal-block-chips { display: flex; flex-wrap: wrap; gap: 2px; margin-top: 2px; }
 .cal-block-chips .cal-chip { font-size: 9px; padding: 1px 5px; }
+/* Job note — fills whatever room is left, clipped at two lines. */
+.cal-block-note {
+  font-size: 10px;
+  color: var(--ink-soft);
+  margin-top: 2px;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
 .cal-resize {
   position: absolute; right: 0; bottom: 0; width: 22px; height: 18px;
   touch-action: none;   /* the handle is only ever a drag */
@@ -718,7 +706,11 @@ body.hours-open {
 
 /* ---- Price table ---- */
 .price-main { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-.price-scroll { flex: 1; overflow: auto; -webkit-overflow-scrolling: touch; padding: 8px; position: relative; }
+.price-scroll { flex: 1; overflow: auto; -webkit-overflow-scrolling: touch; padding: 0; position: relative; }
+/* Margin, NOT padding on the scroller: a sticky element sticks to the PADDING
+   box, so 8px of padding leaves a strip where scrolled rows show through above
+   the header and beside the item column. */
+.price-table { margin: 8px; }
 /* --price-scale drives zoom by scaling LAYOUT (type + spacing). It must not be
    a transform: a transformed ancestor creates a containing block and disables
    position: sticky, which made the item column wander while scrolling. */
@@ -2279,6 +2271,27 @@ input[type="search"]::-webkit-search-cancel-button {
   overflow: hidden;
 }
 #hours-view .app-header { flex-shrink: 0; }
+/* Price table — same treatment, same reason. The vendor row is marked sticky,
+   but a plain `.screen` (min-height: 100vh) lets the DOCUMENT scroll instead of
+   .price-scroll, and a sticky header cannot stick to a scroller it isn't in.
+   Locking the section to the visible viewport makes .price-scroll the only
+   thing that moves, which is also why the item column already worked: that one
+   scrolls horizontally, and .price-scroll DOES scroll on that axis. */
+#price-view.active {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  height: 100dvh;
+  height: var(--app-vh, 100dvh);
+  min-height: 0;
+  max-height: var(--app-vh, 100dvh);
+  overflow: hidden;
+}
+#price-view .app-header { flex-shrink: 0; }
 #editor-view .app-header,
 #editor-view .editor-title { flex-shrink: 0; }
 #editor-view .app-header {
@@ -2340,6 +2353,9 @@ input[type="search"]::-webkit-search-cancel-button {
   overflow: hidden;
   color: transparent;
   background: var(--surface);
+  /* Matches the scrollbar gutter the textarea now reserves, so highlighted
+     text stays exactly under the real text. */
+  padding-right: calc(16px + var(--editor-sb, 10px));
 }
 
 .editor-body-highlight mark {
@@ -2358,6 +2374,24 @@ input[type="search"]::-webkit-search-cancel-button {
   position: relative;
   background: transparent;
   caret-color: var(--ink);
+  /* Always show where you are in the note. The browser's default is an OVERLAY
+     scrollbar that fades out a second after you stop scrolling; styling
+     ::-webkit-scrollbar switches this element to a classic one that stays.
+     scrollbar-gutter reserves the width even when the note is short, so text
+     never reflows the moment it becomes scrollable — and so the highlight
+     layer below can match it with a constant padding.
+     No effect on iOS Safari, which ignores scrollbar styling on touch. */
+  scrollbar-gutter: stable;
+}
+/* NOTE: no `scrollbar-width` / `scrollbar-color` here. Setting either makes
+   Chromium ignore ::-webkit-scrollbar entirely, and the bar goes back to
+   fading. Firefox keeps its own always-visible bar regardless. */
+.editor-body-input::-webkit-scrollbar { width: var(--editor-sb, 10px); }
+.editor-body-input::-webkit-scrollbar-track { background: transparent; }
+.editor-body-input::-webkit-scrollbar-thumb {
+  background: var(--ink-soft);
+  border-radius: 999px;
+  border: 3px solid var(--surface);   /* insets the thumb without shrinking the track */
 }
 
 /* One button that steps through its states. Wider than a paired button since

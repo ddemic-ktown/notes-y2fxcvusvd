@@ -907,6 +907,30 @@ export const Storage = {
     await tracked(setDoc(doc(jobsCol(), id), stripId(next))).catch(err => console.warn("saveJob", err));
     return next;
   },
+  // Backfill employeeUids across ALL jobs, not just the loaded window. Linking
+  // a name to an account in settings only affects jobs saved afterwards — this
+  // re-stamps the older ones so that person can finally see them. Admin only
+  // (rules enforce it). Returns { scanned, updated }.
+  async relinkJobEmployeeUids() {
+    if (_role !== 'admin') return { scanned: 0, updated: 0 };
+    const snap = await getDocs(jobsCol());
+    let updated = 0;
+    const same = (a, b) => a.length === b.length && a.every(v => b.includes(v));
+    for (const d of snap.docs) {
+      const data = d.data() || {};
+      if (data.deletedAt) continue;
+      const want = this.employeeUidsFor(data.employeeNames || []);
+      const have = Array.isArray(data.employeeUids) ? data.employeeUids : [];
+      if (same(want, have)) continue;
+      await tracked(setDoc(doc(jobsCol(), d.id), { employeeUids: want }, { merge: true }))
+        .catch(err => console.warn('relinkJobEmployeeUids', err));
+      const i = _cache.jobs.findIndex(j => j.id === d.id);
+      if (i !== -1) _cache.jobs[i] = { ..._cache.jobs[i], employeeUids: want };
+      updated++;
+    }
+    if (updated) emit();
+    return { scanned: snap.size, updated };
+  },
   async deleteJob(id) {
     _cache.jobs = _cache.jobs.filter(j => j.id !== id);
     emit();

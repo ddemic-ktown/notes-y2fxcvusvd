@@ -258,7 +258,6 @@
         <button type="button" id="cal-day-prev" class="cal-cue cal-cue-side" data-shift="-1"></button>
         <button type="button" id="cal-day-next" class="cal-cue cal-cue-side" data-shift="1"></button>
       </div>
-      <div id="cal-day-legend" class="cal-legend" hidden></div>
       <div id="cal-day-untimed" class="cal-untimed" hidden></div>
       <div id="cal-day-scroll" class="cal-day-scroll">
         <div id="cal-day-timeline" class="cal-timeline"></div>
@@ -303,6 +302,7 @@
       </div>
       <div class="setting-btn-col">
         <button id="job-save" class="primary setting-wide-btn" type="button">Save job</button>
+        <button id="job-duplicate" class="secondary setting-wide-btn" type="button" hidden>Duplicate to next day</button>
         <button id="job-delete" class="secondary setting-wide-btn danger-item" type="button" hidden>Delete job</button>
       </div>
     </div>
@@ -560,6 +560,9 @@
           <!-- Own class as well as keyword-list: employees stack as full-width
                cards, keywords still wrap as pills. -->
           <ul id="employee-list" class="keyword-list employee-list"></ul>
+          <p class="muted setting-hint">Jobs scheduled before a name was linked to an app account don't carry that account, so the person can't see them. Run this once after linking.</p>
+          <button id="employee-relink-btn" class="secondary setting-wide-btn">Re-link accounts to existing jobs</button>
+          <p id="employee-relink-status" class="muted setting-hint"></p>
         </div>
 
         <div data-role-iif>
