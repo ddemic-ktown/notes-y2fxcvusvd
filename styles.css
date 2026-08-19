@@ -716,6 +716,15 @@ body.hours-open {
   font-size: 20px; line-height: 1; cursor: pointer; padding: 0 6px;
   border-radius: 999px; flex-shrink: 0;
 }
+/* Deliberately quiet and word-shaped, not an icon: renaming rewrites every job
+   the person is on, so it should read as a considered action sitting next to
+   the name — not a glyph anyone taps to find out what it does. */
+.employee-rename {
+  background: transparent; border: 1px solid var(--line); color: var(--ink-soft);
+  font-size: 12px; font-weight: 600; line-height: 1; cursor: pointer;
+  padding: 5px 8px; border-radius: 6px; flex-shrink: 0;
+}
+.employee-rename:active { opacity: 0.7; }
 .employee-remove:hover { color: var(--danger); }
 /* Side by side when there's room, stacked on a narrow phone (below). */
 .employee-card-fields { display: flex; gap: 8px; }

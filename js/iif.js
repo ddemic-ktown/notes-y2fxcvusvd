@@ -387,8 +387,13 @@ export function parseHoursNote(text, customers, employees, range = {}) {
 // ---------- IIF generation ----------
 // QuickBooks service items per employee classification. These must exist as
 // Service-type items in the QB company file, with these exact names.
-const ITEM_APPRENTICE = 'Service Rates: Labour Rate';
-const ITEM_JOURNEYMAN = 'Service Rates: Standard Labour';
+//
+// NO SPACE AFTER THE COLON (v2026.08.19-1134). QuickBooks writes a sub-item as
+// Parent:Child with nothing between, and the name is matched literally — the
+// space made every apprentice row fail the import with "The specified Item is
+// not present in QuickBooks or is not Service Type Item [15182]".
+const ITEM_APPRENTICE = 'Service Rates:Labour Rate';
+const ITEM_JOURNEYMAN = 'Service Rates:Standard Labour';
 
 // employeeTypeMap: lowercased employee name → 'apprentice' | 'journeyman'
 export function generateIIF(entries, employeeTypeMap = {}, companyName = 'Company Organizer Ninja') {

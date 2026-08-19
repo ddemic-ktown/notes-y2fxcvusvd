@@ -1041,6 +1041,78 @@ export const Storage = {
     await tracked(setDoc(doc(jobsCol(), id), stripId(next))).catch(err => console.warn("saveJob", err));
     return next;
   },
+  // Rename an employee EVERYWHERE, in one action.
+  //
+  // The name is not an id — it is copied into every job that person is on, and
+  // it is also the KEY of that job's per-person hours map. So a rename has four
+  // places to reach: the employee list, the name→account link, and both of
+  // those fields on every job. Miss any one and the exports silently keep the
+  // old spelling, or the hours detach from the person.
+  //
+  // Jobs are swept FROM THE SERVER, not from the cache: the jobs listener only
+  // covers a three-month window, and an employee who has been on the crew for a
+  // year has jobs well outside it. A cache-only rename would look like it
+  // worked and leave last spring untouched.
+  //
+  // Deliberately NOT rewritten: `timelogs`. Nothing reads that collection any
+  // more (see "Future cleanup" in HANDOFF) and rewriting dead records would
+  // only make them look maintained.
+  async renameEmployee(oldName, newName) {
+    if (_role !== 'admin') return null;
+    const from = String(oldName || '').trim();
+    const to = String(newName || '').trim();
+    if (!from || !to) return { ok: false, msg: 'Enter a name.' };
+    if (from === to) return { ok: false, msg: 'That is already the name.' };
+    const emps = Array.isArray(_cache.settings.employees) ? _cache.settings.employees : [];
+    const nameOf = (e) => (typeof e === 'string' ? e : e.name);
+    if (!emps.some(e => nameOf(e) === from)) return { ok: false, msg: 'That employee no longer exists.' };
+    // Case-insensitive: two employees differing only in case would be
+    // indistinguishable on a job and ambiguous to QuickBooks.
+    if (emps.some(e => nameOf(e) !== from && nameOf(e).toLowerCase() === to.toLowerCase())) {
+      return { ok: false, msg: 'Another employee already has that name.' };
+    }
+
+    // ---- settings: the list, and the account link keyed by name ----
+    const nextEmps = emps.map(e => (nameOf(e) === from
+      ? (typeof e === 'string' ? to : { ...e, name: to })
+      : e));
+    const links = { ..._cache.settings.employeeLinks };
+    if (from in links) { links[to] = links[from]; delete links[from]; }
+    _cache.settings = { ..._cache.settings, employees: nextEmps, employeeLinks: links };
+    emit();
+    await tracked(setDoc(settingsDoc(), _cache.settings, { merge: true }))
+      .catch(err => console.warn('renameEmployee.settings', err));
+
+    // ---- every job, from the server ----
+    let jobs = 0;
+    try {
+      const snap = await getDocs(jobsCol());
+      for (const d of snap.docs) {
+        const j = d.data() || {};
+        const names = Array.isArray(j.employeeNames) ? j.employeeNames : [];
+        const hrs = (j.employeeHours && typeof j.employeeHours === 'object') ? j.employeeHours : {};
+        if (!names.includes(from) && !(from in hrs)) continue;
+        const nextNames = names.map(n => (n === from ? to : n));
+        const nextHours = {};
+        for (const [k, v] of Object.entries(hrs)) nextHours[k === from ? to : k] = v;
+        await tracked(setDoc(doc(jobsCol(), d.id),
+          { employeeNames: nextNames, employeeHours: nextHours }, { merge: true }))
+          .catch(err => console.warn('renameEmployee.job', err));
+        const i = _cache.jobs.findIndex(x => x.id === d.id);
+        if (i !== -1) _cache.jobs[i] = { ..._cache.jobs[i], employeeNames: nextNames, employeeHours: nextHours };
+        jobs++;
+      }
+    } catch (err) {
+      console.warn('renameEmployee.jobs', err);
+      // The settings half already landed, so say so rather than implying
+      // nothing happened — the two are not in one transaction and cannot be.
+      emit();
+      return { ok: false, partial: true, jobs, msg: 'Renamed in Settings, but the jobs could not be updated. Try again.' };
+    }
+    emit();
+    return { ok: true, jobs };
+  },
+
   // Backfill employeeUids across ALL jobs, not just the loaded window. Linking
   // a name to an account in settings only affects jobs saved afterwards — this
   // re-stamps the older ones so that person can finally see them. Admin only

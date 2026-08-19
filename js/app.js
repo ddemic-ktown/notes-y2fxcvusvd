@@ -19,6 +19,8 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 20, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.08.19-1152', 'Rename an employee — the new name replaces the old one on every job they are on, past and future'],
+  ['v2026.08.19-1134', 'QuickBooks item names lose the space after the colon, which was making every apprentice row fail to import'],
   ['v2026.08.19-0830', 'Fixed the ✓ in the hours chart sometimes leaving the cell open instead of closing it'],
   ['v2026.08.19-0819', 'Hours chart reads the calendar only — edit an hour and it saves to the job; no Save button, no red rows, and a ✓ to close the keyboard'],
   ['v2026.08.19-0752', 'Hours chart: employee colours, per-person day and week totals, and hours save as soon as you leave the cell'],
@@ -193,6 +195,12 @@ function getEmployeeTypeMap() {
   getEmployees().forEach(e => { map[e.name.toLowerCase()] = e.type; });
   return map;
 }
+// FEATURE FLAG. Set to false and the rename button disappears everywhere; the
+// code behind it (Storage.renameEmployee) stays put, so turning it back on is
+// the same one-word change. Same pattern as ALLOW_SELF_SIGNUP in storage.js.
+// Note it only stops FUTURE renames — it does not undo ones already made.
+const ALLOW_EMPLOYEE_RENAME = true;
+
 async function setEmployees(list) { await Storage.setSetting('employees', list); }
 async function addEmployee(name, type) {
   const n = (name || '').trim();
@@ -276,6 +284,7 @@ function renderEmployeeList() {
                value="${e.colour || employeeColour(e.name)}"
                aria-label="Calendar colour for ${escapeHtml(e.name)}" />
         <span class="employee-name">${escapeHtml(e.name)}</span>
+        ${ALLOW_EMPLOYEE_RENAME ? `<button data-emp-rename="${escapeHtml(e.name)}" class="employee-rename" aria-label="Rename ${escapeHtml(e.name)}">Rename</button>` : ''}
         <button data-emp="${escapeHtml(e.name)}" class="employee-remove" aria-label="Remove ${escapeHtml(e.name)}">×</button>
       </div>
       <div class="employee-card-fields">
@@ -324,6 +333,29 @@ function renderEmployeeList() {
   employeeListEl.querySelectorAll('select[data-emp-type]').forEach(sel => {
     sel.addEventListener('change', async () => {
       await setEmployeeType(sel.dataset.empType, sel.value);
+    });
+  });
+  employeeListEl.querySelectorAll('button[data-emp-rename]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const from = btn.dataset.empRename;
+      // prompt, not a bespoke modal: this is a rare admin action on a settings
+      // screen, and the whole interaction is "type the correct spelling".
+      const to = (prompt(`Rename “${from}” to what?\n\nThis changes the name on every job they are on, past and future — and it is the name that lands in QuickBooks.`, from) || '').trim();
+      if (!to || to === from) return;
+      btn.disabled = true;
+      const prev = btn.textContent;
+      btn.textContent = 'Renaming…';
+      let res;
+      try {
+        res = await Storage.renameEmployee(from, to);
+      } catch (err) {
+        res = { ok: false, msg: err && err.message ? err.message : String(err) };
+      }
+      btn.disabled = false;
+      btn.textContent = prev;
+      renderEmployeeList();
+      if (!res || !res.ok) { alert((res && res.msg) || 'Could not rename.'); return; }
+      alert(`Renamed to “${to}”.\n\n${res.jobs} job${res.jobs === 1 ? '' : 's'} updated.`);
     });
   });
 }
