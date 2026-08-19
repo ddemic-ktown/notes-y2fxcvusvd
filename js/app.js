@@ -19,6 +19,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 20, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.08.19-0830', 'Fixed the ✓ in the hours chart sometimes leaving the cell open instead of closing it'],
   ['v2026.08.19-0819', 'Hours chart reads the calendar only — edit an hour and it saves to the job; no Save button, no red rows, and a ✓ to close the keyboard'],
   ['v2026.08.19-0752', 'Hours chart: employee colours, per-person day and week totals, and hours save as soon as you leave the cell'],
   ['v2026.08.19-0033', 'The calendar tour now shows where hours go on a job, and a new Tutorial 8 covers users, invites, trash, backup and sample data'],
@@ -7720,24 +7721,39 @@ function wireIifGrid() {
   // keyboard back, and that blur must not then save the thing Escape just
   // rejected.
   let done = false, cancelled = false;
-  const commit = () => {
+  // `finished` separates the two ways out of a cell, which need opposite
+  // handling of the tap that caused them:
+  //
+  //   MOVING (blur, because you tapped another cell) — one tap does both. So no
+  //   suppression (it would swallow the click that opens the next cell) and no
+  //   immediate re-render (it would tear the element out from under that click
+  //   before it lands). Redraw a frame later, only if nothing else claimed the
+  //   cursor.
+  //
+  //   FINISHING (the ✓) — there is no next cell. Deferring the redraw here was
+  //   the bug: the redraw sometimes landed BEFORE the tap's click, which then
+  //   fell on the freshly drawn cell under the finger and reopened it, so ✓
+  //   appeared to do nothing. Intermittent, because it was a race. Suppress the
+  //   follow-up tap and close now.
+  const commit = (finished = false) => {
     if (done) return;
     done = true;
     if (!cancelled) commitIifHours(idx, input.value);
-    // NO re-render here, and no tap suppression. Both matter: moving to the
-    // next cell is a SINGLE tap — its pointerdown blurs this field — so
-    // redrawing now would tear the element out from under that tap before the
-    // click lands, and suppressing would swallow the click outright. Instead
-    // hand the frame back and redraw only if nothing else claimed the cursor.
+    if (finished) {
+      closeIifCell(true, true);
+      return;
+    }
     closeIifCell(false, false);
     requestAnimationFrame(() => {
       if (!openIifCell) renderIIFEntries(iifParsedEntries);
     });
   };
   input.addEventListener('blur', commit);
+  // Enter and Escape are keyboard, not taps — nothing to race with — but they
+  // are finishing, not moving, so they close straight away too.
   input.addEventListener('keydown', (ev) => {
-    if (ev.key === 'Enter') { ev.preventDefault(); input.blur(); }
-    else if (ev.key === 'Escape') { ev.preventDefault(); cancelled = true; input.blur(); }
+    if (ev.key === 'Enter') { ev.preventDefault(); commit(true); input.blur(); }
+    else if (ev.key === 'Escape') { ev.preventDefault(); cancelled = true; commit(true); input.blur(); }
   });
 
   // ✓ — on POINTERDOWN, not click. Pressing it blurs the input, which closes
@@ -7748,19 +7764,16 @@ function wireIifGrid() {
   // preventDefault keeps focus put until we've read the value.
   const doneBtn = editing.querySelector('.iif-edit-done');
   if (doneBtn) {
-    doneBtn.addEventListener('pointerdown', (ev) => {
+    const finish = (ev) => {
       ev.preventDefault();
       ev.stopPropagation();
-      commit();
+      commit(true);
       input.blur();          // hand the keyboard back
-    });
-    // Anything without pointer events, and keyboard users.
-    doneBtn.addEventListener('click', (ev) => {
-      ev.preventDefault();
-      ev.stopPropagation();
-      commit();
-      input.blur();
-    });
+    };
+    doneBtn.addEventListener('pointerdown', finish);
+    // Anything without pointer events, and keyboard users. `done` makes the
+    // second one a no-op.
+    doneBtn.addEventListener('click', finish);
   }
 }
 
