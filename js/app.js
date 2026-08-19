@@ -7,7 +7,10 @@ import {
 } from "./firebase-init.js";
 // formatDate is aliased: app.js already has its own formatDate(iso) for note
 // timestamps, and iif.js's returns the MM/DD/YYYY that QuickBooks expects.
-import { parseHoursNote, generateIIF, fuzzyMatchCustomer,
+// parseHoursNote is deliberately NOT imported any more (v2026.08.18-2325): the
+// hours chart is built from calendar jobs now. The parser is still exported
+// from iif.js, unchanged, so switching back is a one-line change.
+import { generateIIF, fuzzyMatchCustomer,
          formatDate as iifFormatDate, formatDuration } from "./iif.js";
 import { LocalFiles } from "./files.js";
 
@@ -16,6 +19,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 20, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.08.18-2325', 'The hours chart is now built from the hours you enter on calendar jobs, not from the hours note'],
   ['v2026.08.18-1029', 'Note hours worked per person on a job; the day view pills show them as Name: 4'],
   ['v2026.08.17-2140', 'Customers linked to an app account can see their own scheduled jobs — date, time and who is coming'],
   ['v2026.08.17-2030', 'Employees can reach the Calendar (and a shared Price Table) from their home screen'],
@@ -3352,12 +3356,11 @@ function showEditor(record, type, cursorHint) {
   // of "templates". Never on a customer's default note: that note IS the
   // customer, and a copy would look like a second customer record.
   if (duplicateBtnEl) duplicateBtnEl.hidden = !(type === 'note' && !currentIsDefault && !isReadOnlyRole());
+  // The Hours shortcut used to appear on a note titled "hours", because that
+  // note was the chart's input. The chart reads calendar jobs now, so no note
+  // is special and the shortcut stays hidden. (v2026.08.18-2325)
   const editorIifBtnEl = document.getElementById('editor-iif-btn');
-  if (editorIifBtnEl) {
-    const isHoursNote = type === 'note' && (splitTitleAndBody(record.body).title || '').trim().toLowerCase() === 'hours';
-    // Editor IIF is admin-only (bookkeepers use Settings → QuickBooks; employees have no IIF access)
-    editorIifBtnEl.hidden = !(isAdminRole() && isHoursNote);
-  }
+  if (editorIifBtnEl) editorIifBtnEl.hidden = true;
 
   hideAllScreens();
   editorView.classList.add('active');
@@ -6864,20 +6867,22 @@ if (changelogList) {
   `).join('');
 }
 
-// ---------- Hours (parse the "hours" note, correct it, export) ----------
-// The parsed hours note rendered as an EDITABLE GRID that borrows the price
-// table's chrome (see index.html and styles.css). Same interaction: one cell
-// open at a time, the editor stacked inside the cell, tap elsewhere to move or
-// close. What's different is that the columns hold different KINDS of thing —
-// a date, a name from the employee list, a name from the customer list, a
-// number — so each column gets its own small editor instead of the price
-// table's single cell renderer. Nothing here is persisted: edits live in
-// iifParsedEntries until you export.
+// ---------- Hours (calendar jobs → records → QuickBooks) ----------
+// The hours entered on calendar jobs, rendered as a GRID that borrows the price
+// table's chrome (see index.html and styles.css). One cell open at a time, tap
+// elsewhere to move or close.
+//
+// Only the Hours column is editable, and an edit there goes straight back onto
+// the job. Date, employee and customer are the job's, shown read-only —
+// changing them here would mean two places to book work from.
+//
+// (Before v2026.08.18-2325 the rows came from parsing a general note titled
+// "hours", and all four columns were editable. iif.js still exports
+// parseHoursNote, unchanged, if that is ever wanted back.)
 const iifBtn = document.getElementById('iif-btn');
 const iifStatus = document.getElementById('iif-status');
 const iifGrid = document.getElementById('iif-grid');
 const iifScroll = document.getElementById('iif-scroll');
-const iifSrcBar = document.getElementById('iif-src-bar');
 const iifDownloadBtn = document.getElementById('iif-download-btn');
 const iifSaveHoursBtn = document.getElementById('iif-save-hours-btn');
 const editorIifBtn = document.getElementById('editor-iif-btn');
@@ -6897,26 +6902,59 @@ const iifToDate = document.getElementById('iif-to-date');
   if (iifToDate && !iifToDate.value) iifToDate.value = fmt(new Date());
 })();
 
-function getCustomerNamesList() {
-  return Storage.listCustomers().map(c => {
-    const def = Storage.getDefaultNoteForCustomer(c.id);
-    const body = def ? def.body : '';
-    const name = (splitTitleAndBody(body).title || '').trim();
-    return { name, searchText: body };
-  }).filter(c => c.name.length > 0);
-}
-
-function findHoursNote() {
-  return Storage.listAllNotes().find(n => {
-    const { title } = splitTitleAndBody(n.body);
-    return title.trim().toLowerCase() === 'hours';
-  });
-}
-
-function confidenceColor(score) {
-  if (score >= 80) return 'var(--color-success, #16a34a)';
-  if (score >= 50) return '#d97706';
-  return '#dc2626';
+// ---- where the rows come from: CALENDAR JOBS ----
+// Until v2026.08.18-2325 this screen parsed a general note titled "hours".
+// Hours are now typed per person on the job itself, so the job IS the record of
+// what was worked and the note is out of the loop entirely.
+//
+// ONE ENTRY PER PERSON, not per job. Two people on a job usually work different
+// hours (employeeHours is a per-name map), while an entry carries a single
+// `hours` shared by everyone on it — so splitting here is what keeps the number
+// attached to the right person. It also matches QuickBooks, which wants a row
+// per person anyway.
+//
+// The shape returned is deliberately IDENTICAL to what parseHoursNote produced.
+// That is why nothing downstream changed: the saved-record matching, the ticks,
+// Save hours and the .iif writer all still see the entries they expect.
+function jobEntriesInRange(range) {
+  const from = range.from ? ymd(range.from) : '';
+  const to = range.to ? ymd(range.to) : '';
+  const jobs = Storage.listJobs()
+    .filter(j => j.date && (!from || j.date >= from) && (!to || j.date <= to))
+    .sort((a, b) => (a.date === b.date
+      ? String(a.start || '').localeCompare(String(b.start || ''))
+      : a.date.localeCompare(b.date)));
+  const out = [];
+  for (const j of jobs) {
+    // The customer LABEL has to be the same one timelogs are keyed on
+    // (customerCrumbLabel), or a job could never match its own saved record.
+    const cust = j.customerId ? customerCrumbLabel(j.customerId) : (j.customerName || '');
+    // A job with nobody on it still gets one row, so it can't silently vanish.
+    const names = (j.employeeNames || []).length ? j.employeeNames : [''];
+    const hrs = j.employeeHours || {};
+    const d = parseYmd(j.date);
+    for (const name of names) {
+      const h = Number(hrs[name]);
+      const hours = Number.isFinite(h) && h > 0 ? Math.round(h * 100) / 100 : 0;
+      out.push({
+        jobId: j.id,
+        employeeName: name,           // which key in employeeHours an edit writes to
+        date: d,
+        dateFormatted: Number.isNaN(d.getTime()) ? '' : iifFormatDate(d),
+        employees: name ? [name] : [],
+        hours,
+        // Blank, not "0", when nothing has been entered: the cell reads "—" and
+        // you can see at a glance which jobs you still owe hours for.
+        hoursFormatted: hours > 0 ? formatDuration(hours) : '',
+        customer: cust,
+        customerMatched: cust,
+        // No parser means nothing to be unsure about — no score, no orange rows.
+        confidence: null,
+        raw: j.description || '',
+      });
+    }
+  }
+  return out;
 }
 
 // ---- zoom (its own key: resizing the hours chart shouldn't resize prices) ----
@@ -6965,13 +7003,13 @@ function sameHours(a, b) { return Math.abs((Number(a) || 0) - (Number(b) || 0)) 
 //
 // Rows are the UNION of the note and what's already saved:
 //   matched, same hours  → one green row  (kind 'saved')
-//   matched, hours differ → green row (saved) + red row (what the note says)
-//   note only            → plain row      (kind 'note')
+//   matched, hours differ → green row (saved) + red row (what the job says)
+//   job only             → plain row      (kind 'note')
 //   saved only           → green row      (kind 'saved') so recorded hours
-//                          can't vanish just because a line left the note
-// Several note lines sharing a key (two visits, same customer, same day) pair
-// off IN ORDER against the records with that key; extras stay unmatched rather
-// than silently merging.
+//                          can't vanish just because a job was deleted
+// Several jobs sharing a key (two visits, same customer, same day) pair off IN
+// ORDER against the records with that key; extras stay unmatched rather than
+// silently merging.
 function iifGridRows() {
   const byKey = new Map();
   for (const t of iifVisibleTimeLogs()) {
@@ -6986,13 +7024,16 @@ function iifGridRows() {
       const pool = byKey.get(key);
       const log = (pool && pool.length) ? pool.shift() : null;
       const base = { e, idx, emp, empIdx, first: empIdx === 0 };
-      if (log && sameHours(log.hours, e.hours)) {
+      // A job with no hours entered makes no claim, so it can't DISAGREE with a
+      // record — it just shows what's on record. Type a number into it and the
+      // disagreement appears as normal.
+      if (log && (!e.hours || sameHours(log.hours, e.hours))) {
         // In sync. One row, and it stays editable — correcting an already
         // saved line is exactly what you'd want to do next.
         rows.push({ ...base, kind: 'saved', log, editable: true });
       } else if (log) {
         // A PAIR: the same work described two ways. The saved row states what's
-        // on record; the red row is what the note says now and is the one you
+        // on record; the red row is what the job says now and is the one you
         // edit and re-save. `pair` marks them so only one can be ticked — they
         // are one piece of work, and exporting both would double it.
         rows.push({ ...base, kind: 'saved', log, editable: false, pair: true });
@@ -7027,7 +7068,7 @@ function iifRowTickId(row) {
 function iifRowTicked(row) {
   const id = iifRowTickId(row);
   if (!iifTickState.has(id)) {
-    // In a disagreeing pair the NOTE is ticked by default — it's your most
+    // In a disagreeing pair the JOB is ticked by default — it's your most
     // recent word on the matter. Everything else starts ticked.
     iifTickState.set(id, !(row.kind === 'saved' && row.pair));
   }
@@ -7120,60 +7161,29 @@ function parseHoursInput(text) {
 }
 
 function iifCellHtml(row, col) {
-  const { idx, empIdx, first } = row;
+  const { idx, empIdx } = row;
   const v = iifRowValues(row);
-  // A read-only row (a saved record with no note line, or the record half of a
-  // disagreeing pair) carries no cell key, so nothing can open an editor on it.
-  if (!row.editable) {
+  // HOURS IS THE ONLY EDITABLE COLUMN (v2026.08.18-2325). Date, employee and
+  // customer are the calendar job's business — change them on the job and the
+  // chart follows. Everything else carries no cell key, so nothing can open an
+  // editor on it. A read-only ROW (a record with no job behind it, or the
+  // record half of a disagreeing pair) is locked the same way.
+  if (col !== 'hours' || !row.editable) {
     if (col === 'date') return `<td class="iif-date">${escapeHtml(v.dateText)}</td>`;
     if (col === 'employee') return `<td>${escapeHtml(v.emp || 'Nobody')}</td>`;
     if (col === 'customer') return `<td>${escapeHtml(v.cust || '—')}</td>`;
     if (col === 'hours') return `<td>${escapeHtml(v.hoursText || '—')}</td>`;
-    return `<td>${row.orphan ? '<span class="iif-tag">not in note</span>' : ''}</td>`;
+    return `<td>${row.orphan ? '<span class="iif-tag">no job</span>' : ''}</td>`;
   }
   const key = iifRowKey(idx, empIdx);
-  const open = openIifCell === `${key}|${col}`;
-  const cellAttrs = `data-cellkey="${key}|${col}" data-idx="${idx}" data-empidx="${empIdx}"`;
-  if (col === 'date') {
-    if (open) {
-      return `<td class="price-cell price-cell-editing iif-date" ${cellAttrs}>
-        <input class="iif-edit-date" type="date" value="${escapeHtml(v.dateIso)}" /></td>`;
-    }
-    return `<td class="price-cell iif-date" ${cellAttrs}>${escapeHtml(v.dateText)}</td>`;
+  const open = openIifCell === `${key}|hours`;
+  const cellAttrs = `data-cellkey="${key}|hours" data-idx="${idx}" data-empidx="${empIdx}"`;
+  if (open) {
+    return `<td class="price-cell price-cell-editing" ${cellAttrs}>
+      <input class="iif-edit-hours" type="text" inputmode="decimal" placeholder="3.5 or 3:30"
+             value="${escapeHtml(v.hoursText)}" /></td>`;
   }
-  if (col === 'employee') {
-    if (open) {
-      return `<td class="price-cell price-cell-editing" ${cellAttrs}>
-        <input class="iif-edit-emp" type="text" list="iif-emp-list" placeholder="Employee"
-               autocomplete="off" value="${escapeHtml(v.emp)}" /></td>`;
-    }
-    const cls = v.emp ? '' : ' iif-empty-emp';
-    // No issue text here: the orange row already says "look at this", and a
-    // sentence under every uncertain name made the grid hard to read.
-    return `<td class="price-cell" ${cellAttrs}>
-      <span class="iif-pick-value${cls}">${escapeHtml(v.emp || 'Nobody')}</span></td>`;
-  }
-  if (col === 'customer') {
-    if (open) {
-      return `<td class="price-cell price-cell-editing" ${cellAttrs}>
-        <input class="iif-edit-cust" type="text" list="iif-cust-list" placeholder="Customer"
-               autocomplete="off" value="${escapeHtml(v.cust)}" /></td>`;
-    }
-    return `<td class="price-cell" ${cellAttrs}>
-      <span class="iif-pick-value">${escapeHtml(v.cust || 'Choose…')}</span></td>`;
-  }
-  if (col === 'hours') {
-    if (open) {
-      return `<td class="price-cell price-cell-editing" ${cellAttrs}>
-        <input class="iif-edit-hours" type="text" inputmode="decimal" placeholder="3.5 or 3:30"
-               value="${escapeHtml(v.hoursText)}" /></td>`;
-    }
-    return `<td class="price-cell" ${cellAttrs}>${escapeHtml(v.hoursText || '—')}</td>`;
-  }
-  // score — read-only, and only on the first row of a multi-employee entry
-  return `<td>${first && v.confidence != null
-    ? `<span class="iif-score" style="color:${confidenceColor(v.confidence)};">${v.confidence}%</span>`
-    : ''}</td>`;
+  return `<td class="price-cell" ${cellAttrs}>${escapeHtml(v.hoursText || '—')}</td>`;
 }
 
 function renderIIFEntries(entries) {
@@ -7188,22 +7198,20 @@ function renderIIFEntries(entries) {
     <th>Employee</th>
     <th>Customer</th>
     <th>Hours</th>
-    <th>Score</th>
+    <th aria-label="Flag"></th>
   </tr></thead>`;
 
   iifRenderedRows = iifGridRows();
   const body = iifRenderedRows.map((row, i) => {
-    const { e } = row;
-    // Green = on record. Red = the note now says something different. Both
-    // outrank the orange needs-review tint: "saved" and "disagrees" are the
-    // stronger facts.
+    // Green = on record. Red = the job now says something different. (The
+    // orange needs-review tint went with the parser — a job has no confidence
+    // score, it just says what it says.)
     const cls = [
-      (e && e.needsReview) ? 'iif-needs-review' : '',
       row.kind === 'saved' ? 'iif-saved' : '',
       row.kind === 'differs' ? 'iif-differs' : '',
     ].filter(Boolean).join(' ');
-    // EVERY row is tickable now, so anything visible can be exported —
-    // including a record whose note line has since been tidied away.
+    // EVERY row is tickable, so anything visible can be exported — including a
+    // record whose job has since been deleted.
     const tick = `<input type="checkbox" class="iif-row-check" data-row="${i}" ${iifRowTicked(row) ? 'checked' : ''} />`;
     return `<tr class="${cls}">
       <td class="iif-check">${tick}</td>
@@ -7211,141 +7219,19 @@ function renderIIFEntries(entries) {
       ${iifCellHtml(row, 'employee')}
       ${iifCellHtml(row, 'customer')}
       ${iifCellHtml(row, 'hours')}
-      ${iifCellHtml(row, 'score')}
+      ${iifCellHtml(row, 'flag')}
     </tr>`;
   }).join('');
 
   iifGrid.innerHTML = head + `<tbody>${body}</tbody>`;
   applyIifZoomVar();
-  renderIifSrcBar();
   wireIifGrid();
 }
 
-// The note line for whichever row is open. Lives in the sticky header, so it
-// stays put no matter how far down the chart you are working. Tapping it (as
-// an admin) edits the actual line in the hours note — see saveIifNoteLine.
-let iifSrcEditing = false;
-function openIifCellEntryIndex() {
-  if (!openIifCell) return -1;
-  return parseInt(openIifCell.split('|')[0].split(':')[0], 10);
-}
-function renderIifSrcBar() {
-  if (!iifSrcBar) return;
-  if (!openIifCell) { iifSrcBar.hidden = true; iifSrcBar.innerHTML = ''; iifSrcEditing = false; return; }
-  const idx = openIifCellEntryIndex();
-  const e = iifParsedEntries[idx];
-  if (!e) { iifSrcBar.hidden = true; return; }
-  iifSrcBar.hidden = false;
-  if (iifSrcEditing) {
-    iifSrcBar.innerHTML = `
-      <textarea id="iif-src-input" class="iif-src-input" rows="2"></textarea>
-      <p id="iif-src-error" class="iif-src-error" hidden></p>
-      <div class="price-cell-actions iif-src-actions">
-        <button class="price-save iif-src-save" type="button">Save to note</button>
-        <button class="price-cancel iif-src-cancel" type="button">Cancel</button>
-      </div>`;
-    const ta = document.getElementById('iif-src-input');
-    // Set as a property, not in the markup: the raw line can contain anything.
-    ta.value = e.raw || '';
-    wireIifCellButton(iifSrcBar.querySelector('.iif-src-save'), () => {
-      const res = saveIifNoteLine(idx, ta.value);
-      if (!res.ok) {
-        const err = document.getElementById('iif-src-error');
-        if (err) { err.textContent = res.msg; err.hidden = false; }
-        return;
-      }
-      iifSrcEditing = false;
-      renderIifSrcBar();
-    });
-    wireIifCellButton(iifSrcBar.querySelector('.iif-src-cancel'), () => {
-      iifSrcEditing = false;
-      renderIifSrcBar();
-    });
-    setTimeout(() => { ta.focus(); }, 0);
-    return;
-  }
-  // Tap-to-edit is wired to this INNER element, not to #iif-src-bar itself.
-  //
-  // The bar is never replaced — only its innerHTML changes — so a listener
-  // attached to the bar accumulated one copy per render AND stayed live while
-  // editing. Clicking Cancel then ran the button's handler (editing off) and,
-  // as the click bubbled up, a stale tap-to-edit handler turned editing back
-  // on: Cancel worked and was instantly undone.
-  //
-  // Guarding that handler with `if (iifSrcEditing) return` does NOT fix it —
-  // the Cancel button has already set the flag false by the time the bubbled
-  // click arrives. Same trap as the price-table long-press bug. The fix is to
-  // attach to something the render DESTROYS: .iif-src-open doesn't exist in
-  // the editing state, so there is no handler left to undo anything.
-  //
-  // RULE: only wire inside a render when that render rebuilds the element.
-  iifSrcBar.innerHTML =
-    `<div class="iif-src-open"><span class="iif-src-label">Note line:</span> ` +
-    `<span class="iif-src-text">${escapeHtml(e.raw || '(blank)')}</span></div>`;
-  const canEdit = isAdminRole();
-  iifSrcBar.classList.toggle('iif-src-tappable', canEdit);
-  if (canEdit) {
-    wireIifCellButton(iifSrcBar.querySelector('.iif-src-open'), () => {
-      iifSrcEditing = true;
-      renderIifSrcBar();
-    });
-  }
-}
-
-// Write one corrected line back into the "hours" note.
-//
-// Deliberately does NOT re-parse: re-reading the note would rebuild every entry
-// and throw away the corrections you'd already made in the grid, and shift the
-// row indexes the open cell is keyed on. The note is fixed for next time; the
-// row keeps the values you can edit directly anyway.
-function saveIifNoteLine(idx, text) {
-  if (!isAdminRole()) return { ok: false, msg: 'Read-only access.' };
-  const e = iifParsedEntries[idx];
-  if (!e) return { ok: false, msg: 'That row is gone — reopen this screen.' };
-  // Re-read from Storage rather than trusting the copy cached when this screen
-  // opened: the note may have been edited here or on another device since.
-  const note = findHoursNote();
-  if (!note) return { ok: false, msg: 'The hours note no longer exists.' };
-  const { title, body } = splitTitleAndBody(note.body);
-  const lines = body.split('\n');
-  const li = e.lineIndex;
-  if (li == null || li < 0 || li >= lines.length) {
-    return { ok: false, msg: 'The note has changed — reopen this screen to edit it.' };
-  }
-  // Position located the line; the text confirms it's still the same one.
-  if (lines[li].trim() !== (e.raw || '').trim()) {
-    return { ok: false, msg: 'That line changed somewhere else — reopen this screen.' };
-  }
-  lines[li] = text;
-  const nextBody = lines.join('\n');
-  Storage.updateNote(note.id, title + '\n' + nextBody);
-  e.raw = text.trim();
-  iifNoteBody = nextBody;    // keep the cache in step for a later re-parse
-  return { ok: true };
-}
-
-// Both drop lists are rebuilt when the screen opens: employees and customers can
-// change between sessions, and a stale list would offer names that no longer
-// exist.
-function refreshIifDatalists() {
-  const empList = document.getElementById('iif-emp-list');
-  if (empList) {
-    empList.innerHTML = getEmployeeNames()
-      .map(n => `<option value="${escapeHtml(n)}"></option>`).join('');
-  }
-  const custList = document.getElementById('iif-cust-list');
-  if (custList) {
-    const names = Storage.listCustomers()
-      .map(c => ({ label: customerCrumbLabel(c.id), addr: addressCandidates(c.id)[0] || '' }))
-      .filter(c => c.label)
-      .sort((a, b) => a.label.localeCompare(b.label));
-    // The address rides along as the option's LABEL so two Smiths can be told
-    // apart; only the value is typed back into the cell.
-    custList.innerHTML = names
-      .map(c => `<option value="${escapeHtml(c.label)}"${c.addr ? ` label="${escapeHtml(c.label)} — ${escapeHtml(c.addr)}"` : ''}></option>`)
-      .join('');
-  }
-}
+// (The pinned "Note line" bar was removed in v2026.08.18-2325 along with
+// saveIifNoteLine, which wrote a corrected line back into the hours note.
+// There is no source line any more — a row IS a calendar job, and the job is
+// edited in the calendar. #iif-src-bar went out of index.html with it.)
 
 function closeIifCell(rerender = true) {
   // Closing removes the Save/Cancel bar from the header, so everything below
@@ -7360,10 +7246,8 @@ function closeIifCell(rerender = true) {
   suppressIifTaps(500);
   iifOutsideTap.detach();
   openIifCell = null;
-  iifSrcEditing = false;     // never strand a half-finished note edit
   renderIifCellBar(null);    // retire the header Save/Cancel
   if (rerender) renderIIFEntries(iifParsedEntries);
-  else renderIifSrcBar();     // no re-render: retire the pinned note line here
 }
 
 function openIifCellAt(cellKey) {
@@ -7374,10 +7258,10 @@ function openIifCellAt(cellKey) {
 }
 
 // Bring the open cell to the TOP of the chart, so the row you're editing sits
-// directly under the pinned note line however far down the chart it started.
-// The 55vh of trailing space on .iif-scroll is what lets the last rows get
-// there. Two frames: the note line appearing changes the header's height, and
-// measuring before that reflow lands the row in the wrong place.
+// just under the column headers however far down the chart it started. The
+// 55vh of trailing space on .iif-scroll is what lets the last rows get there.
+// Two frames: opening a cell changes the header's height (the Save/Cancel bar
+// appears), and measuring before that reflow lands the row in the wrong place.
 function focusOpenIifCell() {
   const cell = iifGrid ? iifGrid.querySelector('.price-cell-editing') : null;
   if (!cell || !iifScroll) return;
@@ -7410,10 +7294,8 @@ function focusOpenIifCell() {
 const iifOutsideTap = makeOutsideTapWatcher({
   isOpen: () => !!openIifCell,
   // The include tick counts as "inside": tapping it with a cell open should
-  // toggle the row, not close the editor and swallow the tap. So does the note
-  // bar — tapping it opens ITS editor, and closing the cell would take the bar
-  // away with it.
-  editingSelector: '.price-cell-editing, .iif-check, .iif-src-bar',
+  // toggle the row, not close the editor and swallow the tap.
+  editingSelector: '.price-cell-editing, .iif-check',
   cellSelector: '.iif-grid .price-cell',
   onCell: (other) => {
     if (!other.dataset.cellkey) return false;
@@ -7424,48 +7306,42 @@ const iifOutsideTap = makeOutsideTapWatcher({
   onOutside: () => closeIifCell(),
 });
 
-// ---- commits (in memory only — nothing reaches Firestore from this grid) ----
-function commitIifDate(idx, iso) {
-  const e = iifParsedEntries[idx];
-  if (!e || !iso) return;
-  const d = parseYmd(iso);
-  if (Number.isNaN(d.getTime())) return;
-  e.date = d;
-  e.dateFormatted = iifFormatDate(d);
-}
+// ---- the only commit left: hours ----
+// Date, employee and customer belong to the calendar job and are not editable
+// here, so commitIifDate / commitIifEmployee / commitIifCustomer (and
+// resolveEmployeeName, which snapped a typed name to the configured spelling)
+// went out in v2026.08.18-2325.
 function commitIifHours(idx, text) {
   const e = iifParsedEntries[idx];
   if (!e) return;
   const hours = parseHoursInput(text);
   if (hours === null) return;
   e.hours = Math.round(hours * 100) / 100;
-  e.hoursFormatted = formatDuration(e.hours);
+  e.hoursFormatted = e.hours > 0 ? formatDuration(e.hours) : '';
+  writeHoursToJob(e);
 }
-// QuickBooks matches employees by exact name, and the apprentice/journeyman
-// item mapping is keyed on it too — a typo here produces an IIF that fails to
-// import. So a typed name is snapped to the configured spelling, and anything
-// that doesn't match at all is rejected rather than saved.
-function resolveEmployeeName(typed) {
-  const want = String(typed || '').trim().toLowerCase();
-  if (!want) return null;
-  const names = getEmployeeNames();
-  return names.find(n => n.toLowerCase() === want)
-      || names.find(n => n.toLowerCase().startsWith(want))
-      || null;
-}
-function commitIifEmployee(idx, empIdx, name) {
-  const e = iifParsedEntries[idx];
-  if (!e || !name) return;
-  if (!e.employees.length) e.employees = [name];
-  else e.employees[empIdx] = name;
-  // (Ticks used to be keyed by employee NAME and had to be carried across a
-  // rename. They're keyed by row position now, so a rename leaves them alone.)
-}
-function commitIifCustomer(idx, name) {
-  const e = iifParsedEntries[idx];
-  if (!e) return;
-  e.customer = name;
-  e.customerMatched = name;
+
+// The job is the source of truth for this screen, so an edit has to land there
+// too — otherwise reopening the chart would show the old number and quietly
+// undo the correction. In-memory first (the redraw is instant), Firestore
+// fire-and-forget, same as everywhere else in the app.
+//
+// Admin only. A bookkeeper can still correct a number for the export; it just
+// doesn't rewrite the schedule, which isn't theirs to change.
+function writeHoursToJob(e) {
+  if (!isAdminRole()) return;
+  if (!e || !e.jobId || !e.employeeName) return;
+  const job = Storage.getJob(e.jobId);
+  if (!job) return;
+  const employeeHours = { ...(job.employeeHours || {}) };
+  // Clearing the hours removes the person's entry rather than storing a 0 —
+  // "no hours entered" and "worked zero hours" should not look the same.
+  if (e.hours > 0) employeeHours[e.employeeName] = e.hours;
+  else delete employeeHours[e.employeeName];
+  // saveJob REBUILDS the document from what it is handed, so the whole job has
+  // to go back — passing only the changed field would blank everything else.
+  Promise.resolve(Storage.saveJob({ ...job, employeeHours }))
+    .catch(err => console.warn('writeHoursToJob', err));
 }
 
 // Save/Cancel act on POINTERDOWN, not click.
@@ -7527,29 +7403,9 @@ function wireIifGrid() {
   const editing = iifGrid.querySelector('.price-cell-editing');
   if (!editing) return;
   const idx = parseInt(editing.dataset.idx, 10);
-  const empIdx = parseInt(editing.dataset.empidx, 10);
   const col = (editing.dataset.cellkey || '').split('|')[1];
   const save = () => {
-    if (col === 'date') {
-      commitIifDate(idx, editing.querySelector('.iif-edit-date').value);
-    } else if (col === 'hours') {
-      commitIifHours(idx, editing.querySelector('.iif-edit-hours').value);
-    } else if (col === 'employee') {
-      const typed = editing.querySelector('.iif-edit-emp').value;
-      const match = resolveEmployeeName(typed);
-      if (!match) {
-        // Stay open with the cursor where it is — silently dropping the value
-        // would look like it saved. The hint lives in the header bar with the
-        // buttons, so it can't be hidden behind the sticky columns either.
-        showIifCellHint(typed.trim()
-          ? `No employee called “${typed.trim()}”. Pick one from the list.`
-          : 'Pick an employee from the list.');
-        return;
-      }
-      commitIifEmployee(idx, empIdx, match);
-    } else if (col === 'customer') {
-      commitIifCustomer(idx, editing.querySelector('.iif-edit-cust').value.trim());
-    }
+    commitIifHours(idx, editing.querySelector('.iif-edit-hours').value);
     closeIifCell();
   };
   // The buttons live in the header bar, not in the cell — point them at THIS
@@ -7563,32 +7419,8 @@ function wireIifGrid() {
     });
   });
 
-  // Picking from a native popup IS the decision — commit and close rather than
-  // making you find Save afterwards, and suppress the tap the popup sends
-  // through to the page as it closes.
-  const dateInput = editing.querySelector('.iif-edit-date');
-  if (dateInput) {
-    dateInput.addEventListener('change', () => { suppressIifTaps(); save(); });
-  }
-  // For the drop lists, only an EXACT list entry counts as "picked" — a change
-  // event also fires for half-typed text, which must not close the editor.
-  const empInput = editing.querySelector('.iif-edit-emp');
-  if (empInput) {
-    empInput.addEventListener('change', () => {
-      if (!getEmployeeNames().some(n => n === empInput.value)) return;
-      suppressIifTaps();
-      save();
-    });
-  }
-  const custInput = editing.querySelector('.iif-edit-cust');
-  if (custInput) {
-    custInput.addEventListener('change', () => {
-      const opts = [...document.querySelectorAll('#iif-cust-list option')].map(o => o.value);
-      if (!opts.includes(custInput.value)) return;
-      suppressIifTaps();
-      save();
-    });
-  }
+  // (No native popups left to handle: Hours is a plain text field. The date
+  // picker and the two drop lists went with the read-only columns.)
 }
 
 // ---- Save / Cancel for the open cell, in the sticky header ----
@@ -7683,9 +7515,6 @@ function setIifZoom(z) {
 }
 wirePinchZoom(iifScroll, () => iifZoom, setIifZoom, () => suppressIifTaps(400));
 
-let iifNoteBody = null;      // cached while the modal is open
-let iifCustomerNames = null; // cached while the modal is open
-
 function iifRangeFromInputs() {
   const parseInput = (el, endOfDay) => {
     if (!el || !el.value) return null;
@@ -7695,9 +7524,29 @@ function iifRangeFromInputs() {
   return { from: parseInput(iifFromDate, false), to: parseInput(iifToDate, true) };
 }
 
-// Parse the hours note (only the selected date range) and render the table.
+// The calendar keeps a LIVE WINDOW of roughly three months; anything older was
+// never loaded. Widening the range to last spring would otherwise show an empty
+// chart rather than the jobs that are actually there, so pull each month the
+// range touches. ensureJobMonth fetches once and remembers.
+function ensureJobsForRange(range) {
+  if (!range.from || !range.to) return Promise.resolve();
+  const months = [];
+  const d = new Date(range.from.getFullYear(), range.from.getMonth(), 1);
+  const end = new Date(range.to.getFullYear(), range.to.getMonth(), 1);
+  // Capped: a range of several years is a mis-typed date, not a request for
+  // sixty round trips.
+  for (let i = 0; i < 24 && d <= end; i++) {
+    months.push(ymd(d));
+    d.setMonth(d.getMonth() + 1);
+  }
+  return Promise.all(months.map(m =>
+    Promise.resolve(Storage.ensureJobMonth(m)).catch(() => {})));
+}
+
+// Build the chart from the calendar jobs in the selected date range.
+// (Named runIIFParse since the note-parsing days; it no longer parses anything.)
 function runIIFParse() {
-  iifStatus.innerHTML = '<span class="nav-spinner" style="width:16px;height:16px;border-width:2px;vertical-align:middle;"></span> Parsing your hours note…';
+  iifStatus.innerHTML = '<span class="nav-spinner" style="width:16px;height:16px;border-width:2px;vertical-align:middle;"></span> Loading your calendar jobs…';
   closeIifCell(false);                       // a re-parse invalidates row indexes
   iifTickState = new Map();                  // ...and the ticks keyed on them
   iifRenderedRows = [];
@@ -7705,27 +7554,33 @@ function runIIFParse() {
   if (iifDownloadBtn) iifDownloadBtn.hidden = true;
   if (iifSaveHoursBtn) iifSaveHoursBtn.hidden = true;
 
-  // Pull the already-saved hours for this range first, so the grid can be
-  // drawn green/red in one pass rather than flashing everything as unsaved.
+  // Both fetches BEFORE drawing: the already-saved hours for this range (so the
+  // grid is green/red in one pass rather than flashing everything as unsaved),
+  // and any month of jobs outside the calendar's live window.
   const r0 = iifRangeFromInputs();
-  Promise.resolve(
-    Storage.ensureTimeLogRange(r0.from ? ymd(r0.from) : '', r0.to ? ymd(r0.to) : '')
-  ).catch(() => {}).then(() => {
+  Promise.all([
+    Promise.resolve(
+      Storage.ensureTimeLogRange(r0.from ? ymd(r0.from) : '', r0.to ? ymd(r0.to) : '')
+    ).catch(() => {}),
+    ensureJobsForRange(r0).catch(() => {}),
+  ]).then(() => {
     const range = iifRangeFromInputs();
-    iifParsedEntries = parseHoursNote(iifNoteBody, iifCustomerNames, getEmployeeNames(), range);
+    iifParsedEntries = jobEntriesInRange(range);
 
     const total = iifParsedEntries.length;
     // Status is for the WAIT and for failure, not for narrating the result —
     // the chart itself already shows how many entries there are. Cleared here
     // so the line collapses (.iif-status:empty) instead of leaving a gap.
-    iifStatus.textContent = '';
+    iifStatus.textContent = total
+      ? ''
+      : 'No calendar jobs between these dates. Add jobs on the calendar and enter each person’s hours there.';
     renderIIFEntries(iifParsedEntries);
     if (iifDownloadBtn) iifDownloadBtn.hidden = total === 0;
     if (iifSaveHoursBtn) iifSaveHoursBtn.hidden = total === 0 || !isAdminRole();
   });
 }
 
-// ---- Save hours: the ticked note rows become timelog records ----
+// ---- Save hours: the ticked job rows become timelog records ----
 // One record per PERSON. A row that already has a matching record is UPDATED
 // rather than duplicated — matching is by date + employee + customer, so the
 // only thing that can change is the hours.
@@ -7757,11 +7612,11 @@ function iifRowsToSave() {
   return out;
 }
 
-// The .iif is built from the TICKED ROWS, not from the parsed note entries.
-// That's what makes every row exportable: a green row exports what's on
-// record, a red row exports what the note says, and a record whose note line
-// has gone can still reach QuickBooks. Pairs are mutually exclusive, so the
-// same work can never appear twice.
+// The .iif is built from the TICKED ROWS, not from the job entries. That's what
+// makes every row exportable: a green row exports what's on record, a red row
+// exports what the job says, and a record whose job has since been deleted can
+// still reach QuickBooks. Pairs are mutually exclusive, so the same work can
+// never appear twice.
 function iifExportEntries() {
   return iifRenderedRows
     .filter(iifRowTicked)
@@ -7784,7 +7639,7 @@ if (iifSaveHoursBtn) iifSaveHoursBtn.addEventListener('click', async () => {
   if (!isAdminRole()) return;
   const recs = iifRowsToSave();
   if (!recs.length) {
-    iifStatus.textContent = 'Nothing new to save — every ticked line is already on record.';
+    iifStatus.textContent = 'Nothing new to save — every ticked row is already on record.';
     return;
   }
   const updates = recs.filter(r => r.id).length;
@@ -7804,8 +7659,9 @@ if (iifSaveHoursBtn) iifSaveHoursBtn.addEventListener('click', async () => {
 });
 
 // A SCREEN, not a sheet: you navigate to it, and the system back button (or
-// ‹ Back) leaves it like any other screen. Entered fresh every time — the note
-// is re-read and re-parsed, so in-progress corrections do not survive leaving.
+// ‹ Back) leaves it like any other screen. Entered fresh every time — the jobs
+// are re-read, so an uncommitted cell edit does not survive leaving. (A
+// COMMITTED one does: it was written to the job.)
 function showHoursView() {
   if (!hoursView) return;
   // Same gate as the Settings card: admin writes, bookkeeper reads.
@@ -7821,35 +7677,24 @@ function showHoursView() {
   applyIifZoomVar();
   if (!handlingPopstate) history.pushState({ screen: 'hours' }, '');
 
-  const note = findHoursNote();
-  if (!note) {
-    iifStatus.textContent = 'No note titled "hours" found. Create a general note with the title "hours" and add your work notes there.';
-    closeIifCell(false);
-    if (iifGrid) iifGrid.innerHTML = '';
-    if (iifDownloadBtn) iifDownloadBtn.hidden = true;
-    if (iifSaveHoursBtn) iifSaveHoursBtn.hidden = true;
-    return;
-  }
-
-  // Cache the note body and customer list for re-parses while the screen is up
-  iifNoteBody = splitTitleAndBody(note.body).body;
-  iifCustomerNames = getCustomerNamesList();
-
-  refreshIifDatalists();
   runIIFParse();
 }
 
 if (iifBtn) iifBtn.addEventListener('click', showHoursView);
-// From the editor's ⋯ menu: flush the open note first, exactly as the
-// breadcrumb links do, or an unsaved edit to the hours note is parsed stale.
+// (#editor-iif-btn — the Hours shortcut in a note's ⋯ menu — is permanently
+// hidden as of v2026.08.18-2325: it only ever appeared on the "hours" note,
+// which no longer means anything to this screen. Handler left wired in case
+// the button is ever shown again.)
 if (editorIifBtn) editorIifBtn.addEventListener('click', () => {
   if (editorView.classList.contains('active')) commitAndCleanupEditor();
   showHoursView();
 });
-// The range now lives on this screen, so changing it re-reads straight away
-// instead of sending you back to Settings.
-if (iifFromDate) iifFromDate.addEventListener('change', () => { if (iifNoteBody !== null) runIIFParse(); });
-if (iifToDate) iifToDate.addEventListener('change', () => { if (iifNoteBody !== null) runIIFParse(); });
+// The range lives on this screen, so changing it re-reads straight away.
+const iifRangeChanged = () => {
+  if (hoursView && hoursView.classList.contains('active')) runIIFParse();
+};
+if (iifFromDate) iifFromDate.addEventListener('change', iifRangeChanged);
+if (iifToDate) iifToDate.addEventListener('change', iifRangeChanged);
 
 if (iifDownloadBtn) iifDownloadBtn.addEventListener('click', () => {
   const includedEntries = iifExportEntries();
@@ -8294,68 +8139,70 @@ function tutorialSteps(part) {
   // part 7 — the hours chart. Also outside the chain, and admin/bookkeeper
   // only in practice: the home card and Settings entry are already gated.
   if (part === 7) {
-    const hasHoursNote = () => !!findHoursNote();
+    // Since v2026.08.18-2325 the chart reads CALENDAR JOBS, so the thing that
+    // has to exist is a job in the range, not a note.
+    const hasJobs = () => Storage.listJobs().length > 0;
     // Two reasons this is async and guarded. showHoursView pushes history, so
-    // it must run once for the part, not once per bubble. And its parse waits
-    // on a fetch of already-saved hours, so 120ms later the grid is still
-    // empty and the footer buttons are still hidden — a step measuring then
-    // would find nothing and skip itself.
+    // it must run once for the part, not once per bubble. And its load waits on
+    // a fetch of already-saved hours, so 120ms later the grid is still empty
+    // and the footer buttons are still hidden — a step measuring then would
+    // find nothing and skip itself.
     const goHours = async () => {
       if (!isAdminRole() && !isBookkeeperRole()) return false;
       if (!hoursView.classList.contains('active')) showHoursView();
-      for (let i = 0; i < 20 && !document.querySelector('#iif-grid .price-cell'); i++) {
+      for (let i = 0; i < 20 && !document.querySelector('#iif-grid tbody tr'); i++) {
         await new Promise(r => setTimeout(r, 50));
       }
       return true;
     };
-    const noNoteFallback = {
-      target: () => document.querySelector('#notes-list .note-card[data-nav="hours"]'),
-      text: 'This reads a general note titled “hours”. Make one, write your days into it, then run this part again.',
+    const noJobsFallback = {
+      target: () => document.querySelector('#notes-list .note-card[data-nav="calendar"]'),
+      text: 'This reads your calendar. Book a job, put each person’s hours on it, then run this part again.',
     };
     return [
       {
         screen: 'home',
         setup: () => { goHome(); return true; },
         target: () => document.querySelector('#notes-list .note-card[data-nav="hours"]'),
-        text: 'Hours turns the note you scribble your days into — “July 20 / davor 9-4 tamarack cres” — into something you can check and send to QuickBooks.',
+        text: 'Hours collects what everyone actually worked — the hours you enter on each calendar job — so you can check it and send it to QuickBooks.',
       },
       {
         screen: 'hours',
-        group: 'hoursnote',
-        requires: hasHoursNote,
-        fallback: noNoteFallback,
+        group: 'hoursjobs',
+        requires: hasJobs,
+        fallback: noJobsFallback,
         setup: goHours,
         target: () => document.getElementById('iif-from-date'),
-        text: 'From and To decide how much of the note is read. It opens on the last two weeks; widen it when you’re catching up.',
+        text: 'From and To decide which jobs are shown. It opens on the last two weeks; widen it when you’re catching up.',
       },
       {
         screen: 'hours',
-        group: 'hoursnote',
-        requires: hasHoursNote,
+        group: 'hoursjobs',
+        requires: hasJobs,
         setup: goHours,
         target: () => document.getElementById('iif-grid'),
-        text: 'One row per person per line of the note. An orange row means the reader wasn’t sure — usually which customer you meant. Check those first.',
+        text: 'One row per person per job. A row with no hours yet shows a dash — that is a job you still owe hours for.',
       },
       {
         screen: 'hours',
-        group: 'hoursnote',
-        requires: hasHoursNote,
+        group: 'hoursjobs',
+        requires: hasJobs,
         setup: goHours,
         target: () => document.querySelector('#iif-grid .price-cell'),
-        text: 'Tap any cell to correct it. The line from your note appears at the top while you work, so you can see what it actually said — and tapping that line fixes the note itself, so next fortnight reads correctly.',
+        text: 'Hours is the only thing you change here, and the number goes straight back onto the job. Date, employee and customer belong to the job — fix those on the calendar.',
       },
       {
         screen: 'hours',
-        group: 'hoursnote',
-        requires: () => hasHoursNote() && Storage.getRole() === 'admin',
+        group: 'hoursjobs',
+        requires: () => hasJobs() && Storage.getRole() === 'admin',
         setup: goHours,
         target: () => document.getElementById('iif-save-hours-btn'),
-        text: 'Save hours records the ticked rows. Saved rows turn green. If you later change the note, the record stays green and the note’s new version appears in red beside it — tick whichever one is right.',
+        text: 'Save hours records the ticked rows. Saved rows turn green. If the job’s hours change later, the record stays green and the job’s new number appears in red beside it — tick whichever one is right.',
       },
       {
         screen: 'hours',
-        group: 'hoursnote',
-        requires: hasHoursNote,
+        group: 'hoursjobs',
+        requires: hasJobs,
         setup: goHours,
         target: () => document.getElementById('iif-download-btn'),
         text: 'Download .iif writes the ticked rows as a QuickBooks import file. Untick anything you’re not ready to send.',

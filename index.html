@@ -406,10 +406,10 @@
     </div>
   </div>
 
-  <!-- PROCESS / ENTER HOURS VIEW
-       The parsed hours note as an editable grid. A full SCREEN, not a modal:
-       it's a working surface you correct row by row, and a sheet on top of the
-       app left no room for the note line, the range and the chart at once.
+  <!-- HOURS VIEW
+       The hours entered on calendar jobs, as a grid. A full SCREEN, not a
+       modal: it's a working surface you check row by row, and a sheet on top of
+       the app left no room for the range and the chart at once.
        It deliberately wears the PRICE TABLE's classes (price-main,
        price-scroll, price-table, price-cell, price-cell-editing) so the two
        charts look and behave identically: sticky headers, zoom, one cell open
@@ -435,12 +435,9 @@
         <label class="iif-range-label">From <input id="iif-from-date" type="date" class="iif-date-input" /></label>
         <label class="iif-range-label">To <input id="iif-to-date" type="date" class="iif-date-input" /></label>
       </div>
-      <!-- The note line the open row was read from. It lives INSIDE the header
-           because the header is position: sticky — anywhere else it scrolled
-           away once you were working on rows further down, and the keyboard
-           pushed it off the top. You're correcting what the parser read, so it
-           has to stay in front of you. -->
-      <div id="iif-src-bar" class="iif-src-bar" hidden></div>
+      <!-- (#iif-src-bar, which pinned the note line the open row was read
+           from, was removed in v2026.08.18-2325 — rows come from calendar jobs
+           now, so there is no source line to show.) -->
       <!-- Save/Cancel for the open cell live UP HERE, not inside the cell.
            Inside, they sat at the cell's left edge and the sticky tick/Date
            columns (z-index 3, opaque) painted straight over them as soon as
@@ -548,7 +545,7 @@
 
         <div data-staff-only>
           <h4 class="setting-sub-title" style="margin-top:0;">Employees</h4>
-          <p class="muted setting-hint">Names the Time Logger recognises when parsing your hours note.</p>
+          <p class="muted setting-hint">Names you can schedule on a job and record hours against.</p>
           <div class="keyword-add employee-add">
             <input id="employee-input" type="text" placeholder="Add an employee" autocomplete="off" />
             <select id="employee-type-input" aria-label="Classification">
@@ -780,8 +777,6 @@
        gives BOTH a drop list and type-ahead filtering, which a native <select>
        can't do — and the customer list is long enough that searching it
        matters. Filled by refreshIifDatalists() when the screen opens. -->
-  <datalist id="iif-emp-list"></datalist>
-  <datalist id="iif-cust-list"></datalist>
 
   <!-- Tutorial Overlay -->
   <div id="tutorial-overlay" class="tutorial-overlay" hidden>
