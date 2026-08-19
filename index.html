@@ -634,9 +634,37 @@
         <p id="invite-status" class="muted" style="font-size:13px; margin-top:6px;"></p>
       </div>
 
+      <!-- INVITE A NEW COMPANY — deliberately its OWN section, not a fifth
+           option in the role dropdown above. This does not add someone to your
+           org; it hands them a separate company with their own data, and one
+           mis-picked dropdown value should not be able to do that. Shown only
+           to the founder account (Storage.canInviteNewOrg), and enforced
+           independently by isFounder() in firestore.rules. -->
+      <div id="new-org-row" class="setting-row setting-list-row" hidden>
+        <h3 class="setting-list-title">Invite a New Company</h3>
+        <p class="muted setting-hint">Starts a separate company with its own customers, calendar and hours. They become its admin. Nothing here is shared with it.</p>
+        <div class="invite-form">
+          <input id="new-org-email" type="email" placeholder="Owner's email address" autocomplete="off" />
+          <input id="new-org-name" type="text" placeholder="Company name" autocomplete="off" />
+          <button id="new-org-btn" class="primary">Invite</button>
+        </div>
+        <p id="new-org-status" class="muted" style="font-size:13px; margin-top:6px;"></p>
+      </div>
+
       <div class="setting-row setting-list-row">
         <h3 class="setting-list-title">Account</h3>
+        <p id="account-org" class="muted" style="margin: 0 0 4px;" hidden></p>
         <p id="account-email" class="muted" style="margin: 0 0 8px;"></p>
+        <!-- Any admin can name their own company. Also how the ORIGINAL org
+             gets a name — it predates the field entirely. -->
+        <div id="org-name-row" hidden>
+          <h4 class="setting-sub-title" style="margin-top:0;">Company name</h4>
+          <div class="invite-form">
+            <input id="org-name-input" type="text" placeholder="Company name" autocomplete="off" />
+            <button id="org-name-save" class="primary">Save</button>
+          </div>
+          <p id="org-name-status" class="muted" style="font-size:13px; margin:6px 0 12px;"></p>
+        </div>
         <button id="signout-btn" class="secondary setting-wide-btn">Sign out</button>
       </div>
 

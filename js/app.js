@@ -19,6 +19,8 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 20, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.08.19-0007', 'A new-company invite is now tied to one company, expires after 14 days, and any admin can rename their own company'],
+  ['v2026.08.18-2359', 'Invite someone to start their own company — a separate org with its own data, which they administer'],
   ['v2026.08.18-2345', 'Sample data now covers everything — jobs, hours, price table, employees — and Remove says exactly what it will delete'],
   ['v2026.08.18-2325', 'The hours chart is now built from the hours you enter on calendar jobs, not from the hours note'],
   ['v2026.08.18-1029', 'Note hours worked per person on a job; the day view pills show them as Name: 4'],
@@ -99,6 +101,7 @@ const setPasswordSave = document.getElementById('set-password-save');
 const setPasswordSkip = document.getElementById('set-password-skip');
 const signoutBtn = document.getElementById('signout-btn');
 const accountEmailEl = document.getElementById('account-email');
+const accountOrgEl = document.getElementById('account-org');
 
 const notesList = document.getElementById('notes-list');
 const customersList = document.getElementById('customers-list');
@@ -3198,6 +3201,15 @@ function showSettings() {
   renderEmployeeList();
   renderCustomerLinks();
   if (accountEmailEl && auth.currentUser) accountEmailEl.textContent = auth.currentUser.email || '';
+  // The company name only exists on orgs created from a founder invite; the
+  // original org predates names, so the line hides rather than showing blank.
+  if (accountOrgEl) {
+    const orgName = Storage.getOrgName();
+    accountOrgEl.textContent = orgName;
+    accountOrgEl.hidden = !orgName;
+  }
+  refreshNewOrgUi();
+  refreshOrgNameUi();
   refreshSeedButtons();
   refreshTrashUi();
   applyClockButton();
@@ -6197,15 +6209,23 @@ function renderMembersList() {
     const invites = Storage.listInvites();
     invitesList.innerHTML = invites.length === 0
       ? '<li style="font-size:13px;color:var(--ink-soft)">No pending invites</li>'
-      : invites.map(inv => `
+      : invites.map(inv => {
+        // A founder invite is in this list so you can see and cancel it — but
+        // it is NOT someone joining here, and saying "Invited as admin" would
+        // read as exactly the thing it isn't.
+        const what = inv.kind === 'newOrg'
+          ? `Starting their own company${inv.companyName ? ` — ${escapeHtml(inv.companyName)}` : ''}`
+            + ` · ${describeInviteExpiry(inv.expiresAt)}`
+          : `Invited as ${escapeHtml(inv.role)}`;
+        return `
         <li class="member-card">
           <div class="member-card-top">
             <span class="member-card-email">${escapeHtml(inv.email)}</span>
             <button class="member-remove-btn" data-email="${escapeHtml(inv.email)}" title="Cancel">✕</button>
           </div>
-          <span class="member-field-label">Invited as ${escapeHtml(inv.role)}</span>
-        </li>
-      `).join('');
+          <span class="member-field-label">${what}</span>
+        </li>`;
+      }).join('');
     invitesList.querySelectorAll('.member-remove-btn').forEach(btn => {
       btn.addEventListener('click', async () => {
         await Storage.cancelInvite(btn.dataset.email);
@@ -6244,6 +6264,99 @@ if (inviteBtn) {
       if (inviteStatus) inviteStatus.textContent = 'Failed: ' + (e.message || e);
     }
     inviteBtn.disabled = false;
+  });
+}
+
+// A founder invite dies after a fortnight, so the pending list has to say how
+// long is left — an invite that quietly stopped working looks identical to one
+// that never arrived. Days, not a date: "expires in 3 days" is the thing you
+// act on.
+function describeInviteExpiry(expiresAt) {
+  const ms = Number(expiresAt) || 0;
+  if (!ms) return 'no expiry recorded';
+  const left = ms - Date.now();
+  if (left <= 0) return 'EXPIRED — cancel and send a new one';
+  const days = Math.ceil(left / 86400000);
+  if (days === 1) return 'expires today';
+  return `expires in ${days} days`;
+}
+
+// ---------- company name ----------
+// Any admin can rename their own company. That includes you: the original org
+// predates names entirely, so this is also how it gets one.
+const orgNameInput = document.getElementById('org-name-input');
+const orgNameBtn = document.getElementById('org-name-save');
+const orgNameRow = document.getElementById('org-name-row');
+const orgNameStatus = document.getElementById('org-name-status');
+
+function refreshOrgNameUi() {
+  if (!orgNameRow) return;
+  orgNameRow.hidden = !isAdminRole();
+  if (orgNameInput) orgNameInput.value = Storage.getOrgName();
+  if (orgNameStatus) orgNameStatus.textContent = '';
+}
+if (orgNameBtn) {
+  orgNameBtn.addEventListener('click', async () => {
+    const name = orgNameInput ? orgNameInput.value.trim() : '';
+    orgNameBtn.disabled = true;
+    try {
+      await Storage.setOrgName(name);
+      if (orgNameStatus) orgNameStatus.textContent = 'Saved.';
+      // The Account line above reads from the same value.
+      if (accountOrgEl) { accountOrgEl.textContent = name; accountOrgEl.hidden = !name; }
+    } catch (e) {
+      if (orgNameStatus) orgNameStatus.textContent = 'Failed: ' + (e.message || e);
+    }
+    orgNameBtn.disabled = false;
+  });
+}
+
+// ---------- invite a new company (founder only) ----------
+// This is the one action in the app that creates data outside your own org, so
+// it is kept apart from the ordinary invite form and gated twice: the section
+// is hidden unless Storage.canInviteNewOrg(), and firestore.rules refuses the
+// write regardless of what the UI does.
+const newOrgRow = document.getElementById('new-org-row');
+const newOrgEmail = document.getElementById('new-org-email');
+const newOrgName = document.getElementById('new-org-name');
+const newOrgBtn = document.getElementById('new-org-btn');
+const newOrgStatus = document.getElementById('new-org-status');
+
+function refreshNewOrgUi() {
+  if (!newOrgRow) return;
+  newOrgRow.hidden = !Storage.canInviteNewOrg();
+}
+
+if (newOrgBtn) {
+  newOrgBtn.addEventListener('click', async () => {
+    const email = newOrgEmail ? newOrgEmail.value.trim() : '';
+    const company = newOrgName ? newOrgName.value.trim() : '';
+    if (!email) { if (newOrgStatus) newOrgStatus.textContent = 'Please enter an email.'; return; }
+    if (!company) { if (newOrgStatus) newOrgStatus.textContent = 'Please enter a company name.'; return; }
+    // A confirm, not because the write is dangerous to you, but because it is
+    // irreversible for THEM once accepted — an org with their data in it can't
+    // be un-created from here.
+    if (!confirm(`Invite ${email} to start their own company, "${company}"?\n\nThey become the admin of a separate company with its own customers, calendar and hours. None of your data goes with it.`)) return;
+    newOrgBtn.disabled = true;
+    if (newOrgStatus) newOrgStatus.textContent = 'Sending…';
+    try {
+      await Storage.inviteNewOrg(email, company);
+      // Same emailed sign-in link as an ordinary invite — it is the invite.
+      // No localStorage write: this browser isn't the one that will sign in.
+      try {
+        await sendSignInLinkToEmail(auth, email, { url: APP_URL, handleCodeInApp: true });
+        if (newOrgStatus) newOrgStatus.textContent = `Invited ${email} to start ${company} — sign-in link sent.`;
+      } catch (mailErr) {
+        console.error(mailErr);
+        if (newOrgStatus) newOrgStatus.textContent = `Invite created, but the email failed: ${mailErr.message || mailErr}`;
+      }
+      if (newOrgEmail) newOrgEmail.value = '';
+      if (newOrgName) newOrgName.value = '';
+      renderMembersList();
+    } catch (e) {
+      if (newOrgStatus) newOrgStatus.textContent = 'Failed: ' + (e.message || e);
+    }
+    newOrgBtn.disabled = false;
   });
 }
 
@@ -6490,7 +6603,16 @@ const initErrorBanner = document.getElementById('init-error-banner');
 const initErrorText = document.getElementById('init-error-text');
 function showInitError(user, err) {
   if (!initErrorBanner) return;
-  if (err && err.code === 'app/no-access') {
+  if (err && err.code === 'app/invite-expired') {
+    // Distinct from no-access on purpose: "your invite ran out" tells them what
+    // to ask for, where "no access" makes them wonder if they used the wrong
+    // address.
+    initErrorText.textContent =
+      `The invitation for ${user.email || 'this account'} has expired. Ask for a new one and sign in again.`;
+  } else if (err && err.code === 'app/invite-invalid') {
+    initErrorText.textContent =
+      `The invitation for ${user.email || 'this account'} can no longer be used. Ask for a new one.`;
+  } else if (err && err.code === 'app/no-access') {
     initErrorText.textContent =
       `${user.email || 'This account'} doesn't have access to this app yet. Ask the administrator for an invite.`;
   } else {

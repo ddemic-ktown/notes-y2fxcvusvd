@@ -10,10 +10,29 @@ service cloud.firestore {
       allow read, write: if request.auth != null && request.auth.uid == userId;
     }
 
+    // THE FOUNDER — the one account allowed to hand someone a whole new company
+    // (a `newOrg` invite, see below). Deliberately a hardcoded email rather than
+    // a role: an admin is admin OF AN ORG, and a new company's owner is an admin
+    // too, so keying this on a role would let every company you start spawn
+    // further companies without limit. Change this string to move the power.
+    function isFounder() {
+      return request.auth != null && request.auth.token.email != null &&
+        request.auth.token.email.lower() == 'davor.demic@gmail.com';
+    }
+
     // Invite lookup — readable by any authenticated user (needed at sign-in).
-    // Created/updated only by an admin OF THE ORG named in the row (this is the
-    // trust anchor for invite-only membership — must never be world-writable).
-    // Deleted by the invited user (accepting) or an admin of the row's org (cancelling).
+    // Two kinds of row live here:
+    //   · a JOIN invite  — { orgId, role, email }: sign in and you become a
+    //     member of that org with that role. Written only by an admin OF THAT
+    //     ORG; this is the trust anchor for invite-only membership and must
+    //     never be world-writable.
+    //   · a FOUNDER invite — { kind: 'newOrg', email, companyName, newOrgId,
+    //     expiresAt, issuedByOrg, issuedBy }: sign in and a BRAND NEW org is
+    //     created with you as its admin. The org's id is PRE-ALLOCATED on the
+    //     invite (newOrgId), so the invite can create that one org and nothing
+    //     else; expiresAt is epoch millis, after which it is dead.
+    //     Only the founder account may write one.
+    // Deleted by the invited user (accepting) or by whoever could have issued it.
     match /inviteLookup/{emailKey} {
       function isAdminOf(orgId) {
         return request.auth != null &&
@@ -23,9 +42,16 @@ service cloud.firestore {
         return request.auth != null && request.auth.token.email != null &&
           emailKey == request.auth.token.email.lower().replace('\\.', ',');
       }
+      function isNewOrgRow(data) { return data.get('kind', '') == 'newOrg'; }
       allow read: if request.auth != null;
-      allow create, update: if isAdminOf(request.resource.data.orgId);
-      allow delete: if isOwnEmailKey() || isAdminOf(resource.data.orgId);
+      // .get(key, default) throughout: a founder row carries no orgId and a
+      // join row carries no kind, so reading either field directly would throw
+      // on the other shape — and an error in a rule is a denial.
+      allow create, update: if isNewOrgRow(request.resource.data)
+        ? isFounder()
+        : isAdminOf(request.resource.data.orgId);
+      allow delete: if isOwnEmailKey() ||
+        (isNewOrgRow(resource.data) ? isFounder() : isAdminOf(resource.data.orgId));
     }
 
     // Org rules
@@ -48,18 +74,32 @@ service cloud.firestore {
       // Bookkeeper: reads everything, writes nothing (no write rule ever includes it)
       function isBookkeeper() { return isMember() && memberRole() == 'bookkeeper'; }
 
-      // Org doc — invite-only: no self-created orgs. Members can read, admins can update.
-      // (To enable self-signup, change create to: if request.auth != null — see HANDOFF.md)
-      allow read: if isMember();
-      allow create: if false;
-      allow update, delete: if isAdmin();
-
       // Helper: the requester's pending invite doc (inviteLookup keyed by email,
-      // lowercased with dots replaced by commas). Only admins write inviteLookup rows
-      // with an orgId, so this is trusted.
+      // lowercased with dots replaced by commas). Only admins write join rows and
+      // only the founder writes newOrg rows, so this is trusted.
+      // DECLARED HERE, above the allow statements that use it — the org-doc
+      // create rule below calls it, and a rules function has to exist before the
+      // rule that references it.
       function inviteFor() {
         return get(/databases/$(database)/documents/inviteLookup/$(request.auth.token.email.lower().replace('\\.', ',')));
       }
+
+      // Org doc — still no self-signup: the ONLY way to create an org is to be
+      // holding a founder invite. Members can read, admins can update.
+      // (To open this up to anyone, change create to: if request.auth != null —
+      // see "Enabling self-signup" in HANDOFF.md.)
+      allow read: if isMember();
+      // Pinned to the id the invite named, and only while the invite is live.
+      // Without the id check a single invite could mint unlimited orgs before it
+      // was consumed; without the time check a forgotten invite stays a live key
+      // to a new company forever. Both defaults ('' and 0) fail closed.
+      allow create: if request.auth != null &&
+        request.auth.token.email != null &&
+        inviteFor().data.get('kind', '') == 'newOrg' &&
+        orgId == inviteFor().data.get('newOrgId', '') &&
+        request.time.toMillis() < inviteFor().data.get('expiresAt', 0) &&
+        request.resource.data.createdBy == request.auth.uid;
+      allow update, delete: if isAdmin();
 
       // Members subcollection
       match /members/{memberId} {
@@ -71,8 +111,20 @@ service cloud.firestore {
         allow create: if request.auth != null &&
           request.auth.uid == memberId &&
           request.auth.token.email != null &&
-          inviteFor().data.orgId == orgId &&
-          request.resource.data.role == inviteFor().data.role;
+          inviteFor().data.get('orgId', '') == orgId &&
+          request.resource.data.role == inviteFor().data.get('role', '');
+        // Founding a new company: the holder of a founder invite may make
+        // themselves ADMIN of the org they are creating in the same batch.
+        // Same two guards as the org doc above — the org must be the exact one
+        // the invite named, and the invite must not have expired — so an invite
+        // buys exactly one org, once, within its window.
+        allow create: if request.auth != null &&
+          request.auth.uid == memberId &&
+          request.auth.token.email != null &&
+          inviteFor().data.get('kind', '') == 'newOrg' &&
+          orgId == inviteFor().data.get('newOrgId', '') &&
+          request.time.toMillis() < inviteFor().data.get('expiresAt', 0) &&
+          request.resource.data.role == 'admin';
       }
 
       // Invites subcollection — admin only, except the invited user may

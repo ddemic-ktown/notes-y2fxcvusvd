@@ -235,6 +235,36 @@ function attachJobsListener() {
 // to true AND update firestore.rules — see "Enabling self-signup" in HANDOFF.md.
 const ALLOW_SELF_SIGNUP = false;
 
+// THE FOUNDER — the one account that may hand someone a whole new company.
+// A `newOrg` invite creates a separate org with the invitee as its admin, so
+// this is the most powerful thing in the app and it is NOT a role: a new
+// company's owner is an admin too, and keying it on a role would let every
+// company you start spawn further companies. Must match isFounder() in
+// firestore.rules — the rule is the real enforcement; this copy only decides
+// whether the UI is shown.
+const FOUNDER_EMAIL = 'davor.demic@gmail.com';
+function emailIsFounder(email) {
+  return String(email || '').trim().toLowerCase() === FOUNDER_EMAIL;
+}
+// The email → document id mangling used by both invite collections. It was
+// written out by hand in five places; a single slip would have silently made an
+// invite unfindable, which looks exactly like "the invite never arrived".
+// TRIMS: a pasted address with a trailing space would otherwise key the invite
+// under a document id nothing can ever match — the invite would appear to send
+// and then simply never work, with nothing to see anywhere.
+function emailKeyOf(email) {
+  return String(email || '').trim().toLowerCase().replace(/\./g, ',');
+}
+function cleanEmail(email) { return String(email || '').trim(); }
+let _userEmail = null;
+let _orgName = '';
+
+// How long a founder invite stays usable. Long enough that someone can get to
+// it after a holiday, short enough that a forgotten invite isn't a live key to
+// a brand new company a year later. Mirrored by the expiresAt check in
+// firestore.rules, which is the actual enforcement.
+const NEW_ORG_INVITE_DAYS = 14;
+
 // Returns orgId. Joins via invite, or (if self-signup enabled) creates a new org.
 async function resolveOrg(userId, userEmail) {
   // 1. Check if user already has an org membership doc anywhere
@@ -252,12 +282,63 @@ async function resolveOrg(userId, userEmail) {
 
   // 2. Check for a pending invite by email
   if (userEmail) {
-    const emailKey = userEmail.toLowerCase().replace(/\./g, ',');
+    const emailKey = emailKeyOf(userEmail);
     // Search all orgs for an invite — we store invite lookup at top level
     const inviteLookupRef = doc(db, `inviteLookup/${emailKey}`);
     const inviteLookup = await getDoc(inviteLookupRef);
     if (inviteLookup.exists()) {
-      const { orgId, role } = inviteLookup.data();
+      const invite = inviteLookup.data();
+      // A FOUNDER INVITE: don't join anyone's org — start your own.
+      // Everything goes in ONE batch, so either the whole company exists (org
+      // doc, your admin membership, your sign-in pointer, invite consumed) or
+      // none of it does. A half-created org with no admin would be unreachable
+      // and unfixable from inside the app.
+      if (invite.kind === 'newOrg') {
+        // The id was decided when the invite was SENT and is pinned by the
+        // rules, so this invite can create that one org and no other.
+        const newOrgId = invite.newOrgId;
+        if (!newOrgId) {
+          const err = new Error('This invite is from an older version and can no longer be used. Ask for a new one.');
+          err.code = 'app/invite-invalid';
+          throw err;
+        }
+        // Checked here as well as in the rules: the rules produce a bare
+        // permission-denied, which reads as a bug rather than as "your invite
+        // ran out". The rules remain the thing that actually stops it.
+        const expiresAt = Number(invite.expiresAt) || 0;
+        if (!expiresAt || Date.now() >= expiresAt) {
+          const err = new Error('This invitation has expired.');
+          err.code = 'app/invite-expired';
+          throw err;
+        }
+        const batch = writeBatch(db);
+        batch.set(doc(db, `orgs/${newOrgId}`), {
+          createdAt: nowIso(),
+          createdBy: userId,
+          name: invite.companyName || '',
+          // Who started this company, and from where. Kept so the origin of an
+          // org is answerable later without digging through auth logs.
+          foundedByInviteFrom: invite.issuedBy || null,
+          foundedByInviteOrg: invite.issuedByOrg || null,
+        });
+        batch.set(doc(db, `orgs/${newOrgId}/members/${userId}`), {
+          role: 'admin', email: userEmail, name: userEmail, joinedAt: nowIso(),
+        });
+        batch.set(userDocRef, { orgId: newOrgId });
+        // The copy in the ISSUING org's pending list, so it stops showing there.
+        // Deletable by the invitee because the doc id is their own email key.
+        if (invite.issuedByOrg) {
+          batch.delete(doc(db, `orgs/${invite.issuedByOrg}/invites/${emailKey}`));
+        }
+        batch.delete(inviteLookupRef);
+        await batch.commit();
+        // Same reason as the self-signup path below: give Firestore a moment to
+        // propagate the membership, or the listeners attach before the rules can
+        // see that this person is a member and every read is refused.
+        await new Promise(r => setTimeout(r, 1000));
+        return { orgId: newOrgId, role: 'admin' };
+      }
+      const { orgId, role } = invite;
       // Accept invite: add member, write user pointer, delete invite lookup
       const batch = writeBatch(db);
       batch.set(doc(db, `orgs/${orgId}/members/${userId}`), {
@@ -333,6 +414,8 @@ export const Storage = {
 
   async init(userId, userEmail) {
     _uid = userId;
+    _userEmail = userEmail || null;
+    _orgName = '';
     _ready = false;
     _customersReady = false;
     _notesError = null;
@@ -351,7 +434,27 @@ export const Storage = {
     _role = role;
 
     attachListeners();
+    // The org doc is one small read and it is the only place the company name
+    // lives. Not a listener: the name changes about never, and a rename is
+    // picked up on the next sign-in.
+    getDoc(orgDoc())
+      .then(snap => { if (snap.exists()) { _orgName = snap.data().name || ''; emit(); } })
+      .catch(err => console.warn('loadOrgName', err));
   },
+
+  // The company's name, as typed on the invite that created it. Empty for the
+  // original org, which predates names.
+  getOrgName() { return _orgName; },
+  async setOrgName(name) {
+    if (_role !== 'admin' || !_orgId) return;
+    _orgName = String(name || '').trim();
+    emit();
+    await tracked(setDoc(orgDoc(), { name: _orgName }, { merge: true }))
+      .catch(err => console.warn('setOrgName', err));
+  },
+  // Whether the signed-in account may hand someone a whole new company. The
+  // rules enforce this independently — this only decides whether to show the UI.
+  canInviteNewOrg() { return emailIsFounder(_userEmail); },
 
   // ---------- per-user preferences ----------
   // Stored at users/{uid}/prefs/app, NOT under orgs/ — these belong to the
@@ -376,6 +479,7 @@ export const Storage = {
   signedOut() {
     detachListeners();
     _uid = null; _orgId = null; _role = null;
+    _userEmail = null; _orgName = '';
     _ready = false;
     _customersReady = false;
     _notesError = null;
@@ -1694,17 +1798,53 @@ export const Storage = {
 
   async inviteUser(email, role) {
     if (!email || !role) return;
-    const emailKey = email.toLowerCase().replace(/\./g, ',');
+    const emailKey = emailKeyOf(email);
+    const clean = cleanEmail(email);
     const batch = writeBatch(db);
     // Store in org's invites collection
-    batch.set(doc(invitesCol(), emailKey), { email, role, invitedAt: nowIso(), invitedBy: _uid });
+    batch.set(doc(invitesCol(), emailKey), { email: clean, role, invitedAt: nowIso(), invitedBy: _uid });
     // Store lookup so sign-in can find it
-    batch.set(doc(db, `inviteLookup/${emailKey}`), { orgId: _orgId, role, email });
+    batch.set(doc(db, `inviteLookup/${emailKey}`), { orgId: _orgId, role, email: clean });
+    await batch.commit();
+  },
+
+  // Invite someone to start THEIR OWN COMPANY — a separate org they administer,
+  // with none of your data in it. The lookup row names no target org, because
+  // the org doesn't exist yet; resolveOrg creates it when they first sign in.
+  //
+  // A copy goes in this org's invites collection purely so it appears in your
+  // pending list and can be cancelled. It is NOT an invitation to join here,
+  // and the sign-in path never reads it — hence role:'admin' AND kind:'newOrg',
+  // so anything that treats it as an ordinary invite still shows something
+  // sensible rather than a blank.
+  async inviteNewOrg(email, companyName) {
+    if (!email) return;
+    if (!this.canInviteNewOrg()) {
+      const err = new Error('Only the founder account can start a new company.');
+      err.code = 'app/not-founder';
+      throw err;
+    }
+    const emailKey = emailKeyOf(email);
+    const clean = cleanEmail(email);
+    const name = String(companyName || '').trim();
+    // The new org's id is chosen HERE, not at sign-in, and the rules pin the
+    // creation to it — so one invite buys exactly one company.
+    const newOrgId = uid();
+    const expiresAt = Date.now() + NEW_ORG_INVITE_DAYS * 86400000;
+    const batch = writeBatch(db);
+    batch.set(doc(invitesCol(), emailKey), {
+      email: clean, role: 'admin', kind: 'newOrg', companyName: name,
+      newOrgId, expiresAt, invitedAt: nowIso(), invitedBy: _uid,
+    });
+    batch.set(doc(db, `inviteLookup/${emailKey}`), {
+      kind: 'newOrg', email: clean, companyName: name,
+      newOrgId, expiresAt, issuedByOrg: _orgId, issuedBy: _uid,
+    });
     await batch.commit();
   },
 
   async cancelInvite(email) {
-    const emailKey = email.toLowerCase().replace(/\./g, ',');
+    const emailKey = emailKeyOf(email);
     const batch = writeBatch(db);
     batch.delete(doc(invitesCol(), emailKey));
     batch.delete(doc(db, `inviteLookup/${emailKey}`));
