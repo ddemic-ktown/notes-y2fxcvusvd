@@ -1029,12 +1029,44 @@ export const Storage = {
   },
 
   // ---------- Sample data ----------
-  // Everything created here carries demo:true so it can be removed in one go.
-  // Admin only (firestore.rules); no "hours" note is created — that's the Time
-  // Logger's input and fake hours could reach a real IIF export.
+  // A full demo org, not just a few notes: customers, notes, employees,
+  // keywords, calendar jobs, recorded hours and a price table, so every screen
+  // has something real-looking to show and the tutorial has targets to point
+  // at. Everything is tagged so it can be taken back out in one press — see
+  // SEED_TAG below.
+  //
+  // DATES ARE REBASED ON TODAY every time it runs. Fixed dates would drift out
+  // of the calendar's live window and out of the Hours screen's default
+  // fortnight within a month, and the sample would look empty.
+  //
+  // Documents (customers, notes, jobs, timelogs, price items) carry
+  // `demo: true`. Settings-shaped things (employees, keywords, price vendors)
+  // can't carry a flag, so what the seed added is recorded in
+  // settings.demoSeed and removed by matching that record — and only ever
+  // seeded when you have none of your own, so a real setup can't be replaced.
   async seedSampleData() {
-    if (_role !== 'admin') return { customers: 0, notes: 0 };
+    if (_role !== 'admin') return null;
     const now = nowIso();
+    const today = new Date();
+    // Day offsets from today. Negative = worked (has hours and, mostly, a
+    // record); positive = booked but not yet worked.
+    const day = (n) => {
+      const d = new Date(today.getFullYear(), today.getMonth(), today.getDate() + n);
+      return ymdOf(d);
+    };
+
+    const counts = {
+      customers: 0, notes: 0, jobs: 0, timelogs: 0, priceItems: 0,
+      employees: 0, keywords: 0, vendors: 0,
+    };
+    // What the seed added to settings, so removeSampleData can undo exactly
+    // that and nothing else.
+    const demoSeed = { employees: [], keywords: [], vendorIds: [] };
+
+    // ---- customers and their notes ----
+    // Four, deliberately different: a couple with two jobs on the go, a
+    // straightforward one-job customer, a business (contact person instead of a
+    // second name), and a property manager who books several small jobs.
     const samples = [
       {
         def: 'Bill & Karen Eagle\n148 Eagle Crescent\n(403) 555-0142\nbill.eagle@example.com',
@@ -1055,13 +1087,27 @@ export const Storage = {
           'Patio lighting\nOwner wants string lights before the long weekend.\n\ntodo: quote transformer + 60ft cable\n☑ site visit done',
         ],
       },
+      {
+        def: 'Ridgeview Property Management\n8 Ridgeview Road, Unit 3\n(403) 555-0110\nMaint. requests go to Priya',
+        notes: [
+          'Unit 12 — leaking tap\nCartridge replaced, watch for weeping.\n\ntodo: invoice through the office, not the tenant',
+          'Common area punch list\n☑ replace hallway bulbs\n☐ reseal back step\n☐ quote parkade lighting\n\nmaterials: 6 LED bulbs, tube of urethane sealant',
+        ],
+      },
     ];
-    let noteCount = 0;
+    // Keyed by the customer's display name (its default note's first line), so
+    // the jobs and hour records below can find the id they need.
+    const custIds = {};
+    const custAddr = {};
     for (const s of samples) {
       const cid = uid();
+      const name = (s.def.split('\n')[0] || '').trim();
+      custIds[name] = cid;
+      custAddr[name] = (s.def.split('\n')[1] || '').trim();
       const customer = { id: cid, created: now, updated: now, demo: true };
       _cache.customers.push(customer);
       tracked(setDoc(doc(customersCol(), cid), stripId(customer))).catch(err => console.warn("seed.customer", err));
+      counts.customers++;
       const defId = uid();
       const defaultNote = {
         id: defId, body: s.def, customerId: cid, isDefault: true,
@@ -1069,23 +1115,26 @@ export const Storage = {
       };
       _cache.notes.push(defaultNote);
       tracked(setDoc(doc(notesCol(), defId), stripId(defaultNote))).catch(err => console.warn("seed.defnote", err));
-      noteCount++;
+      counts.notes++;
       for (const body of s.notes) {
         const nid = uid();
         const note = {
           id: nid, body, customerId: cid, isDefault: false, assignedTo: [],
-          customerName: (s.def.split('\n')[0] || '').trim(),
-          created: now, updated: now, demo: true,
+          customerName: name, created: now, updated: now, demo: true,
         };
         _cache.notes.push(note);
         tracked(setDoc(doc(notesCol(), nid), stripId(note))).catch(err => console.warn("seed.note", err));
-        noteCount++;
+        counts.notes++;
       }
     }
-    // A couple of general notes (no customer)
+
+    // ---- general notes (no customer) ----
+    // The third is mostly checkboxes, so the editor's tick behaviour has an
+    // obvious place to be tried.
     const generals = [
       'Shop list\ntodo: pick up 2x4s and deck screws\n☐ return borrowed nailer',
       'Ideas\nmaterials: try the composite decking sample from the supplier\nCall back about the trailer hitch.',
+      'Truck checks\n☑ oil change\n☑ new wiper blades\n☐ book winter tires\n☐ replace the missing 10mm socket\n\ntodo: renew the trailer registration',
     ];
     for (const body of generals) {
       const nid = uid();
@@ -1095,32 +1144,370 @@ export const Storage = {
       };
       _cache.notes.push(note);
       tracked(setDoc(doc(notesCol(), nid), stripId(note))).catch(err => console.warn("seed.general", err));
-      noteCount++;
+      counts.notes++;
     }
-    // Seed keywords so the aggregator section has something to show
+
+    // ---- employees (settings) ----
+    // Only when there are none: these names end up in the EMP column of a real
+    // QuickBooks import, and replacing someone's configured spelling would
+    // break their import. One apprentice among journeymen so the two IIF item
+    // mappings are both exercised.
+    const SEED_EMPLOYEES = [
+      { name: 'Sam Rivera',  type: 'journeyman', colour: '#2563eb' },
+      { name: 'Janet Wu',    type: 'journeyman', colour: '#16a34a' },
+      { name: 'Tyler Novak', type: 'apprentice', colour: '#d97706' },
+    ];
+    const existingEmps = Array.isArray(_cache.settings.employees) ? _cache.settings.employees : [];
+    const empNames = existingEmps.length
+      ? existingEmps.map(e => (typeof e === 'string' ? e : e.name))
+      : SEED_EMPLOYEES.map(e => e.name);
+    if (!existingEmps.length) {
+      _cache.settings = { ..._cache.settings, employees: SEED_EMPLOYEES };
+      demoSeed.employees = SEED_EMPLOYEES.map(e => e.name);
+      counts.employees = SEED_EMPLOYEES.length;
+    }
+    // Jobs are scheduled against whatever names are actually configured, so the
+    // sample works on an org that already has its own crew.
+    const emp = (i) => empNames[i % empNames.length];
+
+    // ---- keywords (settings) ----
+    const SEED_KEYWORDS = ['todo', 'materials'];
     const kw = Array.isArray(_cache.settings.keywords) ? _cache.settings.keywords : [];
     if (kw.length === 0) {
-      _cache.settings = { ..._cache.settings, keywords: ['todo', 'materials'] };
-      setDoc(settingsDoc(), _cache.settings, { merge: true }).catch(err => console.warn("seed.keywords", err));
+      _cache.settings = { ..._cache.settings, keywords: SEED_KEYWORDS };
+      demoSeed.keywords = SEED_KEYWORDS.slice();
+      counts.keywords = SEED_KEYWORDS.length;
+    }
+
+    // ---- calendar jobs ----
+    // Chosen to cover the shapes the calendar and the Hours chart have to
+    // handle, not just to fill space:
+    //   · timed and untimed (an untimed job sits in the strip above the day
+    //     timeline instead of on it)
+    //   · one person and several, with DIFFERENT hours each
+    //   · two jobs on the same day for the same customer — that's the case the
+    //     Hours chart's pair-off-in-order matching exists for
+    //   · past jobs with hours, one past job WITHOUT (the "you still owe hours
+    //     for this" dash), and upcoming jobs with none yet
+    const jobSpecs = [
+      { d: -12, start: '08:00', end: '16:30', cust: 'Bill & Karen Eagle',
+        emps: [0, 1], hours: [8.5, 8.5], desc: 'Framing — kitchen wall opened up' },
+      { d: -11, start: '08:00', end: '12:00', cust: 'Anne Bull',
+        emps: [2], hours: [4], desc: 'Rough-in inspection' },
+      { d: -9, start: '', end: '', cust: 'Ridgeview Property Management',
+        emps: [1], hours: [2], desc: 'Unit 12 tap — no set time, fit in when passing' },
+      { d: -6, start: '07:30', end: '15:00', cust: 'Bill & Karen Eagle',
+        emps: [0, 2], hours: [7.5, 7], desc: 'Drywall delivery and hang' },
+      { d: -5, start: '09:00', end: '11:00', cust: 'Sunrise Cafe',
+        emps: [0], hours: [2], desc: 'Site visit — measure for string lights' },
+      { d: -5, start: '13:00', end: '16:00', cust: 'Sunrise Cafe',
+        emps: [0], hours: [3], desc: 'Second visit same day — ran the cable' },
+      { d: -3, start: '08:00', end: '16:00', cust: 'Ridgeview Property Management',
+        emps: [1, 2], hours: [null, null], desc: 'Common area punch list — hours not entered yet' },
+      { d: 2, start: '08:00', end: '17:00', cust: 'Bill & Karen Eagle',
+        emps: [0, 1], hours: [null, null], desc: 'Cabinet install — booked' },
+      { d: 4, start: '', end: '', cust: 'Anne Bull',
+        emps: [2], hours: [null], desc: 'Drop off the vanity' },
+      { d: 6, start: '10:00', end: '14:00', cust: 'Sunrise Cafe',
+        emps: [0, 2], hours: [null, null], desc: 'Hang the lights before the weekend' },
+    ];
+    const seededJobs = [];
+    for (const spec of jobSpecs) {
+      const id = uid();
+      const names = spec.emps.map(i => emp(i));
+      const employeeHours = {};
+      names.forEach((n, i) => {
+        const h = spec.hours[i];
+        if (h != null) employeeHours[n] = h;
+      });
+      const job = {
+        id,
+        date: day(spec.d),
+        start: spec.start,
+        end: spec.end,
+        description: spec.desc,
+        employeeNames: names,
+        employeeHours,
+        // Demo employees aren't linked to real accounts, so nothing to filter
+        // on — the fields still have to EXIST for the read rules to evaluate.
+        employeeUids: [],
+        customerUids: [],
+        customerId: custIds[spec.cust] || null,
+        customerName: spec.cust,
+        address: custAddr[spec.cust] || '',
+        created: now, updated: now, demo: true,
+      };
+      _cache.jobs.push(job);
+      seededJobs.push({ job, names, hours: spec.hours });
+      tracked(setDoc(doc(jobsCol(), id), stripId(job))).catch(err => console.warn("seed.job", err));
+      counts.jobs++;
+    }
+
+    // ---- recorded hours ----
+    // Deliberately NOT a clean copy of the jobs — the point is to show the
+    // three states the Hours chart distinguishes:
+    //   · a record that agrees with its job          → one green row
+    //   · a record that disagrees                    → green row + red row
+    //   · a record with no job behind it             → green "no job" row
+    // The disagreement lands on the FIRST person of the -6 job; the -5 pair and
+    // the -3 job are left unrecorded so there is something to save.
+    const disagreeOn = day(-6);
+    for (const { job, names } of seededJobs) {
+      if (job.date > day(-4)) continue;                 // upcoming work isn't recorded
+      for (const n of names) {
+        const h = job.employeeHours[n];
+        if (h == null) continue;                        // nothing entered on the job
+        if (job.date === day(-5)) continue;             // left for you to save
+        const recorded = (job.date === disagreeOn && n === names[0]) ? h - 1 : h;
+        const id = uid();
+        const log = {
+          id,
+          date: job.date,
+          employeeName: n,
+          employeeUids: [],
+          customerId: job.customerId,
+          customerName: job.customerName,
+          hours: recorded,
+          hoursFormatted: String(recorded),
+          note: job.description,
+          created: now, updated: now, demo: true,
+        };
+        _cache.timelogs.push(log);
+        tracked(setDoc(doc(timelogsCol(), id), stripId(log))).catch(err => console.warn("seed.timelog", err));
+        counts.timelogs++;
+      }
+    }
+    // One record with no job at all — a day someone worked that never made it
+    // onto the calendar. It still has to reach QuickBooks.
+    {
+      const id = uid();
+      const orphan = {
+        id,
+        date: day(-8),
+        employeeName: emp(1),
+        employeeUids: [],
+        customerId: custIds['Anne Bull'] || null,
+        customerName: 'Anne Bull',
+        hours: 5,
+        hoursFormatted: '5',
+        note: 'Called out — no job was booked for this',
+        created: now, updated: now, demo: true,
+      };
+      _cache.timelogs.push(orphan);
+      tracked(setDoc(doc(timelogsCol(), id), stripId(orphan))).catch(err => console.warn("seed.timelog", err));
+      counts.timelogs++;
+    }
+
+    // ---- price table ----
+    // Vendors are columns in one shared config doc, so like employees they are
+    // only seeded into an empty table. Items always seed: they're their own
+    // documents and carry demo:true.
+    const cfg = this.getPriceConfig();
+    let vendors = cfg.vendors;
+    if (!vendors.length) {
+      vendors = [
+        { id: uid(), name: 'Beacon Supply', order: 0 },
+        { id: uid(), name: 'Northgate',     order: 1 },
+        { id: uid(), name: 'Trade Depot',   order: 2 },
+      ];
+      demoSeed.vendorIds = vendors.map(v => v.id);
+      counts.vendors = vendors.length;
+      await this.savePriceConfig({ vendors });
+    }
+    // [price, days ago, availability]. null = no price from that vendor.
+    // Several cells carry two or three entries so the history sheet has
+    // something to show, and all four availability states appear.
+    const V = vendors.map(v => v.id);
+    const priceSpecs = [
+      { name: '2x4x8 SPF stud', cells: [
+        [[4.29, 30, 'yes'], [4.65, 9, 'yes'], [4.49, 2, 'yes']],
+        [[4.55, 12, 'yes']],
+        [[4.19, 4, 'soon']],
+      ] },
+      { name: '1/2" drywall sheet', cells: [
+        [[16.80, 21, 'yes'], [17.95, 3, 'yes']],
+        [[18.40, 5, 'later']],
+        null,
+      ] },
+      { name: 'Deck screws 5lb', cells: [
+        [[42.00, 16, 'yes']],
+        [[39.75, 6, 'yes'], [41.20, 1, 'no']],
+        [[40.50, 8, 'yes']],
+      ] },
+      { name: 'Cedar 5/4x6 decking (lin ft)', cells: [
+        [[3.85, 40, 'yes'], [4.40, 11, 'later']],
+        null,
+        [[4.10, 7, 'yes']],
+      ] },
+      { name: 'Vanity 30" white', cells: [
+        null,
+        [[289.00, 14, 'soon']],
+        [[319.00, 2, 'yes']],
+      ] },
+      { name: 'LED bulb A19 (6 pack)', cells: [
+        [[18.99, 25, 'yes']],
+        [[17.49, 10, 'yes']],
+        [[21.00, 3, 'no']],
+      ] },
+    ];
+    priceSpecs.forEach((spec, row) => {
+      const id = uid();
+      const cells = {};
+      spec.cells.forEach((entries, col) => {
+        if (!entries || !V[col]) return;
+        cells[V[col]] = entries.map(([price, ago, avail]) => ({
+          price,
+          date: day(-ago),
+          avail,
+          // `added` breaks ties when two entries share a date; spacing them
+          // keeps "newest" deterministic rather than dependent on write order.
+          added: new Date(Date.now() - ago * 86400000).toISOString(),
+        }));
+      });
+      const item = { id, name: spec.name, order: row, cells, created: now, updated: now, demo: true };
+      _cache.priceItems.push(item);
+      tracked(setDoc(doc(priceItemsCol(), id), stripId(item))).catch(err => console.warn("seed.priceItem", err));
+      counts.priceItems++;
+    });
+
+    // Record what went into settings LAST, so a failure earlier can't leave a
+    // removal record pointing at things that were never created.
+    if (demoSeed.employees.length || demoSeed.keywords.length || demoSeed.vendorIds.length) {
+      _cache.settings = { ..._cache.settings, demoSeed };
+    }
+    if (counts.employees || counts.keywords || demoSeed.vendorIds.length) {
+      setDoc(settingsDoc(), _cache.settings, { merge: true }).catch(err => console.warn("seed.settings", err));
     }
     emit();
-    return { customers: samples.length, notes: noteCount };
+    return counts;
   },
 
   hasSampleData() {
-    return _cache.notes.some(n => n.demo) || _cache.customers.some(c => c.demo);
+    return _cache.notes.some(n => n.demo)
+      || _cache.customers.some(c => c.demo)
+      || _cache.jobs.some(j => j.demo)
+      || _cache.timelogs.some(t => t.demo)
+      || _cache.priceItems.some(i => i.demo);
   },
 
-  async removeSampleData() {
-    if (_role !== 'admin') return { customers: 0, notes: 0 };
+  // What removeSampleData would delete. Returns both the COUNTS (for the
+  // confirmation dialog) and the documents themselves, so the dialog and the
+  // deletion agree exactly — the caller passes the plan straight back into
+  // removeSampleData rather than letting it recount.
+  //
+  // Jobs and timelogs are swept FROM THE SERVER, not from the cache: the jobs
+  // listener only covers a three-month window and timelogs are fetched on
+  // demand, so cache-only deletion would silently strand demo records outside
+  // whatever happened to be loaded. That's a full read of both collections, but
+  // only on an explicit press of a button that isn't even shown unless sample
+  // data exists.
+  async sampleDataPlan() {
     const notes = _cache.notes.filter(n => n.demo);
     const customers = _cache.customers.filter(c => c.demo);
-    _cache.notes = _cache.notes.filter(n => !n.demo);
-    _cache.customers = _cache.customers.filter(c => !c.demo);
+    const items = _cache.priceItems.filter(i => i.demo);
+    let jobs = _cache.jobs.filter(j => j.demo);
+    let logs = _cache.timelogs.filter(t => t.demo);
+    if (_orgId && _role === 'admin') {
+      try {
+        const [jSnap, tSnap] = await Promise.all([getDocs(jobsCol()), getDocs(timelogsCol())]);
+        jobs = jSnap.docs.filter(d => d.data().demo).map(d => ({ id: d.id, ...d.data() }));
+        logs = tSnap.docs.filter(d => d.data().demo).map(d => ({ id: d.id, ...d.data() }));
+      } catch (err) {
+        console.warn('sampleDataPlan', err);   // fall back to what's cached
+      }
+    }
+    const ds = _cache.settings.demoSeed || {};
+    const emps = Array.isArray(_cache.settings.employees) ? _cache.settings.employees : [];
+    const empNames = emps.map(e => (typeof e === 'string' ? e : e.name));
+    const kws = Array.isArray(_cache.settings.keywords) ? _cache.settings.keywords : [];
+    const cfgVendors = this.getPriceConfig().vendors;
+    // Only what is still there and still recognisable: anything renamed or
+    // removed by hand since seeding is left alone.
+    const employees = (ds.employees || []).filter(n => empNames.includes(n));
+    const keywords = (ds.keywords || []).filter(k => kws.includes(k));
+    const vendorIds = (ds.vendorIds || []).filter(id => cfgVendors.some(v => v.id === id));
+    return {
+      docs: { notes, customers, jobs, logs, items },
+      settings: { employees, keywords, vendorIds },
+      counts: {
+        customers: customers.length,
+        notes: notes.length,
+        jobs: jobs.length,
+        timelogs: logs.length,
+        priceItems: items.length,
+        employees: employees.length,
+        keywords: keywords.length,
+        vendors: vendorIds.length,
+      },
+    };
+  },
+
+  // Removes the demo documents, and the settings entries the seed recorded in
+  // settings.demoSeed — matched by name/id, so anything you renamed or added
+  // yourself survives.
+  async removeSampleData(plan) {
+    if (_role !== 'admin') return null;
+    const p = plan || await this.sampleDataPlan();
+    const { notes, customers, jobs, logs, items } = p.docs;
+
+    const gone = (list) => new Set(list.map(x => x.id));
+    const goneNotes = gone(notes), goneCust = gone(customers);
+    const goneJobs = gone(jobs), goneLogs = gone(logs), goneItems = gone(items);
+    _cache.notes = _cache.notes.filter(n => !goneNotes.has(n.id));
+    _cache.customers = _cache.customers.filter(c => !goneCust.has(c.id));
+    _cache.jobs = _cache.jobs.filter(j => !goneJobs.has(j.id));
+    _cache.timelogs = _cache.timelogs.filter(t => !goneLogs.has(t.id));
+    _cache.priceItems = _cache.priceItems.filter(i => !goneItems.has(i.id));
+
+    // ---- settings the seed added ----
+    const { employees, keywords, vendorIds } = p.settings;
+    let settingsChanged = false;
+    if (employees.length) {
+      const emps = Array.isArray(_cache.settings.employees) ? _cache.settings.employees : [];
+      _cache.settings = {
+        ..._cache.settings,
+        employees: emps.filter(e => !employees.includes(typeof e === 'string' ? e : e.name)),
+      };
+      settingsChanged = true;
+    }
+    if (keywords.length) {
+      const kws = Array.isArray(_cache.settings.keywords) ? _cache.settings.keywords : [];
+      _cache.settings = { ..._cache.settings, keywords: kws.filter(k => !keywords.includes(k)) };
+      settingsChanged = true;
+    }
+    if (_cache.settings.demoSeed) {
+      // null, not delete: this goes out with { merge: true }, which would leave
+      // an omitted key sitting on the server.
+      _cache.settings = { ..._cache.settings, demoSeed: null };
+      settingsChanged = true;
+    }
+    if (settingsChanged) {
+      tracked(setDoc(settingsDoc(), _cache.settings, { merge: true })).catch(err => console.warn("unseed.settings", err));
+    }
+    // Vendor columns live in the price config, and dropping a column has to
+    // drop its cells from every REMAINING row too, or the deleted vendor's
+    // prices sit there invisibly and come back if the column is re-added.
+    if (vendorIds.length) {
+      const cfg = this.getPriceConfig();
+      await this.savePriceConfig({ vendors: cfg.vendors.filter(v => !vendorIds.includes(v.id)) });
+      for (const item of _cache.priceItems.slice()) {
+        if (!item.cells) continue;
+        const cells = { ...item.cells };
+        let touched = false;
+        for (const vid of vendorIds) {
+          if (vid in cells) { delete cells[vid]; touched = true; }
+        }
+        if (touched) await this.savePriceItem(item.id, { cells });
+      }
+    }
+
     emit();
     for (const n of notes) tracked(deleteDoc(doc(notesCol(), n.id))).catch(err => console.warn("unseed.note", err));
     for (const c of customers) tracked(deleteDoc(doc(customersCol(), c.id))).catch(err => console.warn("unseed.customer", err));
-    return { customers: customers.length, notes: notes.length };
+    for (const j of jobs) tracked(deleteDoc(doc(jobsCol(), j.id))).catch(err => console.warn("unseed.job", err));
+    for (const t of logs) tracked(deleteDoc(doc(timelogsCol(), t.id))).catch(err => console.warn("unseed.timelog", err));
+    for (const i of items) tracked(deleteDoc(doc(priceItemsCol(), i.id))).catch(err => console.warn("unseed.priceItem", err));
+    return p.counts;
   },
 
   isOrgEmpty() {

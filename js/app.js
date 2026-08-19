@@ -19,6 +19,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 20, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.08.18-2345', 'Sample data now covers everything — jobs, hours, price table, employees — and Remove says exactly what it will delete'],
   ['v2026.08.18-2325', 'The hours chart is now built from the hours you enter on calendar jobs, not from the hours note'],
   ['v2026.08.18-1029', 'Note hours worked per person on a job; the day view pills show them as Name: 4'],
   ['v2026.08.17-2140', 'Customers linked to an app account can see their own scheduled jobs — date, time and who is coming'],
@@ -5835,25 +5836,79 @@ function refreshSeedButtons() {
   if (!seedBtn || !unseedBtn) return;
   const has = Storage.hasSampleData();
   unseedBtn.hidden = !has;
-  seedBtn.textContent = has ? 'Add more sample data' : 'Add sample data';
+  // REFRESH, not "add more": the sample set is a coherent whole with dates
+  // rebased on today, and pressing the button twice used to leave two of every
+  // customer, job and price row. Refreshing also re-dates it, so a sample
+  // loaded last month lands back in view.
+  seedBtn.textContent = has ? 'Refresh sample data' : 'Add sample data';
+}
+
+// "3 customers, 12 notes and 10 jobs" — Oxford-comma-free, empty categories
+// dropped, so the sentence stays readable however much or little there is.
+const SEED_NOUNS = {
+  customers: ['customer', 'customers'],
+  notes: ['note', 'notes'],
+  jobs: ['calendar job', 'calendar jobs'],
+  timelogs: ['hour record', 'hour records'],
+  priceItems: ['price table row', 'price table rows'],
+  employees: ['employee', 'employees'],
+  keywords: ['keyword', 'keywords'],
+  vendors: ['price table vendor', 'price table vendors'],
+};
+function describeSeedCounts(counts) {
+  const parts = [];
+  for (const [key, [one, many]] of Object.entries(SEED_NOUNS)) {
+    const n = (counts && counts[key]) || 0;
+    if (n) parts.push(`${n} ${n === 1 ? one : many}`);
+  }
+  if (!parts.length) return 'nothing';
+  if (parts.length === 1) return parts[0];
+  return parts.slice(0, -1).join(', ') + ' and ' + parts[parts.length - 1];
 }
 
 if (seedBtn) {
   seedBtn.addEventListener('click', async () => {
     seedBtn.disabled = true;
-    if (seedStatus) seedStatus.textContent = 'Adding…';
-    const { customers, notes } = await Storage.seedSampleData();
-    if (seedStatus) seedStatus.textContent = `Added ${customers} customers and ${notes} notes.`;
+    const refreshing = Storage.hasSampleData();
+    if (seedStatus) seedStatus.textContent = refreshing ? 'Refreshing…' : 'Adding…';
+    // Clear the old set first, or the second press doubles everything.
+    if (refreshing) await Storage.removeSampleData();
+    const counts = await Storage.seedSampleData();
+    if (seedStatus) seedStatus.textContent = `Added ${describeSeedCounts(counts)}.`;
     seedBtn.disabled = false;
     refreshSeedButtons();
   });
 }
 if (unseedBtn) {
   unseedBtn.addEventListener('click', async () => {
-    if (!confirm('Remove all sample customers and notes? Your own data is not affected.')) return;
     unseedBtn.disabled = true;
-    const { customers, notes } = await Storage.removeSampleData();
-    if (seedStatus) seedStatus.textContent = `Removed ${customers} customers and ${notes} notes.`;
+    // The plan is worked out BEFORE the prompt so the dialog names exactly what
+    // will go, and the same plan is what gets deleted — no chance of the
+    // confirmation describing one thing and the deletion doing another.
+    // Employees, keywords and vendors are only listed when the seed added them
+    // and you have not since changed them.
+    let plan;
+    try {
+      plan = await Storage.sampleDataPlan();
+    } catch (err) {
+      console.warn(err);
+      unseedBtn.disabled = false;
+      if (seedStatus) seedStatus.textContent = 'Could not check what to remove. Try again.';
+      return;
+    }
+    const what = describeSeedCounts(plan.counts);
+    if (what === 'nothing') {
+      unseedBtn.disabled = false;
+      if (seedStatus) seedStatus.textContent = 'There is no sample data to remove.';
+      refreshSeedButtons();
+      return;
+    }
+    if (!confirm(`Remove ${what}?\n\nThis deletes only the sample data. Anything you created yourself is not affected.`)) {
+      unseedBtn.disabled = false;
+      return;
+    }
+    const counts = await Storage.removeSampleData(plan);
+    if (seedStatus) seedStatus.textContent = `Removed ${describeSeedCounts(counts)}.`;
     unseedBtn.disabled = false;
     refreshSeedButtons();
   });
