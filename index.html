@@ -750,20 +750,10 @@
     <button id="editor-done-btn" class="fab fab-done" type="button" aria-label="Done" hidden>✓</button>
   </section>
 
-  <!-- First-run welcome (empty org, admin only) -->
-  <div id="welcome-modal" class="modal-overlay" hidden>
-    <div class="modal-panel">
-      <div class="modal-header">
-        <h2 class="modal-title">Welcome to JobPilot</h2>
-      </div>
-      <p class="modal-hint">Your app is empty. Want to look around with some sample customers and notes first? You can remove them any time from Settings.</p>
-      <div class="setting-btn-col">
-        <button id="welcome-seed-tour" class="primary setting-wide-btn">Add sample data &amp; take the tour</button>
-        <button id="welcome-tour" class="secondary setting-wide-btn">Just take the tour</button>
-        <button id="welcome-empty" class="secondary setting-wide-btn">Start empty</button>
-      </div>
-    </div>
-  </div>
+  <!-- (The first-run welcome modal was removed in v2026.08.19-0020. The tour
+       and sample-data offers are getting-started CARDS on the home screen now —
+       a dialog in front of an empty app has to be answered before you can look
+       at anything, so the fastest way past it was to decline both.) -->
 
   <!-- Compiled Aggregator Resolve Modal -->
   <div id="compiled-modal" class="modal-overlay" hidden>

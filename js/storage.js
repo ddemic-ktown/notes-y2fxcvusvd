@@ -258,6 +258,7 @@ function emailKeyOf(email) {
 function cleanEmail(email) { return String(email || '').trim(); }
 let _userEmail = null;
 let _orgName = '';
+let _orgCreatedAt = null;
 
 // How long a founder invite stays usable. Long enough that someone can get to
 // it after a holiday, short enough that a forgotten invite isn't a live key to
@@ -416,6 +417,7 @@ export const Storage = {
     _uid = userId;
     _userEmail = userEmail || null;
     _orgName = '';
+    _orgCreatedAt = null;
     _ready = false;
     _customersReady = false;
     _notesError = null;
@@ -438,13 +440,27 @@ export const Storage = {
     // lives. Not a listener: the name changes about never, and a rename is
     // picked up on the next sign-in.
     getDoc(orgDoc())
-      .then(snap => { if (snap.exists()) { _orgName = snap.data().name || ''; emit(); } })
-      .catch(err => console.warn('loadOrgName', err));
+      .then(snap => {
+        if (!snap.exists()) return;
+        _orgName = snap.data().name || '';
+        _orgCreatedAt = snap.data().createdAt || null;
+        emit();
+      })
+      .catch(err => console.warn('loadOrgDoc', err));
   },
 
   // The company's name, as typed on the invite that created it. Empty for the
   // original org, which predates names.
   getOrgName() { return _orgName; },
+  // How many days old this company is, or null if the org doc has no createdAt
+  // (or hasn't loaded yet). Callers treat null as OLD — the getting-started
+  // cards fail closed rather than surprising an established company.
+  getOrgAgeDays() {
+    if (!_orgCreatedAt) return null;
+    const t = Date.parse(_orgCreatedAt);
+    if (Number.isNaN(t)) return null;
+    return (Date.now() - t) / 86400000;
+  },
   async setOrgName(name) {
     if (_role !== 'admin' || !_orgId) return;
     _orgName = String(name || '').trim();
@@ -479,7 +495,7 @@ export const Storage = {
   signedOut() {
     detachListeners();
     _uid = null; _orgId = null; _role = null;
-    _userEmail = null; _orgName = '';
+    _userEmail = null; _orgName = ''; _orgCreatedAt = null;
     _ready = false;
     _customersReady = false;
     _notesError = null;
@@ -1723,6 +1739,29 @@ export const Storage = {
     });
   },
   getMember(uid) { return _cache.members.find(m => m.uid === uid) || null; },
+
+  // Which getting-started cards this PERSON has dismissed, kept on their own
+  // member doc rather than in org settings. Two admins of a new company each
+  // get the offer and each dismiss it for themselves; and because it lives on
+  // the server (streamed by the members listener) a dismissal on the phone is
+  // already gone on the laptop.
+  gettingStartedDismissed() {
+    const me = _cache.members.find(m => m.uid === _uid);
+    const gs = (me && me.gettingStarted) || {};
+    return { tour: !!gs.tour, sample: !!gs.sample };
+  },
+  async dismissGettingStarted(card) {
+    if (!_uid || !_orgId) return;
+    if (card !== 'tour' && card !== 'sample') return;
+    const next = { ...this.gettingStartedDismissed(), [card]: true };
+    // Mirror into the cache so the card goes NOW — the listener round-trip is
+    // fast but not instant, and a ✕ that visibly does nothing gets pressed again.
+    const i = _cache.members.findIndex(m => m.uid === _uid);
+    if (i !== -1) _cache.members[i] = { ..._cache.members[i], gettingStarted: next };
+    emit();
+    await tracked(setDoc(doc(membersCol(), _uid), { gettingStarted: next }, { merge: true }))
+      .catch(err => console.warn('dismissGettingStarted', err));
+  },
 
   async updateMemberRole(memberUid, role) {
     const ref = doc(membersCol(), memberUid);

@@ -19,6 +19,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 20, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.08.19-0020', 'A new company sees two dismissible cards on the home screen — take the tour, add sample data — instead of a pop-up'],
   ['v2026.08.19-0007', 'A new-company invite is now tied to one company, expires after 14 days, and any admin can rename their own company'],
   ['v2026.08.18-2359', 'Invite someone to start their own company — a separate org with its own data, which they administer'],
   ['v2026.08.18-2345', 'Sample data now covers everything — jobs, hours, price table, employees — and Remove says exactly what it will delete'],
@@ -3751,9 +3752,10 @@ function renderNotesList() {
   // Calendar and Hours pair up on the row beneath. A lone card fills the row.
   const navRow = `<div class="nav-card-row">${customersCard}${priceCard}</div>`
     + ((calendarCard || hoursCard) ? `<div class="nav-card-row">${calendarCard}${hoursCard}</div>` : '');
-  notesList.innerHTML = navRow + pinnedBlock + olderHtml + orphanCard;
+  notesList.innerHTML = gettingStartedCardsHtml() + navRow + pinnedBlock + olderHtml + orphanCard;
 
   applyLayoutMode();
+  wireGettingStartedCards(notesList);
   notesList.querySelectorAll('[data-section]').forEach(btn => {
     btn.addEventListener('click', () => {
       btn.innerHTML = '<span class="nav-spinner" style="width:14px;height:14px;border-width:2px;vertical-align:middle;"></span>';
@@ -3786,6 +3788,10 @@ function renderNotesList() {
 
   notesList.querySelectorAll('.note-card').forEach(card => {
     card.addEventListener('click', () => {
+      // A getting-started card has its own buttons and is not itself tappable —
+      // without this it falls through to the note lookup at the bottom and
+      // opens nothing, which just looks broken.
+      if (card.dataset.gs) return;
       if (card.dataset.nav === 'customers') {
         const chevron = card.querySelector('.note-chevron');
         if (chevron) chevron.innerHTML = '<span class="nav-spinner"></span>';
@@ -3803,6 +3809,79 @@ function renderNotesList() {
         const note = Storage.getNote(card.dataset.id);
         if (note) { returnScreen = 'notes'; showEditor(note, 'note'); }
       }
+    });
+  });
+}
+
+
+// ---------- getting-started cards ----------
+// Replaces the first-run welcome MODAL (removed v2026.08.19-0020). A dialog in
+// front of an empty app has to be answered before you can look at anything, and
+// "Start empty" was the fastest way past it — so the two things worth doing got
+// dismissed by people who hadn't seen the app yet. As cards they sit on the
+// home screen and wait.
+//
+// Shown to EVERY admin of a young company, not just whoever founded it: a
+// second admin added in week one is as new to the app as the first.
+//
+// Three gates, all of which must pass:
+//   · you are an admin (nobody else can seed data or needs the full tour)
+//   · the company is younger than GETTING_STARTED_DAYS — an org doc with no
+//     createdAt reads as null and counts as OLD, so an established company can
+//     never suddenly sprout these
+//   · this person hasn't dismissed that card (stored on their own member doc)
+// `onboardingSeen` is still honoured as the legacy marker for anyone who went
+// through the old modal.
+const GETTING_STARTED_DAYS = 90;
+
+function gettingStartedCardsHtml() {
+  if (!isAdminRole()) return '';
+  if (Storage.getSettings().onboardingSeen) return '';
+  const age = Storage.getOrgAgeDays();
+  if (age === null || age > GETTING_STARTED_DAYS) return '';
+  const done = Storage.gettingStartedDismissed();
+  const card = (key, title, hint, action) => done[key] ? '' : `
+    <article class="note-card getting-started-card" data-gs="${key}">
+      <div class="note-head">
+        <p class="note-title">${title}</p>
+        <button class="member-remove-btn" data-gs-dismiss="${key}" title="Dismiss" aria-label="Dismiss">✕</button>
+      </div>
+      <p class="note-preview">${hint}</p>
+      <button class="primary setting-wide-btn" data-gs-go="${key}" style="margin-top:8px;">${action}</button>
+    </article>`;
+  const both = card('tour', 'Take the tour',
+      'A quick walk through the app, one screen at a time. You can start it again any time from Settings → Help.',
+      'Start the tour')
+    + card('sample', 'Add sample data',
+      'Fills the app with example customers, jobs, hours and prices so you can try things safely. Add or remove it any time from Settings → Sample data.',
+      'Add sample data');
+  return both;
+}
+
+// Wired by renderNotesList after it writes the home screen.
+function wireGettingStartedCards(root) {
+  if (!root) return;
+  root.querySelectorAll('[data-gs-dismiss]').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();       // the card itself is not a nav target, but the
+                                 // home click handler walks .note-card
+      await Storage.dismissGettingStarted(btn.dataset.gsDismiss);
+      renderNotesList();
+    });
+  });
+  root.querySelectorAll('[data-gs-go]').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const which = btn.dataset.gsGo;
+      if (which === 'tour') { startTutorial(1); return; }
+      btn.disabled = true;
+      btn.textContent = 'Adding…';
+      await Storage.seedSampleData();
+      // Loading it counts as doing it — leaving the card offering to add data
+      // that is now sitting on screen reads as if nothing happened.
+      await Storage.dismissGettingStarted('sample');
+      refreshSeedButtons();
+      renderNotesList();
     });
   });
 }
@@ -5838,11 +5917,10 @@ function renderTrashList() {
   });
 }
 
-// ---------- sample data + first-run welcome ----------
+// ---------- sample data ----------
 const seedBtn = document.getElementById('seed-btn');
 const unseedBtn = document.getElementById('unseed-btn');
 const seedStatus = document.getElementById('seed-status');
-const welcomeModal = document.getElementById('welcome-modal');
 
 function refreshSeedButtons() {
   if (!seedBtn || !unseedBtn) return;
@@ -5926,37 +6004,10 @@ if (unseedBtn) {
   });
 }
 
-// Offer sample data + the tour the first time an admin opens an empty org.
-// The choice is stored org-side so other devices don't ask again.
-function maybeShowWelcome() {
-  if (!welcomeModal) return;
-  if (!isAdminRole()) return;
-  if (Storage.getSettings().onboardingSeen) return;
-  if (!Storage.isOrgEmpty()) return;
-  welcomeModal.hidden = false;
-}
-function dismissWelcome() {
-  if (welcomeModal) welcomeModal.hidden = true;
-  Storage.setSetting('onboardingSeen', true);
-}
-const welcomeSeedTour = document.getElementById('welcome-seed-tour');
-const welcomeTour = document.getElementById('welcome-tour');
-const welcomeEmpty = document.getElementById('welcome-empty');
-if (welcomeSeedTour) {
-  welcomeSeedTour.addEventListener('click', async () => {
-    welcomeSeedTour.disabled = true;
-    await Storage.seedSampleData();
-    refreshSeedButtons();
-    dismissWelcome();
-    welcomeSeedTour.disabled = false;
-    // Let the seeded data render before the first bubble measures its target
-    setTimeout(() => startTutorial(1), 200);
-  });
-}
-if (welcomeTour) {
-  welcomeTour.addEventListener('click', () => { dismissWelcome(); setTimeout(() => startTutorial(1), 100); });
-}
-if (welcomeEmpty) welcomeEmpty.addEventListener('click', dismissWelcome);
+// (The first-run welcome MODAL was removed in v2026.08.19-0020 and replaced by
+// the getting-started cards on the home screen — see gettingStartedCardsHtml.
+// settings.onboardingSeen is no longer written; it is still READ, so anyone who
+// already answered the old dialog never sees the cards.)
 
 // ---------- role-based UI ----------
 const ROLE_LABELS = { admin: 'Admin', employee: 'Employee', bookkeeper: 'Bookkeeper', customer: 'Customer' };
@@ -6592,10 +6643,10 @@ onAuthStateChanged(auth, async (user) => {
   if (pendingPasswordPrompt) {
     pendingPasswordPrompt = false;
     showSetPasswordModal();
-  } else {
-    // Brand-new empty org: offer sample data and the tour
-    maybeShowWelcome();
   }
+  // (A new company's tour/sample-data offer used to be a modal fired from here.
+  // It is the getting-started cards on the home screen now, which need no
+  // trigger — renderNotesList decides whether to draw them.)
 });
 
 // ---------- init error banner ----------
@@ -8810,7 +8861,7 @@ function detachTutorialTapWatch() {
   tutorialTapStart = null;
 }
 
-// Start a tutorial part programmatically (welcome modal, sample-data flow)
+// Start a tutorial part programmatically (getting-started cards, Settings → Help)
 function startTutorial(part, opts = {}) {
   tutorialPart = part || 1;
   tutorialStartPart = tutorialPart;
