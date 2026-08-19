@@ -19,6 +19,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 20, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.08.19-0752', 'Hours chart: employee colours, per-person day and week totals, and hours save as soon as you leave the cell'],
   ['v2026.08.19-0033', 'The calendar tour now shows where hours go on a job, and a new Tutorial 8 covers users, invites, trash, backup and sample data'],
   ['v2026.08.19-0020', 'A new company sees two dismissible cards on the home screen — take the tour, add sample data — instead of a pop-up'],
   ['v2026.08.19-0007', 'A new-company invite is now tied to one company, expires after 14 days, and any admin can rename their own company'],
@@ -749,12 +750,55 @@ function shiftYmd(s, days) {
 function shortDay(s) {
   return parseYmd(s).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
 }
+// "Phone" for layout decisions made in JS rather than CSS — matches the
+// 430px breakpoint styles.css already uses, so the two can't drift apart.
+// A MediaQueryList, not a width read, so we can also react when it changes
+// (a desktop window dragged narrow, or a tablet rotated).
+const PHONE_MQ = window.matchMedia('(max-width: 430px)');
+function isPhoneWidth() { return PHONE_MQ.matches; }
+
+// "15th" — used by the calendar breadcrumbs, which now read
+// Home › August › Thursday 15th. The month is the crumb before it, so
+// repeating it in the last crumb was noise.
+function ordinalDay(n) {
+  const rem100 = n % 100;
+  if (rem100 >= 11 && rem100 <= 13) return n + 'th';
+  return n + ({ 1: 'st', 2: 'nd', 3: 'rd' }[n % 10] || 'th');
+}
+function dayCrumbLabel(s) {
+  const d = parseYmd(s);
+  if (Number.isNaN(d.getTime())) return String(s);
+  return `${d.toLocaleDateString([], { weekday: 'long' })} ${ordinalDay(d.getDate())}`;
+}
+
 function prettyDate(s) {
   const d = parseYmd(s);
   return d.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
 }
 // Days shown in the grid: the 1st back to Sunday, through the last day forward
 // to Saturday, so every week row is complete.
+// Month or week. A month of cells on a phone gives each day about a thumbnail's
+// worth of space, which is why the pills had to shrink to initials — week view
+// is the other half of that answer: same grid, same columns, seven cells
+// instead of thirty-five, so each one is big enough to actually read.
+let calMode = localStorage.getItem('na-cal-mode') === 'week' ? 'week' : 'month';
+
+// The Sunday of the week `cursor` falls in — the grid's columns start on Sunday,
+// so a week has to as well or the day names would sit above the wrong dates.
+function weekStart(d) {
+  const s = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  s.setDate(s.getDate() - s.getDay());
+  return s;
+}
+function weekGridDays(cursor) {
+  const start = weekStart(cursor);
+  const days = [];
+  for (let i = 0; i < 7; i++) days.push(new Date(start.getFullYear(), start.getMonth(), start.getDate() + i));
+  return days;
+}
+function calGridDays(cursor) {
+  return calMode === 'week' ? weekGridDays(cursor) : monthGridDays(cursor);
+}
 function monthGridDays(cursor) {
   const first = new Date(cursor.getFullYear(), cursor.getMonth(), 1);
   const start = new Date(first);
@@ -781,22 +825,35 @@ function renderCalendar() {
     Storage.ensureJobMonth(ymd(new Date(calCursor.getFullYear(), calCursor.getMonth() + off, 1)));
   }
   if (!calGrid) return;
+  // Home › August. The year is dropped: you can see which month you're in from
+  // the grid, and the crumb is a place, not a date stamp. It comes back only
+  // when you've wandered out of the current year, where it is the one thing you
+  // actually need to know.
+  const calYear = calCursor.getFullYear();
+  const thisYear = new Date().getFullYear();
   renderCrumbs('crumbs-calendar', [
     { label: 'Home', go: 'home' },
-    { label: `${MONTH_NAMES[calCursor.getMonth()]} ${calCursor.getFullYear()}` },
+    { label: MONTH_NAMES[calCursor.getMonth()] + (calYear === thisYear ? '' : ` ${calYear}`) },
   ]);
   const canEdit = isAdminRole();
   const calFab = document.getElementById('cal-fab');
   if (calFab) calFab.style.display = canEdit ? '' : 'none';
 
-  const days = monthGridDays(calCursor);
+  const days = calGridDays(calCursor);
   const todayStr = ymd(new Date());
+  // On a phone a month cell has room for about four characters, so a pill shows
+  // the INITIAL only; the colour is what you actually read a week by anyway.
+  // The full name stays in the title attribute and in the day view.
+  const shortPills = isPhoneWidth() && calMode === 'month';
   const head = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']
     .map(d => `<div class="cal-head">${d}</div>`).join('');
   const cells = days.map(d => {
     const s = ymd(d);
     const jobs = Storage.listJobsByDate(s);
-    const otherMonth = d.getMonth() !== calCursor.getMonth();
+    // In week view every cell is 'this week', so nothing is greyed as an
+    // adjacent month — a week that straddles two months is one week, not a
+    // week with four faded days in it.
+    const otherMonth = calMode === 'month' && d.getMonth() !== calCursor.getMonth();
     const classes = ['cal-cell'];
     if (otherMonth) classes.push('cal-other');
     if (!jobs.length) classes.push('cal-empty');   // greyed when nobody is on
@@ -807,7 +864,11 @@ function renderCalendar() {
     const lines = groups.map(g => {
       if (shown >= MAX_CHIPS) return '';
       const chips = g.names.length
-        ? g.names.map(n => `<span class="cal-chip" style="${chipStyle(n)}">${escapeHtml(n.split(/[\s(]+/)[0])}</span>`).join('')
+        ? g.names.map(n => {
+            const first = n.split(/[\s(]+/)[0];
+            const label = shortPills ? first.slice(0, 1).toUpperCase() : first;
+            return `<span class="cal-chip${shortPills ? ' cal-chip-initial' : ''}" style="${chipStyle(n)}" title="${escapeHtml(n)}">${escapeHtml(label)}</span>`;
+          }).join('')
         : '<span class="cal-chip cal-chip-none">—</span>';
       const room = MAX_CHIPS - shown;
       const take = g.jobs.slice(0, room);
@@ -822,11 +883,27 @@ function renderCalendar() {
   }).join('');
   // Cues so it's obvious there's more above and below — naming the month beats
   // a bare arrow, and both are tappable for people who'd rather not swipe.
-  const prevMonth = new Date(calCursor.getFullYear(), calCursor.getMonth() - 1, 1);
-  const nextMonth = new Date(calCursor.getFullYear(), calCursor.getMonth() + 1, 1);
-  const cueUp = `<button type="button" class="cal-cue cal-cue-up" data-shift="-1">∧ ${escapeHtml(MONTH_NAMES[prevMonth.getMonth()])}</button>`;
-  const cueDown = `<button type="button" class="cal-cue cal-cue-down" data-shift="1">∨ ${escapeHtml(MONTH_NAMES[nextMonth.getMonth()])}</button>`;
+  const cueLabel = (delta) => {
+    if (calMode === 'week') {
+      const s = weekStart(calCursor);
+      const w = new Date(s.getFullYear(), s.getMonth(), s.getDate() + delta * 7);
+      const e = new Date(w.getFullYear(), w.getMonth(), w.getDate() + 6);
+      // "Aug 10–16" — a bare "week" tells you nothing about where you'd land.
+      return `${MONTH_NAMES[w.getMonth()].slice(0, 3)} ${w.getDate()}–${e.getDate()}`;
+    }
+    return MONTH_NAMES[new Date(calCursor.getFullYear(), calCursor.getMonth() + delta, 1).getMonth()];
+  };
+  const cueUp = `<button type="button" class="cal-cue cal-cue-up" data-shift="-1">∧ ${escapeHtml(cueLabel(-1))}</button>`;
+  const cueDown = `<button type="button" class="cal-cue cal-cue-down" data-shift="1">∨ ${escapeHtml(cueLabel(1))}</button>`;
+  calGrid.classList.toggle('cal-grid-week', calMode === 'week');
   calGrid.innerHTML = cueUp + `<div class="cal-headrow">${head}</div><div class="cal-cells">${cells}</div>` + cueDown;
+  const modeBtn = document.getElementById('cal-mode');
+  if (modeBtn) {
+    // Labelled with where it GOES, not where you are — a button that says
+    // "Month" while showing a month reads as a state nobody can act on.
+    modeBtn.textContent = calMode === 'week' ? 'Month' : 'Week';
+    modeBtn.setAttribute('aria-label', calMode === 'week' ? 'Switch to month view' : 'Switch to week view');
+  }
   calGrid.querySelectorAll('.cal-cue').forEach(btn => {
     btn.addEventListener('click', () => calShiftMonth(parseInt(btn.dataset.shift, 10)));
   });
@@ -944,10 +1021,18 @@ function renderCalendarDay() {
   const timeline = document.getElementById('cal-day-timeline');
   const untimedWrap = document.getElementById('cal-day-untimed');
   if (!timeline || !calSelectedDate) return;
+  // Home › August › Thursday 15th. The middle crumb names the MONTH rather than
+  // saying "Calendar" — it goes to the same place, and a trail reads better as
+  // where you are than as what the screen is called.
+  const dayDate = parseYmd(calSelectedDate);
+  const dayMonth = Number.isNaN(dayDate.getTime())
+    ? 'Calendar'
+    : MONTH_NAMES[dayDate.getMonth()] + (dayDate.getFullYear() === new Date().getFullYear()
+        ? '' : ` ${dayDate.getFullYear()}`);
   renderCrumbs('crumbs-calendar-day', [
     { label: 'Home', go: 'home' },
-    { label: 'Calendar', go: 'calendar' },
-    { label: prettyDate(calSelectedDate) },
+    { label: dayMonth, go: 'calendar' },
+    { label: dayCrumbLabel(calSelectedDate) },
   ]);
   // Swipe cues, same idea as the month view's ∧/∨ — naming the day beats a bare
   // arrow, and both are tappable for anyone who'd rather not swipe.
@@ -1149,6 +1234,14 @@ function wireDayInteractions(canEdit) {
 
 const calToday = document.getElementById('cal-today');
 if (calToday) calToday.addEventListener('click', () => { calCursor = new Date(); renderCalendar(); });
+const calModeBtn = document.getElementById('cal-mode');
+if (calModeBtn) calModeBtn.addEventListener('click', () => setCalMode(calMode === 'week' ? 'month' : 'week'));
+// A window dragged narrow (or a tablet rotated) crosses the phone breakpoint
+// without any navigation, and the pills are rendered HTML — so redraw, or the
+// initials stay behind on a screen with room for names.
+PHONE_MQ.addEventListener('change', () => {
+  if (calendarView && calendarView.classList.contains('active')) renderCalendar();
+});
 // Swipe UP for the next month, DOWN for the previous — the grid moves the way
 // your finger does, as if scrolling forward through a continuous calendar.
 // A fade with a 5px nudge in the direction you moved: enough to read as
@@ -1164,11 +1257,35 @@ function calSlide(el, dir) {
   el.classList.add(cls);
   el.addEventListener('animationend', () => el.classList.remove(cls), { once: true });
 }
+// Named for what it did originally; it now shifts by whatever the current view
+// is a view OF — a month, or a week. The swipe and the ∧/∨ cues both come
+// through here, so both follow the mode without knowing about it.
 function calShiftMonth(delta) {
-  calCursor = new Date(calCursor.getFullYear(), calCursor.getMonth() + delta, 1);
+  if (calMode === 'week') {
+    const s = weekStart(calCursor);
+    calCursor = new Date(s.getFullYear(), s.getMonth(), s.getDate() + delta * 7);
+  } else {
+    calCursor = new Date(calCursor.getFullYear(), calCursor.getMonth() + delta, 1);
+  }
   renderCalendar();
   // renderCalendar rebuilds .cal-cells, so grab it after the render
   calSlide(calGrid && calGrid.querySelector('.cal-cells'), delta > 0 ? 'up' : 'down');
+}
+function setCalMode(mode) {
+  calMode = mode === 'week' ? 'week' : 'month';
+  localStorage.setItem('na-cal-mode', calMode);
+  // Switching to week lands on the week containing whatever month you were
+  // looking at — the 1st, unless that month is the current one, where "the week
+  // you meant" is almost always this one.
+  if (calMode === 'week') {
+    const today = new Date();
+    const sameMonth = calCursor.getFullYear() === today.getFullYear()
+      && calCursor.getMonth() === today.getMonth();
+    calCursor = weekStart(sameMonth ? today : calCursor);
+  } else {
+    calCursor = new Date(calCursor.getFullYear(), calCursor.getMonth(), 1);
+  }
+  renderCalendar();
 }
 // Desktop: the wheel changes months once the grid has nothing left to scroll,
 // which is the same feel as the swipe. The toolbar arrows are gone — the ∧/∨
@@ -7353,16 +7470,11 @@ function iifRowValues(row) {
   };
 }
 function iifRowKey(idx, empIdx) { return `${idx}:${empIdx}`; }
-// Save/Cancel are NOT rendered inside the cell — see #iif-cell-bar in the
-// header and the comment there. Two earlier attempts (pointerdown instead of
-// click, then moving the buttons above the input) both failed because they
-// treated the wrong cause: the sticky tick/Date columns paint over the left
-// edge of whatever cell is being edited, which is where the buttons sat.
-// A native popup (date picker, drop list) closes by sending a tap THROUGH to
-// the page underneath. That tap landed on whatever grid cell happened to be
-// under it and opened it — "after I pick a date it goes to a random cell".
-// Same idea as the price table's pinch suppression: ignore cell-opening taps
-// for a moment after a popup has done its work.
+// A pinch gesture ends as a tap on whatever is underneath, which would open a
+// cell editor nobody asked for. Same idea as the price table's pinch
+// suppression: ignore cell-opening taps for a moment after a gesture.
+// (This also used to cover native popups closing — date pickers and drop lists
+// — which went with the read-only columns in v2026.08.18-2325.)
 let iifTapSuppressedUntil = 0;
 function suppressIifTaps(ms = 400) { iifTapSuppressedUntil = Date.now() + ms; }
 function iifTapsSuppressed() { return Date.now() < iifTapSuppressedUntil; }
@@ -7399,7 +7511,14 @@ function iifCellHtml(row, col) {
   // record half of a disagreeing pair) is locked the same way.
   if (col !== 'hours' || !row.editable) {
     if (col === 'date') return `<td class="iif-date">${escapeHtml(v.dateText)}</td>`;
-    if (col === 'employee') return `<td>${escapeHtml(v.emp || 'Nobody')}</td>`;
+    if (col === 'employee') {
+      // Same colours as the calendar (chipStyle → employeeColour), so a name
+      // means the same thing on both screens and a fortnight of rows can be
+      // scanned by colour rather than read.
+      return v.emp
+        ? `<td><span class="cal-chip iif-emp-chip" style="${chipStyle(v.emp)}">${escapeHtml(v.emp)}</span></td>`
+        : `<td><span class="cal-chip cal-chip-none iif-emp-chip">Nobody</span></td>`;
+    }
     if (col === 'customer') return `<td>${escapeHtml(v.cust || '—')}</td>`;
     if (col === 'hours') return `<td>${escapeHtml(v.hoursText || '—')}</td>`;
     return `<td>${row.orphan ? '<span class="iif-tag">no job</span>' : ''}</td>`;
@@ -7419,6 +7538,8 @@ function renderIIFEntries(entries) {
   if (!iifGrid) return;
   if (!entries.length) {
     iifGrid.innerHTML = '<tbody><tr><td class="price-empty-state">No entries found.</td></tr></tbody>';
+    const empty = document.getElementById('iif-totals');
+    if (empty) { empty.hidden = true; empty.innerHTML = ''; }
     return;
   }
   const head = `<thead><tr>
@@ -7454,7 +7575,84 @@ function renderIIFEntries(entries) {
 
   iifGrid.innerHTML = head + `<tbody>${body}</tbody>`;
   applyIifZoomVar();
+  renderIifTotals();
   wireIifGrid();
+}
+
+// ---- totals: each person, per day and per week ----
+// Counted from the TICKED rows, not from the jobs — a tick is what the rest of
+// this screen already means by "this is the truth", so the totals agree with
+// what Save hours and the .iif export would do. Untick a row and it leaves the
+// total, which is the point.
+//
+// Weeks run Sunday→Saturday to match the calendar grid. A range that straddles
+// two weeks gets two tables rather than one merged column set, because "how
+// many hours did Sam do that week" is the question being asked, and a total
+// spanning a week boundary answers nothing.
+const IIF_DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+function iifWeekKey(iso) {
+  const d = parseYmd(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const s = new Date(d.getFullYear(), d.getMonth(), d.getDate() - d.getDay());
+  return ymd(s);
+}
+// 7.25 not 7.2500, and 8 not 8.00 — a column of trailing zeroes is harder to
+// read than the numbers are worth.
+function iifFmtHours(n) {
+  const v = Math.round((Number(n) || 0) * 100) / 100;
+  return v ? String(v) : '';
+}
+function renderIifTotals() {
+  const box = document.getElementById('iif-totals');
+  if (!box) return;
+  // weekStartIso → employee → dateIso → hours
+  const weeks = new Map();
+  for (const row of iifRenderedRows) {
+    if (!iifRowTicked(row)) continue;
+    const v = iifRowValues(row);
+    const hours = row.kind === 'saved' ? Number(row.log.hours) : Number(row.e && row.e.hours);
+    if (!v.emp || !v.dateIso || !(hours > 0)) continue;
+    const wk = iifWeekKey(v.dateIso);
+    if (!weeks.has(wk)) weeks.set(wk, new Map());
+    const byEmp = weeks.get(wk);
+    if (!byEmp.has(v.emp)) byEmp.set(v.emp, new Map());
+    const byDay = byEmp.get(v.emp);
+    byDay.set(v.dateIso, (byDay.get(v.dateIso) || 0) + hours);
+  }
+  if (!weeks.size) { box.hidden = true; box.innerHTML = ''; return; }
+  box.hidden = false;
+
+  const tables = [...weeks.keys()].sort().map(wk => {
+    const start = parseYmd(wk);
+    const days = Array.from({ length: 7 }, (_, i) =>
+      ymd(new Date(start.getFullYear(), start.getMonth(), start.getDate() + i)));
+    const byEmp = weeks.get(wk);
+    const names = [...byEmp.keys()].sort((a, b) => a.localeCompare(b));
+    const end = parseYmd(days[6]);
+    const label = `${MONTH_NAMES[start.getMonth()].slice(0, 3)} ${start.getDate()} – ${MONTH_NAMES[end.getMonth()].slice(0, 3)} ${end.getDate()}`;
+    const head = `<tr><th class="iif-tot-name">Week of ${escapeHtml(label)}</th>`
+      + days.map((d, i) => `<th>${IIF_DAY_NAMES[i]}<span class="iif-tot-dnum">${parseYmd(d).getDate()}</span></th>`).join('')
+      + '<th class="iif-tot-sum">Total</th></tr>';
+    const rows = names.map(n => {
+      const byDay = byEmp.get(n);
+      const cells = days.map(d => `<td>${iifFmtHours(byDay.get(d)) || '·'}</td>`).join('');
+      const total = [...byDay.values()].reduce((a, b) => a + b, 0);
+      return `<tr><th class="iif-tot-name"><span class="cal-chip iif-emp-chip" style="${chipStyle(n)}">${escapeHtml(n)}</span></th>`
+        + cells + `<td class="iif-tot-sum">${iifFmtHours(total)}</td></tr>`;
+    }).join('');
+    // Everyone's day, so a Tuesday that looks light can be checked at a glance.
+    const dayAll = days.map(d => {
+      let t = 0;
+      for (const byDay of byEmp.values()) t += byDay.get(d) || 0;
+      return `<td>${iifFmtHours(t) || '·'}</td>`;
+    }).join('');
+    let grand = 0;
+    for (const byDay of byEmp.values()) for (const v of byDay.values()) grand += v;
+    const foot = `<tr class="iif-tot-all"><th class="iif-tot-name">Everyone</th>${dayAll}`
+      + `<td class="iif-tot-sum">${iifFmtHours(grand)}</td></tr>`;
+    return `<table class="iif-totals-table"><thead>${head}</thead><tbody>${rows}${foot}</tbody></table>`;
+  }).join('');
+  box.innerHTML = tables;
 }
 
 // (The pinned "Note line" bar was removed in v2026.08.18-2325 along with
@@ -7462,20 +7660,20 @@ function renderIIFEntries(entries) {
 // There is no source line any more — a row IS a calendar job, and the job is
 // edited in the calendar. #iif-src-bar went out of index.html with it.)
 
-function closeIifCell(rerender = true) {
-  // Closing removes the Save/Cancel bar from the header, so everything below
-  // SHIFTS UP — and the tail of the very tap that closed it (the click that
-  // follows pointerdown) then lands on whatever cell has moved under the
-  // finger, opening that one. It presented as "Cancel does nothing"
-  // (reopened the same cell), "jumps to another cell", or working fine,
-  // depending on where the layout settled: not reproducible, because it
-  // depended on finger position. Suppress cell-opening taps for a moment so
-  // the tap that closed a cell cannot open the next one. Cell-to-cell moves
-  // are unaffected — those call openIifCellAt directly, not through here.
-  suppressIifTaps(500);
+// `suppress` guards a historical trap: closing used to remove the Save/Cancel
+// bar from the header, everything below shifted up, and the tail of the very
+// tap that closed it landed on whatever cell had moved under the finger. That
+// bar is gone (v2026.08.19-0752 — hours save on blur now), so closing no longer
+// changes the layout and the suppression is only needed where a tap really can
+// arrive late: a native popup dismissing, or a pinch ending.
+//
+// It MUST stay off on the blur path. Moving from one cell to the next is a
+// single tap — pointerdown on the new cell blurs the old one — so suppressing
+// there would make the second cell simply not open.
+function closeIifCell(rerender = true, suppress = true) {
+  if (suppress) suppressIifTaps(500);
   iifOutsideTap.detach();
   openIifCell = null;
-  renderIifCellBar(null);    // retire the header Save/Cancel
   if (rerender) renderIIFEntries(iifParsedEntries);
 }
 
@@ -7494,6 +7692,15 @@ function openIifCellAt(cellKey) {
 function focusOpenIifCell() {
   const cell = iifGrid ? iifGrid.querySelector('.price-cell-editing') : null;
   if (!cell || !iifScroll) return;
+  // PHONES ONLY. Hauling the row to the top exists because a phone keyboard
+  // covers the bottom half of the screen and the sticky columns paint over the
+  // left — neither is true on a desktop, where the chart lurching on every
+  // click is just the page moving under you for no reason.
+  if (!isPhoneWidth()) {
+    const input = cell.querySelector('input');
+    if (input) { input.focus(); if (input.type === 'text') input.select(); }
+    return;
+  }
   requestAnimationFrame(() => requestAnimationFrame(() => {
     const c = cell.getBoundingClientRect();
     const s = iifScroll.getBoundingClientRect();
@@ -7573,40 +7780,6 @@ function writeHoursToJob(e) {
     .catch(err => console.warn('writeHoursToJob', err));
 }
 
-// Save/Cancel act on POINTERDOWN, not click.
-//
-// Tapping either button blurs the open input, which dismisses the keyboard,
-// which changes --app-vh — and this screen is SIZED to --app-vh (it has to be;
-// see the note-line fix in v2026.08.02-0734). So the whole screen reflows
-// between pointerdown and pointerup, the button slides out from under your
-// finger, the two events land on different elements, and the browser never
-// dispatches a click at all. Cancel looked completely dead; Save only seemed
-// to work because Enter is the other way to trigger it.
-//
-// preventDefault on pointerdown keeps the field focused so nothing moves until
-// we've acted. The click listener is a fallback for anything without pointer
-// events, and the `done` flag stops both paths firing.
-//
-// The price table wires the identical buttons with a plain click and is fine —
-// #price-view isn't sized to the visible viewport, so it doesn't reflow when
-// the keyboard closes. Don't "fix" that one to match.
-// De-duped by TIME, not by a one-shot flag: these buttons now live in the
-// header and persist for the whole session, so a permanent "already fired"
-// flag would make them work exactly once.
-function wireIifCellButton(el, fn) {
-  if (!el) return;
-  let last = 0;
-  const run = (ev) => {
-    const now = Date.now();
-    if (now - last < 500) return;   // the click that follows our own pointerdown
-    last = now;
-    ev.preventDefault();
-    fn();
-  };
-  el.addEventListener('pointerdown', run);
-  el.addEventListener('click', run);
-}
-
 function wireIifGrid() {
   if (!iifGrid) return;
   iifGrid.querySelectorAll('.iif-row-check').forEach(cb => {
@@ -7617,6 +7790,7 @@ function wireIifGrid() {
       // Ticking half of a pair unticks the other half — redraw so you can see
       // that happen rather than discovering it in the exported file.
       if (row.pair) renderIIFEntries(iifParsedEntries);
+      else renderIifTotals();   // the totals count ticked rows, so they moved
     });
   });
   iifGrid.querySelectorAll('.price-cell').forEach(cell => {
@@ -7632,67 +7806,50 @@ function wireIifGrid() {
   const editing = iifGrid.querySelector('.price-cell-editing');
   if (!editing) return;
   const idx = parseInt(editing.dataset.idx, 10);
-  const col = (editing.dataset.cellkey || '').split('|')[1];
-  const save = () => {
-    commitIifHours(idx, editing.querySelector('.iif-edit-hours').value);
-    closeIifCell();
-  };
-  // The buttons live in the header bar, not in the cell — point them at THIS
-  // cell's save for as long as it's open.
-  iifCellSaveFn = save;
-  renderIifCellBar(col);
-  editing.querySelectorAll('input').forEach(input => {
-    input.addEventListener('keydown', (ev) => {
-      if (ev.key === 'Enter') { ev.preventDefault(); save(); }
-      else if (ev.key === 'Escape') { ev.preventDefault(); closeIifCell(); }
+  const input = editing.querySelector('.iif-edit-hours');
+  if (!input) return;
+
+  // COMMIT ON BLUR — there are no Save/Cancel buttons any more. Leaving the
+  // cell in any way (tapping another cell, tapping off the grid, Tab, the
+  // keyboard closing) is the confirmation.
+  //
+  // `cancelled` exists for Escape only: it has to blur the field to give the
+  // keyboard back, and that blur must not then save the thing Escape just
+  // rejected.
+  let done = false, cancelled = false;
+  const commit = () => {
+    if (done) return;
+    done = true;
+    if (!cancelled) commitIifHours(idx, input.value);
+    // NO re-render here, and no tap suppression. Both matter: moving to the
+    // next cell is a SINGLE tap — its pointerdown blurs this field — so
+    // redrawing now would tear the element out from under that tap before the
+    // click lands, and suppressing would swallow the click outright. Instead
+    // hand the frame back and redraw only if nothing else claimed the cursor.
+    closeIifCell(false, false);
+    requestAnimationFrame(() => {
+      if (!openIifCell) renderIIFEntries(iifParsedEntries);
     });
+  };
+  input.addEventListener('blur', commit);
+  input.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Enter') { ev.preventDefault(); input.blur(); }
+    else if (ev.key === 'Escape') { ev.preventDefault(); cancelled = true; input.blur(); }
   });
-
-  // (No native popups left to handle: Hours is a plain text field. The date
-  // picker and the two drop lists went with the read-only columns.)
 }
 
-// ---- Save / Cancel for the open cell, in the sticky header ----
-// Wired ONCE against elements that never get re-rendered, so no amount of grid
-// redrawing can detach them. iifCellSaveFn points at whichever cell is open.
-const iifCellBar = document.getElementById('iif-cell-bar');
-const iifCellWhat = document.getElementById('iif-cell-what');
-const iifCellHint = document.getElementById('iif-cell-hint');
-let iifCellSaveFn = null;
-const IIF_COL_LABEL = { date: 'Date', employee: 'Employee', customer: 'Customer', hours: 'Hours' };
-function showIifCellHint(msg) {
-  if (!iifCellHint) return;
-  iifCellHint.textContent = msg || '';
-  iifCellHint.hidden = !msg;
-}
-function renderIifCellBar(col) {
-  if (!iifCellBar) return;
-  if (!col) { iifCellBar.hidden = true; showIifCellHint(''); iifCellSaveFn = null; return; }
-  if (iifCellWhat) iifCellWhat.textContent = `Editing ${IIF_COL_LABEL[col] || col}`;
-  showIifCellHint('');
-  iifCellBar.hidden = false;
-}
+// (The Save / Cancel bar that used to live in the sticky header went in
+// v2026.08.19-0752. Hours is the only editable column and it commits the
+// moment focus leaves the cell, so a button whose only job was to say "yes,
+// that number" was pure ceremony — and on a phone it was ceremony that moved
+// the layout, which caused three separate bugs in its lifetime.)
+
 // An exception thrown inside a re-render used to vanish into a console nobody
 // can see on a phone, which looks identical to a dead button. Kept from the
 // v2026.08.02-1506 diagnostic build: errors on this screen now say so.
 window.addEventListener('error', (e) => {
   if (!hoursView || !hoursView.classList.contains('active')) return;
   if (iifStatus) iifStatus.textContent = 'error: ' + (e.message || 'unknown');
-});
-
-wireIifCellButton(document.getElementById('iif-cell-save'), () => {
-  try {
-    if (iifCellSaveFn) iifCellSaveFn();
-  } catch (err) {
-    if (iifStatus) iifStatus.textContent = 'save failed: ' + (err && err.message ? err.message : String(err));
-  }
-});
-wireIifCellButton(document.getElementById('iif-cell-cancel'), () => {
-  try {
-    closeIifCell();
-  } catch (err) {
-    if (iifStatus) iifStatus.textContent = 'close failed: ' + (err && err.message ? err.message : String(err));
-  }
 });
 
 const iifZoomIn = document.getElementById('iif-zoom-in');
@@ -7780,6 +7937,8 @@ function runIIFParse() {
   iifTickState = new Map();                  // ...and the ticks keyed on them
   iifRenderedRows = [];
   if (iifGrid) iifGrid.innerHTML = '';
+  const totalsBox = document.getElementById('iif-totals');
+  if (totalsBox) { totalsBox.hidden = true; totalsBox.innerHTML = ''; }
   if (iifDownloadBtn) iifDownloadBtn.hidden = true;
   if (iifSaveHoursBtn) iifSaveHoursBtn.hidden = true;
 

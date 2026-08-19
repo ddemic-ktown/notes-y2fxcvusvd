@@ -581,6 +581,22 @@ body.hours-open {
 /* The "nobody assigned" chip has no employee behind it, so it carries the text
    colour the others now set inline. */
 .cal-chip-none { background: var(--ink-soft); color: #fff; }
+/* Phone month view: one letter per person. Fixed width and centred so a column
+   of them lines up — ragged pills of one character each read as noise. */
+.cal-chip-initial {
+  min-width: 15px; padding: 1px 0; text-align: center;
+  font-size: 10px; letter-spacing: 0;
+}
+
+/* WEEK VIEW — same seven columns, one row. The cells stop being thumbnails and
+   become tall enough to read, which is the whole point of the mode on a phone:
+   grid-auto-rows goes from "fit 5 rows on screen" to "fill the space you have".
+   The row still scrolls if a day is busy enough to overflow. */
+.cal-grid-week .cal-cells { grid-auto-rows: minmax(0, 1fr); }
+.cal-grid-week .cal-cell { padding: 5px 6px; gap: 3px; overflow-y: auto; }
+.cal-grid-week .cal-daynum { font-size: 13px; }
+.cal-grid-week .cal-chip { font-size: 10px; padding: 1px 6px; }
+.cal-grid-week .cal-job-who { font-size: 11px; white-space: normal; }
 .cal-job-who { font-size: 10px; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cal-more { font-size: 10px; color: var(--ink-soft); font-weight: 600; }
 .cal-day-card .cal-day-chips { display: flex; flex-wrap: wrap; gap: 4px; margin: 4px 0; }
@@ -1503,6 +1519,34 @@ body.dark-mode .iif-grid tbody tr.iif-needs-review td { background: #2d1a00; }
 body.dark-mode .iif-grid tbody tr.iif-saved td { background: #052e1b; }
 body.dark-mode .iif-grid tbody tr.iif-differs td { background: #3f1212; }
 .iif-tag { font-size: calc(11px * var(--price-scale)); color: var(--ink-soft); font-style: italic; }
+
+/* Employee chips in the hours chart — same colours as the calendar, but this
+   is a dense table, so they sit tighter than a calendar cell's. */
+.iif-emp-chip { font-size: calc(11px * var(--price-scale, 1)); padding: 2px 8px; display: inline-block; }
+
+/* TOTALS — each person per day, one table per week (Sun–Sat, matching the
+   calendar grid). Inside the scroller, under the chart. */
+.iif-totals { padding: 14px 4px 24px; display: flex; flex-direction: column; gap: 16px; }
+.iif-totals-table {
+  border-collapse: collapse; width: 100%;
+  font-size: calc(12px * var(--price-scale, 1));
+}
+.iif-totals-table th, .iif-totals-table td {
+  border: 1px solid var(--line); padding: 4px 6px; text-align: center; white-space: nowrap;
+}
+.iif-totals-table thead th {
+  background: var(--bg); color: var(--ink-soft);
+  font-size: calc(11px * var(--price-scale, 1)); font-weight: 700;
+}
+.iif-totals-table .iif-tot-name { text-align: left; }
+.iif-totals-table thead .iif-tot-name { color: var(--ink); }
+/* The date under the weekday, small — it disambiguates two Tuesdays in a
+   fortnight without competing with the numbers that matter. */
+.iif-tot-dnum { display: block; font-weight: 600; opacity: 0.65; }
+.iif-totals-table .iif-tot-sum { font-weight: 700; background: var(--bg); }
+.iif-totals-table .iif-tot-all th, .iif-totals-table .iif-tot-all td {
+  font-weight: 700; background: var(--bg);
+}
 /* The source line from the note, pinned above the grid while a cell is open.
    It is NOT a table row: inside the scroller it drifted off the top as soon as
    you scrolled, and it has to survive the keyboard and an open drop list. */

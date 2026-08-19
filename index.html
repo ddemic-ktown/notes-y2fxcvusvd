@@ -229,6 +229,8 @@
         <button class="icon-btn date-btn app-back-btn" aria-label="Back">‹ Back</button>
         <nav class="crumbs" id="crumbs-calendar" aria-label="Breadcrumb"></nav>
         <div class="cal-nav" role="group" aria-label="Change month">
+          <!-- Labelled with the view it switches TO, not the one you're in. -->
+          <button id="cal-mode" class="icon-btn date-btn" type="button">Week</button>
           <button id="cal-today" class="icon-btn date-btn">Today</button>
         </div>
         <div class="editor-more-wrap">
@@ -438,23 +440,18 @@
       <!-- (#iif-src-bar, which pinned the note line the open row was read
            from, was removed in v2026.08.18-2325 — rows come from calendar jobs
            now, so there is no source line to show.) -->
-      <!-- Save/Cancel for the open cell live UP HERE, not inside the cell.
-           Inside, they sat at the cell's left edge and the sticky tick/Date
-           columns (z-index 3, opaque) painted straight over them as soon as
-           the grid scrolled sideways — so Cancel worked only on Hours, the
-           column furthest from the sticky ones. Up here nothing can cover
-           them, and they're in the same place whichever column you're in. -->
-      <div id="iif-cell-bar" class="iif-cell-bar" hidden>
-        <span id="iif-cell-what" class="iif-cell-what"></span>
-        <span id="iif-cell-hint" class="iif-cell-hint" hidden></span>
-        <button id="iif-cell-save" class="primary" type="button">Save</button>
-        <button id="iif-cell-cancel" class="secondary" type="button">Cancel</button>
-      </div>
+      <!-- (The Save/Cancel bar was removed in v2026.08.19-0752: Hours commits
+           when focus leaves the cell, so there was nothing left for a button
+           to confirm.) -->
     </header>
     <main class="price-main hours-main">
       <div id="iif-status" class="iif-status"></div>
       <div id="iif-scroll" class="price-scroll iif-scroll">
         <table id="iif-grid" class="price-table iif-grid"></table>
+        <!-- Totals live INSIDE the scroller, under the chart: they are a
+             summary of what is above them, and pinning them to the footer would
+             take space from the rows on the screen where space is tightest. -->
+        <div id="iif-totals" class="iif-totals" hidden></div>
       </div>
       <div class="iif-footer">
         <button id="iif-save-hours-btn" class="secondary iif-download-btn" hidden>Save hours</button>
