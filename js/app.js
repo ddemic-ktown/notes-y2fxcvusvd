@@ -19,6 +19,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 20, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.08.19-0819', 'Hours chart reads the calendar only — edit an hour and it saves to the job; no Save button, no red rows, and a ✓ to close the keyboard'],
   ['v2026.08.19-0752', 'Hours chart: employee colours, per-person day and week totals, and hours save as soon as you leave the cell'],
   ['v2026.08.19-0033', 'The calendar tour now shows where hours go on a job, and a new Tutorial 8 covers users, invites, trash, backup and sample data'],
   ['v2026.08.19-0020', 'A new company sees two dismissible cards on the home screen — take the tour, add sample data — instead of a pop-up'],
@@ -841,10 +842,10 @@ function renderCalendar() {
 
   const days = calGridDays(calCursor);
   const todayStr = ymd(new Date());
-  // On a phone a month cell has room for about four characters, so a pill shows
-  // the INITIAL only; the colour is what you actually read a week by anyway.
-  // The full name stays in the title attribute and in the day view.
-  const shortPills = isPhoneWidth() && calMode === 'month';
+  // On a phone a pill shows the INITIAL only, in both month and week view —
+  // the colour is what you actually read a week by, and the names ate the room
+  // the customer needed. Full name stays in the title attribute and the day view.
+  const shortPills = isPhoneWidth();
   const head = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']
     .map(d => `<div class="cal-head">${d}</div>`).join('');
   const cells = days.map(d => {
@@ -7230,7 +7231,6 @@ const iifStatus = document.getElementById('iif-status');
 const iifGrid = document.getElementById('iif-grid');
 const iifScroll = document.getElementById('iif-scroll');
 const iifDownloadBtn = document.getElementById('iif-download-btn');
-const iifSaveHoursBtn = document.getElementById('iif-save-hours-btn');
 const editorIifBtn = document.getElementById('editor-iif-btn');
 
 let iifParsedEntries = [];
@@ -7319,146 +7319,54 @@ function nudgeIifZoom(delta) {
 // table's openCellKey.
 let openIifCell = null;
 
-// One row per entry PER EMPLOYEE: a note line naming two people is two rows in
-// QuickBooks. Editing date/customer/hours changes the shared entry (so both
-// rows move together, which is right — it's one line of the note); editing the
-// employee changes only that row's slot.
-// Matching a saved timelog to a note line, by DATE + EMPLOYEE + CUSTOMER.
-// Consequence worth knowing: hours is then the only field that can disagree,
-// which is what makes a "discrepancy" a precise thing to show. The trade-off
-// is that correcting a customer breaks the link — the old record shows as
-// saved-but-not-in-the-note rather than quietly updating.
-function iifLogKey(dateStr, employee, customer) {
-  return [
-    String(dateStr || ''),
-    String(employee || '').trim().toLowerCase(),
-    String(customer || '').trim().toLowerCase(),
-  ].join('|');
-}
-function iifEntryLogKey(e, emp) {
-  return iifLogKey(iifIsoDate(e), emp, e.customerMatched);
-}
-// Hours are floats derived from clock arithmetic; compare to the nearest
-// minute rather than exactly, or 3.4999999 and 3.5 read as a discrepancy.
-function sameHours(a, b) { return Math.abs((Number(a) || 0) - (Number(b) || 0)) < 0.009; }
-
-// One row per entry PER EMPLOYEE: a note line naming two people is two rows in
-// QuickBooks. Editing date/customer/hours changes the shared entry (so both
-// rows move together, which is right — it's one line of the note); editing the
-// employee changes only that row's slot.
+// ONE ROW PER PERSON PER JOB, straight from the calendar. Nothing else.
 //
-// Rows are the UNION of the note and what's already saved:
-//   matched, same hours  → one green row  (kind 'saved')
-//   matched, hours differ → green row (saved) + red row (what the job says)
-//   job only             → plain row      (kind 'note')
-//   saved only           → green row      (kind 'saved') so recorded hours
-//                          can't vanish just because a job was deleted
-// Several jobs sharing a key (two visits, same customer, same day) pair off IN
-// ORDER against the records with that key; extras stay unmatched rather than
-// silently merging.
+// Until v2026.08.19-0819 this screen also carried a separate `timelogs`
+// collection — "a job is a plan, a timelog is a fact" — and the grid was the
+// UNION of the two, painted green when they agreed and green+red when they
+// disagreed, with a Save hours button to reconcile them.
+//
+// That made sense while hours came from a hand-written note, which genuinely
+// was a different source from the schedule. It stopped making sense the moment
+// hours were typed onto the job itself: the job became the fact, and the second
+// copy could only ever drift from it. In practice that meant typing a correct
+// number and watching the row turn red at you, then having to press Save to
+// agree with yourself.
+//
+// So the records are gone from this screen. Editing an hours cell writes to the
+// job and that is the whole transaction. Existing timelog documents are left
+// alone in Firestore — nothing reads them now, and nothing deletes them.
 function iifGridRows() {
-  const byKey = new Map();
-  for (const t of iifVisibleTimeLogs()) {
-    if (!byKey.has(t._key)) byKey.set(t._key, []);
-    byKey.get(t._key).push(t);
-  }
   const rows = [];
   iifParsedEntries.forEach((e, idx) => {
     const emps = e.employees.length ? e.employees : [''];
     emps.forEach((emp, empIdx) => {
-      const key = iifEntryLogKey(e, emp);
-      const pool = byKey.get(key);
-      const log = (pool && pool.length) ? pool.shift() : null;
-      const base = { e, idx, emp, empIdx, first: empIdx === 0 };
-      // A job with no hours entered makes no claim, so it can't DISAGREE with a
-      // record — it just shows what's on record. Type a number into it and the
-      // disagreement appears as normal.
-      if (log && (!e.hours || sameHours(log.hours, e.hours))) {
-        // In sync. One row, and it stays editable — correcting an already
-        // saved line is exactly what you'd want to do next.
-        rows.push({ ...base, kind: 'saved', log, editable: true });
-      } else if (log) {
-        // A PAIR: the same work described two ways. The saved row states what's
-        // on record; the red row is what the job says now and is the one you
-        // edit and re-save. `pair` marks them so only one can be ticked — they
-        // are one piece of work, and exporting both would double it.
-        rows.push({ ...base, kind: 'saved', log, editable: false, pair: true });
-        rows.push({ ...base, kind: 'differs', log, editable: true, pair: true });
-      } else {
-        rows.push({ ...base, kind: 'note', editable: true });
-      }
+      rows.push({ e, idx, emp, empIdx, first: empIdx === 0, kind: 'note', editable: true });
     });
   });
-  // Anything saved that no note line claimed
-  for (const list of byKey.values()) {
-    for (const log of list) {
-      rows.push({ log, kind: 'saved', orphan: true, first: true, editable: false });
-    }
-  }
   return rows;
 }
 
 // ---- which rows are ticked ----
-// Keyed by ROW, not by entry+employee as before: orphan rows have no entry
-// behind them, and the two halves of a pair need to be tickable separately.
-// One map serves both Save hours and Download .iif, so "ticked" means the same
-// thing for both: this row is the truth. Cleared on every re-parse.
+// A tick means "include this in the QuickBooks file". Everything starts ticked;
+// cleared on every reload of the screen.
 let iifTickState = new Map();
 let iifRenderedRows = [];
-function iifRowTickId(row) {
-  if (row.orphan) return `log:${row.log.id}`;
-  if (row.kind === 'saved') return `saved:${row.log.id}`;
-  if (row.kind === 'differs') return `differs:${row.idx}:${row.empIdx}`;
-  return `note:${row.idx}:${row.empIdx}`;
-}
+function iifRowTickId(row) { return `${row.idx}:${row.empIdx}`; }
 function iifRowTicked(row) {
   const id = iifRowTickId(row);
-  if (!iifTickState.has(id)) {
-    // In a disagreeing pair the JOB is ticked by default — it's your most
-    // recent word on the matter. Everything else starts ticked.
-    iifTickState.set(id, !(row.kind === 'saved' && row.pair));
-  }
+  if (!iifTickState.has(id)) iifTickState.set(id, true);
   return iifTickState.get(id);
 }
-function setIifRowTick(row, on) {
-  iifTickState.set(iifRowTickId(row), on);
-  // Ticking one half of a pair unticks the other. Unticking leaves both off —
-  // "neither of these" is a legitimate answer.
-  if (on && row.pair) {
-    const partner = row.kind === 'saved'
-      ? `differs:${row.idx}:${row.empIdx}`
-      : `saved:${row.log.id}`;
-    iifTickState.set(partner, false);
-  }
-}
-// Timelogs for the range currently on screen, keyed for matching.
-function iifVisibleTimeLogs() {
-  const r = iifRangeFromInputs();
-  const from = r.from ? ymd(r.from) : '';
-  const to = r.to ? ymd(r.to) : '';
-  return Storage.listTimeLogsInRange(from, to).map(t => ({
-    ...t,
-    _key: iifLogKey(t.date, t.employeeName, t.customerName),
-  }));
-}
+function setIifRowTick(row, on) { iifTickState.set(iifRowTickId(row), on); }
+
 function iifShortDateFromIso(iso) {
   const d = parseYmd(iso);
   if (Number.isNaN(d.getTime())) return String(iso || '—');
   return d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
 }
-// What a row displays, whichever side it came from.
+// What a row displays. One source now — the calendar job behind it.
 function iifRowValues(row) {
-  if (row.kind === 'saved') {
-    const t = row.log;
-    return {
-      dateText: iifShortDateFromIso(t.date),
-      dateIso: t.date,
-      emp: t.employeeName || '',
-      cust: t.customerName || '',
-      hoursText: t.hoursFormatted || '',
-      confidence: null,
-    };
-  }
   const e = row.e;
   return {
     dateText: iifShortDate(e),
@@ -7466,7 +7374,6 @@ function iifRowValues(row) {
     emp: row.emp || '',
     cust: e.customerMatched || '',
     hoursText: e.hoursFormatted || '',
-    confidence: e.confidence,
   };
 }
 function iifRowKey(idx, empIdx) { return `${idx}:${empIdx}`; }
@@ -7521,15 +7428,24 @@ function iifCellHtml(row, col) {
     }
     if (col === 'customer') return `<td>${escapeHtml(v.cust || '—')}</td>`;
     if (col === 'hours') return `<td>${escapeHtml(v.hoursText || '—')}</td>`;
-    return `<td>${row.orphan ? '<span class="iif-tag">no job</span>' : ''}</td>`;
+    return '<td></td>';
   }
   const key = iifRowKey(idx, empIdx);
   const open = openIifCell === `${key}|hours`;
   const cellAttrs = `data-cellkey="${key}|hours" data-idx="${idx}" data-empidx="${empIdx}"`;
   if (open) {
+    // The ✓ is the way OUT of the cell on a phone: a numeric keyboard has no
+    // Return key to dismiss itself with, and tapping "somewhere else" on a
+    // grid means tapping another cell. It sits INSIDE the hours cell, which is
+    // safe only because Hours is the last column — the sticky tick and Date
+    // columns paint over the left edge of whatever is being edited, which is
+    // what killed two earlier attempts at in-cell buttons.
     return `<td class="price-cell price-cell-editing" ${cellAttrs}>
-      <input class="iif-edit-hours" type="text" inputmode="decimal" placeholder="3.5 or 3:30"
-             value="${escapeHtml(v.hoursText)}" /></td>`;
+      <div class="iif-edit-wrap">
+        <input class="iif-edit-hours" type="text" inputmode="decimal" placeholder="3.5 or 3:30"
+               value="${escapeHtml(v.hoursText)}" />
+        <button type="button" class="iif-edit-done" aria-label="Save hours and close">✓</button>
+      </div></td>`;
   }
   return `<td class="price-cell" ${cellAttrs}>${escapeHtml(v.hoursText || '—')}</td>`;
 }
@@ -7553,13 +7469,10 @@ function renderIIFEntries(entries) {
 
   iifRenderedRows = iifGridRows();
   const body = iifRenderedRows.map((row, i) => {
-    // Green = on record. Red = the job now says something different. (The
-    // orange needs-review tint went with the parser — a job has no confidence
-    // score, it just says what it says.)
-    const cls = [
-      row.kind === 'saved' ? 'iif-saved' : '',
-      row.kind === 'differs' ? 'iif-differs' : '',
-    ].filter(Boolean).join(' ');
+    // No row states left. Green meant "on record" and red meant "the job
+    // disagrees with the record"; with the records gone there is only one
+    // version of a number and nothing for a colour to say about it.
+    const cls = '';
     // EVERY row is tickable, so anything visible can be exported — including a
     // record whose job has since been deleted.
     const tick = `<input type="checkbox" class="iif-row-check" data-row="${i}" ${iifRowTicked(row) ? 'checked' : ''} />`;
@@ -7610,7 +7523,7 @@ function renderIifTotals() {
   for (const row of iifRenderedRows) {
     if (!iifRowTicked(row)) continue;
     const v = iifRowValues(row);
-    const hours = row.kind === 'saved' ? Number(row.log.hours) : Number(row.e && row.e.hours);
+    const hours = Number(row.e && row.e.hours);
     if (!v.emp || !v.dateIso || !(hours > 0)) continue;
     const wk = iifWeekKey(v.dateIso);
     if (!weeks.has(wk)) weeks.set(wk, new Map());
@@ -7640,17 +7553,7 @@ function renderIifTotals() {
       return `<tr><th class="iif-tot-name"><span class="cal-chip iif-emp-chip" style="${chipStyle(n)}">${escapeHtml(n)}</span></th>`
         + cells + `<td class="iif-tot-sum">${iifFmtHours(total)}</td></tr>`;
     }).join('');
-    // Everyone's day, so a Tuesday that looks light can be checked at a glance.
-    const dayAll = days.map(d => {
-      let t = 0;
-      for (const byDay of byEmp.values()) t += byDay.get(d) || 0;
-      return `<td>${iifFmtHours(t) || '·'}</td>`;
-    }).join('');
-    let grand = 0;
-    for (const byDay of byEmp.values()) for (const v of byDay.values()) grand += v;
-    const foot = `<tr class="iif-tot-all"><th class="iif-tot-name">Everyone</th>${dayAll}`
-      + `<td class="iif-tot-sum">${iifFmtHours(grand)}</td></tr>`;
-    return `<table class="iif-totals-table"><thead>${head}</thead><tbody>${rows}${foot}</tbody></table>`;
+    return `<table class="iif-totals-table"><thead>${head}</thead><tbody>${rows}</tbody></table>`;
   }).join('');
   box.innerHTML = tables;
 }
@@ -7836,6 +7739,29 @@ function wireIifGrid() {
     if (ev.key === 'Enter') { ev.preventDefault(); input.blur(); }
     else if (ev.key === 'Escape') { ev.preventDefault(); cancelled = true; input.blur(); }
   });
+
+  // ✓ — on POINTERDOWN, not click. Pressing it blurs the input, which closes
+  // the keyboard, which changes --app-vh; this screen is sized to --app-vh, so
+  // the whole thing reflows between pointerdown and pointerup, the button slides
+  // out from under the finger and no click is ever dispatched. (The same trap
+  // the old header Save button was written around — see its history in git.)
+  // preventDefault keeps focus put until we've read the value.
+  const doneBtn = editing.querySelector('.iif-edit-done');
+  if (doneBtn) {
+    doneBtn.addEventListener('pointerdown', (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      commit();
+      input.blur();          // hand the keyboard back
+    });
+    // Anything without pointer events, and keyboard users.
+    doneBtn.addEventListener('click', (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      commit();
+      input.blur();
+    });
+  }
 }
 
 // (The Save / Cancel bar that used to live in the sticky header went in
@@ -7940,18 +7866,11 @@ function runIIFParse() {
   const totalsBox = document.getElementById('iif-totals');
   if (totalsBox) { totalsBox.hidden = true; totalsBox.innerHTML = ''; }
   if (iifDownloadBtn) iifDownloadBtn.hidden = true;
-  if (iifSaveHoursBtn) iifSaveHoursBtn.hidden = true;
 
-  // Both fetches BEFORE drawing: the already-saved hours for this range (so the
-  // grid is green/red in one pass rather than flashing everything as unsaved),
-  // and any month of jobs outside the calendar's live window.
+  // One fetch: any month of jobs outside the calendar's live window. (The
+  // timelog fetch went with the records in v2026.08.19-0819.)
   const r0 = iifRangeFromInputs();
-  Promise.all([
-    Promise.resolve(
-      Storage.ensureTimeLogRange(r0.from ? ymd(r0.from) : '', r0.to ? ymd(r0.to) : '')
-    ).catch(() => {}),
-    ensureJobsForRange(r0).catch(() => {}),
-  ]).then(() => {
+  ensureJobsForRange(r0).catch(() => {}).then(() => {
     const range = iifRangeFromInputs();
     iifParsedEntries = jobEntriesInRange(range);
 
@@ -7964,58 +7883,25 @@ function runIIFParse() {
       : 'No calendar jobs between these dates. Add jobs on the calendar and enter each person’s hours there.';
     renderIIFEntries(iifParsedEntries);
     if (iifDownloadBtn) iifDownloadBtn.hidden = total === 0;
-    if (iifSaveHoursBtn) iifSaveHoursBtn.hidden = total === 0 || !isAdminRole();
   });
 }
 
-// ---- Save hours: the ticked job rows become timelog records ----
-// One record per PERSON. A row that already has a matching record is UPDATED
-// rather than duplicated — matching is by date + employee + customer, so the
-// only thing that can change is the hours.
-function iifRowsToSave() {
-  const out = [];
-  for (const row of iifRenderedRows) {
-    // Green rows are already records — an in-sync one has nothing to write,
-    // and the record half of a pair means "keep what's stored".
-    if (row.kind !== 'note' && row.kind !== 'differs') continue;
-    if (!iifRowTicked(row)) continue;
-    const e = row.e, emp = row.emp;
-    if (!emp) continue;                       // nobody to pay
-    if (!e.hours || e.hours <= 0) continue;   // nothing to record
-    if (!e.customerMatched) continue;
-    const cust = Storage.listCustomers().find(c => customerCrumbLabel(c.id) === e.customerMatched);
-    out.push({
-      // A red row carries the record it disagrees with, so this UPDATES rather
-      // than adding a second record for the same work.
-      id: row.log ? row.log.id : null,
-      date: iifIsoDate(e),
-      employeeName: emp,
-      customerId: cust ? cust.id : null,
-      customerName: e.customerMatched,
-      hours: e.hours,
-      hoursFormatted: e.hoursFormatted,
-      note: e.raw || '',
-    });
-  }
-  return out;
-}
+// (Save hours and iifRowsToSave went in v2026.08.19-0819 with the timelog
+// records. Editing an hours cell writes to the job immediately — there is
+// nothing left to save in a second step.)
 
-// The .iif is built from the TICKED ROWS, not from the job entries. That's what
-// makes every row exportable: a green row exports what's on record, a red row
-// exports what the job says, and a record whose job has since been deleted can
-// still reach QuickBooks. Pairs are mutually exclusive, so the same work can
-// never appear twice.
+// The .iif is built from the TICKED ROWS. Untick anything you aren't ready to
+// send; the rows themselves are just the calendar.
 function iifExportEntries() {
   return iifRenderedRows
     .filter(iifRowTicked)
     .map(row => {
       const v = iifRowValues(row);
       const d = parseYmd(v.dateIso);
-      const hours = row.kind === 'saved' ? Number(row.log.hours) : Number(row.e.hours);
       return {
         dateFormatted: Number.isNaN(d.getTime()) ? '' : iifFormatDate(d),
         employees: v.emp ? [v.emp] : [],
-        hours,
+        hours: Number(row.e && row.e.hours),
         hoursFormatted: v.hoursText,
         customerMatched: v.cust,
       };
@@ -8023,28 +7909,6 @@ function iifExportEntries() {
     // generateIIF skips these anyway; dropping them here keeps the count honest
     .filter(e => e.employees.length && e.hours > 0 && e.customerMatched && e.dateFormatted);
 }
-if (iifSaveHoursBtn) iifSaveHoursBtn.addEventListener('click', async () => {
-  if (!isAdminRole()) return;
-  const recs = iifRowsToSave();
-  if (!recs.length) {
-    iifStatus.textContent = 'Nothing new to save — every ticked row is already on record.';
-    return;
-  }
-  const updates = recs.filter(r => r.id).length;
-  const adds = recs.length - updates;
-  iifSaveHoursBtn.disabled = true;
-  iifStatus.innerHTML = '<span class="nav-spinner" style="width:16px;height:16px;border-width:2px;vertical-align:middle;"></span> Saving hours…';
-  try {
-    await Storage.saveTimeLogsBulk(recs);
-    iifStatus.textContent = `Saved ${adds} new record${adds === 1 ? '' : 's'}` +
-      (updates ? `, updated ${updates}` : '') + '.';
-  } catch (err) {
-    console.error(err);
-    iifStatus.textContent = 'Could not save hours. If this is the first time, the Firestore rules may not be deployed yet.';
-  }
-  iifSaveHoursBtn.disabled = false;
-  renderIIFEntries(iifParsedEntries);
-});
 
 // A SCREEN, not a sheet: you navigate to it, and the system back button (or
 // ‹ Back) leaves it like any other screen. Entered fresh every time — the jobs
@@ -8479,7 +8343,7 @@ function tutorialSteps(part) {
         screen: 'calendar',
         setup: goMonth,
         target: () => document.getElementById('cal-today'),
-        text: 'Today brings you back to this month from wherever you’ve wandered.',
+        text: 'Jump to today brings you back from wherever you’ve wandered — to this month, or to this week if you’re in week view.',
       },
       {
         screen: 'calendar',
@@ -8602,15 +8466,7 @@ function tutorialSteps(part) {
         requires: hasJobs,
         setup: goHours,
         target: () => document.querySelector('#iif-grid .price-cell'),
-        text: 'Hours is the only thing you change here, and the number goes straight back onto the job. Date, employee and customer belong to the job — fix those on the calendar.',
-      },
-      {
-        screen: 'hours',
-        group: 'hoursjobs',
-        requires: () => hasJobs() && Storage.getRole() === 'admin',
-        setup: goHours,
-        target: () => document.getElementById('iif-save-hours-btn'),
-        text: 'Save hours records the ticked rows. Saved rows turn green. If the job’s hours change later, the record stays green and the job’s new number appears in red beside it — tick whichever one is right.',
+        text: 'Hours is the only thing you change here. Tap a cell, type the number, and it is saved onto the job the moment you leave the cell — tap the ✓ to finish and put the keyboard away. Date, employee and customer belong to the job, so fix those on the calendar.',
       },
       {
         screen: 'hours',

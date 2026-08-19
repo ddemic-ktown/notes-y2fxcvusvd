@@ -527,6 +527,13 @@ body.hours-open {
 .cal-main { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
 .cal-grid { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 6px; }
 .cal-nav { display: flex; align-items: center; gap: 2px; flex-shrink: 0; }
+/* One button, two labels — see index.html. Full wording where there's room,
+   just "Today" on a phone, where the Week/Month toggle sits beside it. */
+.cal-today-short { display: none; }
+@media (max-width: 430px) {
+  .cal-today-long { display: none; }
+  .cal-today-short { display: inline; }
+}
 /* Cues that there's a month above and below — named, and tappable */
 .cal-cue {
   display: block;
@@ -1518,7 +1525,25 @@ body.dark-mode .iif-grid tbody tr.iif-needs-review td { background: #2d1a00; }
 .iif-grid tbody tr.iif-differs td:first-child { box-shadow: inset 3px 0 0 #dc2626; }
 body.dark-mode .iif-grid tbody tr.iif-saved td { background: #052e1b; }
 body.dark-mode .iif-grid tbody tr.iif-differs td { background: #3f1212; }
+/* .iif-saved / .iif-differs are no longer applied (v2026.08.19-0819 removed the
+   separate hour records the green/red pair described). Rules left in place: they
+   cost nothing and are the fastest way back if records ever return. */
 .iif-tag { font-size: calc(11px * var(--price-scale)); color: var(--ink-soft); font-style: italic; }
+
+/* The editing cell: input plus the ✓ that commits it and closes the keyboard.
+   Safe inside the cell only because Hours is the LAST column — the sticky tick
+   and Date columns paint over the left edge of whatever is being edited. */
+.iif-edit-wrap { display: flex; align-items: center; gap: 4px; }
+.iif-edit-wrap .iif-edit-hours { flex: 1; min-width: 0; }
+.iif-edit-done {
+  flex: 0 0 auto;
+  min-width: 34px; min-height: 34px;      /* a thumb target, not a glyph */
+  border: 1px solid var(--accent); border-radius: 6px;
+  background: var(--accent); color: #fff;
+  font-size: 15px; font-weight: 700; line-height: 1;
+  cursor: pointer; padding: 0;
+}
+.iif-edit-done:active { opacity: 0.8; }
 
 /* Employee chips in the hours chart — same colours as the calendar, but this
    is a dense table, so they sit tighter than a calendar cell's. */

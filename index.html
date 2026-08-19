@@ -228,10 +228,13 @@
       <div class="customers-header-top">
         <button class="icon-btn date-btn app-back-btn" aria-label="Back">‹ Back</button>
         <nav class="crumbs" id="crumbs-calendar" aria-label="Breadcrumb"></nav>
-        <div class="cal-nav" role="group" aria-label="Change month">
+        <div class="cal-nav" role="group" aria-label="Calendar view">
           <!-- Labelled with the view it switches TO, not the one you're in. -->
           <button id="cal-mode" class="icon-btn date-btn" type="button">Week</button>
-          <button id="cal-today" class="icon-btn date-btn">Today</button>
+          <!-- Two labels, one button: the header also carries the Week/Month
+               toggle now, and two full-length labels crowd a phone. CSS swaps
+               them at the 430px breakpoint. -->
+          <button id="cal-today" class="icon-btn date-btn" type="button" aria-label="Jump to today"><span class="cal-today-long">Jump to today</span><span class="cal-today-short">Today</span></button>
         </div>
         <div class="editor-more-wrap">
           <button id="cal-more-btn" class="icon-btn date-btn editor-more-btn" type="button" aria-label="More calendar options">⋯</button>
@@ -454,7 +457,6 @@
         <div id="iif-totals" class="iif-totals" hidden></div>
       </div>
       <div class="iif-footer">
-        <button id="iif-save-hours-btn" class="secondary iif-download-btn" hidden>Save hours</button>
         <button id="iif-download-btn" class="primary iif-download-btn" hidden>Download .iif</button>
       </div>
     </main>
