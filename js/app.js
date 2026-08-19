@@ -19,6 +19,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 20, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.08.19-0033', 'The calendar tour now shows where hours go on a job, and a new Tutorial 8 covers users, invites, trash, backup and sample data'],
   ['v2026.08.19-0020', 'A new company sees two dismissible cards on the home screen — take the tour, add sample data — instead of a pop-up'],
   ['v2026.08.19-0007', 'A new-company invite is now tied to one company, expires after 14 days, and any admin can rename their own company'],
   ['v2026.08.18-2359', 'Invite someone to start their own company — a separate org with its own data, which they administer'],
@@ -8078,7 +8079,9 @@ let tutorialStartPart = 1; // the part the user launched — back never goes bef
 // role, and reached from that screen's own ⋯ menu. They always end on
 // themselves, which is what tutorialSolo does.
 const TUTORIAL_PARTS = 5;
-const SOLO_PARTS = [6, 7];
+// Parts outside the linear 1→5 chain: one subject each, not daily reading for
+// every role, so each ends on itself rather than rolling into the next.
+const SOLO_PARTS = [6, 7, 8];
 let tutorialSolo = false;
 // The step the user launched from. Normally 0; a skip-home launch starts
 // later, and Back must not reverse into a step we just said doesn't apply.
@@ -8355,6 +8358,29 @@ function tutorialSteps(part) {
         text: 'Press and hold a job to pick it up and drag it to a new time; drag the corner to change how long it runs. Both snap to quarter hours. A quick tap opens it for editing.',
       },
       {
+        // THE STEP THIS TOUR WAS MISSING. The Hours chart is built entirely
+        // from these numbers, and until v2026.08.19-0033 the only mention of
+        // them was part 7's fallback — the step that DISAPPEARS as soon as you
+        // have jobs, so anyone with a calendar never saw it.
+        screen: 'calendar',
+        group: 'jobhours',
+        requires: () => canEditJobs() && Storage.listJobs().length > 0,
+        setup: async () => {
+          if (!canEditJobs()) return false;
+          const jobs = Storage.listJobs();
+          // Prefer a job that has people on it — the hours boxes only exist
+          // beside a name, so an empty job would point the bubble at nothing.
+          const job = jobs.find(j => (j.employeeNames || []).length) || jobs[0];
+          if (!job) return false;
+          if (!calendarView.classList.contains('active')) showCalendar();
+          openJobModal(job.id);
+          await new Promise(r => setTimeout(r, 60));   // let the modal paint
+          return true;
+        },
+        target: () => document.getElementById('job-employees'),
+        text: 'Tick who is going, and once the job is done type the hours each person worked beside their name. This box is where the Hours chart gets its numbers — nothing reaches QuickBooks until it is filled in.',
+      },
+      {
         screen: 'settings',
         requires: () => Storage.getRole() === 'admin',
         setup: () => { showSettings(); return true; },
@@ -8435,6 +8461,55 @@ function tutorialSteps(part) {
         target: () => document.getElementById('iif-download-btn'),
         text: 'Download .iif writes the ticked rows as a QuickBooks import file. Untick anything you’re not ready to send.',
       },
+    ];
+  }
+
+  // part 8 — administration. Solo, admin-only, and entirely on the Settings
+  // screen. This was the whole missing category: the tour covered notes,
+  // customers, prices, the calendar and hours, and said nothing about users,
+  // roles, invites, trash, backup or sample data — which are most of what a new
+  // company's owner needs in week one.
+  //
+  // No `requires` on most steps: isTargetVisible() already skips a step whose
+  // target is hidden, and every row here is hidden by role or by circumstance
+  // (the new-company block only exists for the founder). Letting that do the
+  // work keeps the conditions in ONE place rather than duplicating each row's
+  // visibility rule as a predicate that could drift out of step with it.
+  if (part === 8) {
+    // showSettings pushes history, so only call it when we aren't there —
+    // otherwise the back button is buried under one entry per bubble.
+    const goSettings = () => {
+      if (!settingsView.classList.contains('active')) showSettings();
+      return true;
+    };
+    const row = (id) => () => {
+      const el = document.getElementById(id);
+      return el ? (el.closest('.setting-row') || el) : null;
+    };
+    const step = (target, text) => ({ screen: 'settings', setup: goSettings, target, text });
+    return [
+      step(() => document.getElementById('members-list'),
+        'Everyone with access to this company, and what each can do. Admin does everything. Bookkeeper sees everything but changes nothing. Employee sees only the notes and jobs given to them. Customer sees only their own.'),
+      step(() => document.getElementById('invite-email'),
+        'Invite someone by email and pick what they are. They get a link that signs them straight in — no password to set up first. Get the role wrong and you can change it here afterwards; it takes effect on their phone immediately.'),
+      step(() => document.getElementById('invites-list'),
+        'Invitations you have sent that nobody has accepted yet. Cancel one with ✕ if you invited the wrong address.'),
+      step(() => document.getElementById('new-org-email'),
+        'This is different: it starts someone their OWN company, with their own customers, calendar and hours. Nothing of yours goes with it and you cannot see inside it. The invitation lasts 14 days.'),
+      step(() => document.getElementById('org-name-input'),
+        'Your company name, shown at the top of this Account section. Change it whenever you like.'),
+      step(() => document.getElementById('employee-list'),
+        'Your crew. Apprentice or journeyman is not just a label — it picks which QuickBooks item their hours are billed against, so getting it wrong makes the import land in the wrong place.'),
+      step(() => document.getElementById('customer-link-list'),
+        'Link a customer to an app account and they can sign in to see the jobs you have booked for them — the date, the time and who is coming. Nothing else.'),
+      step(row('seed-btn'),
+        'Fills the app with example customers, jobs, hours and prices so you can try anything without touching real work. Remove takes every bit of it back out and tells you exactly what it is deleting first.'),
+      step(row('trash-open-btn'),
+        'Deleting is not final. Notes and customers go here for 30 days and can be put back — including a customer with all their notes.'),
+      step(row('backup-btn'),
+        'Downloads everything as one file you can keep. Worth doing before anything drastic. Photos and documents are NOT in it — those live on the device.'),
+      step(row('import-csv-btn'),
+        'Already have your customers in a spreadsheet? Paste the rows here and each one becomes a customer with their details as their first note.'),
     ];
   }
 
