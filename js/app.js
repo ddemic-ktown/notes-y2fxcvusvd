@@ -20,6 +20,8 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 20, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.08.27-2120', 'Dragging a row while sorted by latest puts the table back into your own order first, so the row lands where you drop it'],
+  ['v2026.08.27-2116', 'The price table’s Layout button stays available while sorted by latest, and the sort button now reads as a state'],
   ['v2026.08.27-2106', 'The price table gets a blue + in the corner for a new item or vendor, replacing the two header buttons'],
   ['v2026.08.27-2031', 'Opening an hours cell no longer shifts the chart on a desktop; on a phone it still brings the row into view'],
   ['v2026.08.27-1940', 'The hours chart shades alternate days, so a day’s rows read as one block'],
@@ -2037,13 +2039,13 @@ function renderPriceTable() {
   const reorderBtn = document.getElementById('price-reorder');
   const importBtn = document.getElementById('price-import');
   const exportBtn = document.getElementById('price-export');
-  // Dragging rows edits the MANUAL order, which isn't what you're looking at
-  // while sorted by latest — so it's offered only in Custom.
-  if (reorderBtn) reorderBtn.hidden = !canEdit || priceSort === 'latest';
+  if (reorderBtn) reorderBtn.hidden = !canEdit;
   const sortBtn = document.getElementById('price-sort');
   if (sortBtn) {
+    // Reads as a STATE, not an instruction. "Sort: Latest" was taken as "press
+    // me to sort by latest", so pressing it looked like it did the opposite.
     sortBtn.hidden = !Storage.canViewPriceTable();
-    sortBtn.textContent = priceSort === 'latest' ? 'Sort: Latest' : 'Sort: Custom';
+    sortBtn.textContent = priceSort === 'latest' ? 'Sorted: Latest' : 'Sorted: Custom';
     sortBtn.classList.toggle('active', priceSort === 'latest');
   }
   if (importBtn) importBtn.hidden = !canEdit;
@@ -2206,6 +2208,22 @@ function wirePriceHeaderDrag(el, axis, id) {
     dragged = false;
     timer = setTimeout(() => {
       timer = null;
+      // ROWS only. The sort reorders rows on top of the saved order, so a drag
+      // in Latest would move the row somewhere you can't see; flipping to
+      // Custom first makes the drag move what is on screen. Vendor columns
+      // keep their own order and are never re-sorted, so a column drag (axis
+      // 'x') needs none of this.
+      if (axis === 'y' && priceSort === 'latest') {
+        priceSort = '';
+        localStorage.removeItem('na-price-sort');
+        // Same buzz a real drag gives, so the press doesn't feel ignored — the
+        // rows visibly resort, then a second press picks one up.
+        if (navigator.vibrate) navigator.vibrate(10);
+        renderPriceTable();
+        // The table was just rebuilt, so this element is gone — the press ends
+        // here and the drag starts on the next one.
+        return;
+      }
       priceDrag = { el, axis, id, target: null };
       el.classList.add('price-dragging');
       // Second line of defence: the axis is already reserved in CSS, but where
@@ -2702,18 +2720,28 @@ if (priceSortBtn) priceSortBtn.addEventListener('click', () => {
   else localStorage.removeItem('na-price-sort');
   // Leaving Layout mode on while the rows resort would show drag handles for
   // an order that isn't the one being displayed.
-  if (priceSort === 'latest' && priceReorderMode) {
-    priceReorderMode = false;
-    if (priceReorderBtn) {
-      priceReorderBtn.setAttribute('aria-pressed', 'false');
-      priceReorderBtn.textContent = 'Layout';
-      priceReorderBtn.classList.remove('active');
-    }
-  }
+  if (priceSort === 'latest' && priceReorderMode) exitPriceReorderMode();
   renderPriceTable();
 });
+// Shared by the Layout button and the sort toggle, so the button's label,
+// pressed state and the mode flag can't drift apart.
+function exitPriceReorderMode() {
+  priceReorderMode = false;
+  priceSelItems.clear(); priceSelVendors.clear();
+  if (priceReorderBtn) {
+    priceReorderBtn.setAttribute('aria-pressed', 'false');
+    priceReorderBtn.textContent = 'Layout';
+    priceReorderBtn.classList.remove('active');
+  }
+}
 const priceReorderBtn = document.getElementById('price-reorder');
 if (priceReorderBtn) priceReorderBtn.addEventListener('click', () => {
+  // Dragging edits the MANUAL order, so entering Layout puts the table back
+  // into it — otherwise you'd be rearranging rows you aren't looking at.
+  if (!priceReorderMode && priceSort === 'latest') {
+    priceSort = '';
+    localStorage.removeItem('na-price-sort');
+  }
   priceReorderMode = !priceReorderMode;
   priceReorderBtn.setAttribute('aria-pressed', String(priceReorderMode));
   priceReorderBtn.textContent = priceReorderMode ? 'Done' : 'Layout';
