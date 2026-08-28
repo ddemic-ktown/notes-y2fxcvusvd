@@ -20,6 +20,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 20, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.08.27-2210', 'Day groups in the hours chart alternate between the two theme shades across the whole row'],
   ['v2026.08.27-2200', 'The hours chart’s day shading now reads evenly across the whole row, in both light and dark'],
   ['v2026.08.27-2156', 'The price table’s + hides while you are entering a price'],
   ['v2026.08.27-2153', 'Cancelling a new customer lands on the home screen instead of opening whichever note was under your finger'],
