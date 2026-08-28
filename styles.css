@@ -1568,13 +1568,19 @@ body.dark-mode .compiled-action.danger-soft { color: #f87171; border-color: #b91
    columns included — those carry their own opaque `background: var(--bg)` so
    they can pass under the rest of the table, and without this the band would
    stop dead at the left edge. Listed before the row-state rules so a tinted
-   row still wins over the band. */
+   row still wins over the band.
+
+   ONE colour for the whole row, and it has to read against BOTH defaults: the
+   sticky columns sit on --bg and the rest on --surface. The first attempt was
+   picked against --bg alone, so the tick and Date shifted clearly while the
+   body cells barely moved — and in dark mode the tint was within a hair of
+   --surface, which made most of the row look unbanded. */
 .iif-grid tbody tr.iif-day-band td:not(.price-cell-editing),
 .iif-grid tbody tr.iif-day-band td.iif-check,
-.iif-grid tbody tr.iif-day-band td.iif-date { background: #eceef2; }
+.iif-grid tbody tr.iif-day-band td.iif-date { background: #e3e7ee; }
 body.dark-mode .iif-grid tbody tr.iif-day-band td:not(.price-cell-editing),
 body.dark-mode .iif-grid tbody tr.iif-day-band td.iif-check,
-body.dark-mode .iif-grid tbody tr.iif-day-band td.iif-date { background: #1b2433; }
+body.dark-mode .iif-grid tbody tr.iif-day-band td.iif-date { background: #2b3648; }
 .iif-grid tbody tr.iif-needs-review td { background: #fff7ed; }
 body.dark-mode .iif-grid tbody tr.iif-needs-review td { background: #2d1a00; }
 /* GREEN = on record in timelogs. RED = the note now says something different.

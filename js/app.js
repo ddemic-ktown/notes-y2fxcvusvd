@@ -20,6 +20,9 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 20, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.08.27-2200', 'The hours chart’s day shading now reads evenly across the whole row, in both light and dark'],
+  ['v2026.08.27-2156', 'The price table’s + hides while you are entering a price'],
+  ['v2026.08.27-2153', 'Cancelling a new customer lands on the home screen instead of opening whichever note was under your finger'],
   ['v2026.08.27-2120', 'Dragging a row while sorted by latest puts the table back into your own order first, so the row lands where you drop it'],
   ['v2026.08.27-2116', 'The price table’s Layout button stays available while sorted by latest, and the sort button now reads as a state'],
   ['v2026.08.27-2106', 'The price table gets a blue + in the corner for a new item or vendor, replacing the two header buttons'],
@@ -2032,9 +2035,12 @@ function renderPriceTable() {
   // Action buttons are admin/shared-employee only; Share is admin only
   const shareBtn = document.getElementById('price-share');
   // Both add actions live in the FAB menu now, so one control carries them.
+  // It also goes away while a cell is open: it floats over the bottom-right of
+  // the table, which is where the keyboard pushes the open cell.
   const priceFabEl = document.getElementById('price-fab');
-  if (priceFabEl) priceFabEl.hidden = !canEdit;
-  if (!canEdit) { const m = document.getElementById('price-fab-menu'); if (m) m.hidden = true; }
+  const fabAllowed = canEdit && !openCellKey;
+  if (priceFabEl) priceFabEl.hidden = !fabAllowed;
+  if (!fabAllowed) { const m = document.getElementById('price-fab-menu'); if (m) m.hidden = true; }
   if (shareBtn) shareBtn.hidden = !isAdminRole();
   const reorderBtn = document.getElementById('price-reorder');
   const importBtn = document.getElementById('price-import');
@@ -5392,6 +5398,19 @@ function updateCancelBtn() {
 // button and Android's system back use, so save flushing and return-screen
 // logic are shared. commitAndCleanupEditor only discards a record that is still
 // completely empty, so anything typed survives.
+// Acting on POINTERDOWN means the screen changes before the finger lifts, so
+// the release lands on whatever has moved under it — a Recent Notes card, on
+// the way home. Swallow taps for a moment afterwards. Capture phase, so it is
+// gone before any card's own handler sees it.
+let navTapSuppressedUntil = 0;
+function suppressNavTaps(ms = 500) { navTapSuppressedUntil = Date.now() + ms; }
+document.addEventListener('click', (e) => {
+  if (Date.now() >= navTapSuppressedUntil) return;
+  navTapSuppressedUntil = 0;     // one tap only — never swallow a second
+  e.stopPropagation();
+  e.preventDefault();
+}, true);
+
 // FIRES ON POINTERDOWN, not click — the same trap the hours ✓ was written
 // around. This button sits at the bottom of the screen with the keyboard up:
 // the tap blurs the field, the keyboard closes, --app-vh changes, the layout
@@ -5407,6 +5426,7 @@ const editorDoneAction = (ev) => {
   // Two events for one press (pointerdown then click) must not run twice.
   if (Date.now() - doneGuard < 700) return;
   doneGuard = Date.now();
+  if (ev && ev.type === 'pointerdown') suppressNavTaps();
   // Captured now: commitAndCleanupEditor clears pendingNewRecord on the way out.
   const rec = pendingNewRecord;
   // Drop the keyboard first: leaving it up over the destination screen looks
@@ -5456,6 +5476,7 @@ const editorCancelAction = (ev) => {
   if (ev) { ev.preventDefault(); ev.stopPropagation(); }
   if (Date.now() - cancelGuard < 700) return;
   cancelGuard = Date.now();
+  if (ev && ev.type === 'pointerdown') suppressNavTaps();
   const rec = pendingNewRecord;
   if (!rec) return;
   if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
