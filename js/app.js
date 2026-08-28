@@ -11,6 +11,7 @@ import {
 // hours chart is built from calendar jobs now. The parser is still exported
 // from iif.js, unchanged, so switching back is a one-line change.
 import { generateIIF, fuzzyMatchCustomer,
+         DEFAULT_ITEM_APPRENTICE, DEFAULT_ITEM_JOURNEYMAN,
          formatDate as iifFormatDate, formatDuration } from "./iif.js";
 import { LocalFiles } from "./files.js";
 
@@ -19,6 +20,20 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 20, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.08.27-2031', 'Opening an hours cell no longer shifts the chart on a desktop; on a phone it still brings the row into view'],
+  ['v2026.08.27-1940', 'The hours chart shades alternate days, so a day’s rows read as one block'],
+  ['v2026.08.27-1936', 'In the day view the crew now sits beside the customer name when it fits, so short jobs stop hiding who is on them'],
+  ['v2026.08.27-1933', 'Price table can sort by most recently priced, and a new item is added at the top instead of the bottom'],
+  ['v2026.08.27-1930', 'A just-created customer or note is finished with labelled Save and Cancel buttons instead of a ✓ and an ✕'],
+  ['v2026.08.27-1928', 'The green ✓ on a new customer or note saves and leaves on the first tap instead of only lowering the keyboard'],
+  ['v2026.08.27-1925', 'Filter the hours chart to one employee — the totals and the QuickBooks file follow the filter'],
+  ['v2026.08.27-1918', 'The month grid now fits the screen on Android — the last week row no longer sits behind the address bar'],
+  ['v2026.08.27-1913', 'The price table’s colour legend moved into the ⋯ menu, so it is out of the way while you type a price'],
+  ['v2026.08.27-1908', 'The day view’s ‹ › arrows and header stay put instead of scrolling away with the top of the day'],
+  ['v2026.08.27-1905', 'The calendar and day view now show the month or day you are on between the ‹ › cues, so a cue can’t be mistaken for the current date'],
+  ['v2026.08.27-1900', 'Months and weeks now change with a left/right swipe instead of up/down, with ‹ › cues above the grid'],
+  ['v2026.08.20-2212', 'Pending invites can be resent, and inviting a new company gives you a message to send them if the email goes astray'],
+  ['v2026.08.19-1223', 'The two QuickBooks service item names are now editable in Settings instead of being fixed in the code'],
   ['v2026.08.19-1152', 'Rename an employee — the new name replaces the old one on every job they are on, past and future'],
   ['v2026.08.19-1134', 'QuickBooks item names lose the space after the colon, which was making every apprentice row fail to import'],
   ['v2026.08.19-0830', 'Fixed the ✓ in the hours chart sometimes leaving the cell open instead of closing it'],
@@ -195,6 +210,48 @@ function getEmployeeTypeMap() {
   getEmployees().forEach(e => { map[e.name.toLowerCase()] = e.type; });
   return map;
 }
+// ---------- QuickBooks service items ----------
+// Which QB Service item each classification bills against. Stored per company
+// because it describes THEIR QuickBooks file, not the app. Empty means "use the
+// built-in default" — see generateIIF.
+function getIifItems() {
+  const st = Storage.getSettings();
+  return {
+    apprentice: (st.iifItemApprentice || '').trim() || DEFAULT_ITEM_APPRENTICE,
+    journeyman: (st.iifItemJourneyman || '').trim() || DEFAULT_ITEM_JOURNEYMAN,
+  };
+}
+function renderIifItemFields() {
+  const a = document.getElementById('iif-item-apprentice');
+  const j = document.getElementById('iif-item-journeyman');
+  const items = getIifItems();
+  // Only when not focused: this runs on every settings render, and the settings
+  // listener fires on your own write — so it would otherwise yank the cursor
+  // out of the field you are typing in.
+  if (a && document.activeElement !== a) a.value = items.apprentice;
+  if (j && document.activeElement !== j) j.value = items.journeyman;
+}
+function wireIifItemFields() {
+  const pairs = [
+    ['iif-item-apprentice', 'iifItemApprentice'],
+    ['iif-item-journeyman', 'iifItemJourneyman'],
+  ];
+  for (const [id, key] of pairs) {
+    const el = document.getElementById(id);
+    if (!el || el.dataset.wired) continue;
+    el.dataset.wired = '1';       // wired once; the field is never re-created
+    // 'change', not 'input': one Firestore write when you finish, not one per
+    // keystroke. Same reasoning as the employee colour picker.
+    el.addEventListener('change', async () => {
+      const v = el.value.trim();
+      await Storage.setSetting(key, v);
+      // Cleared means "back to the default" — show what will actually be
+      // written rather than leaving the box misleadingly blank.
+      if (!v) renderIifItemFields();
+    });
+  }
+}
+
 // FEATURE FLAG. Set to false and the rename button disappears everywhere; the
 // code behind it (Storage.renameEmployee) stays put, so turning it back on is
 // the same one-word change. Same pattern as ALLOW_SELF_SIGNUP in storage.js.
@@ -915,7 +972,7 @@ function renderCalendar() {
       <div class="cal-daynum">${d.getDate()}</div>${lines}${more}
     </div>`;
   }).join('');
-  // Cues so it's obvious there's more above and below — naming the month beats
+  // Cues so it's obvious there's more either side — naming the month beats
   // a bare arrow, and both are tappable for people who'd rather not swipe.
   const cueLabel = (delta) => {
     if (calMode === 'week') {
@@ -927,10 +984,15 @@ function renderCalendar() {
     }
     return MONTH_NAMES[new Date(calCursor.getFullYear(), calCursor.getMonth() + delta, 1).getMonth()];
   };
-  const cueUp = `<button type="button" class="cal-cue cal-cue-up" data-shift="-1">∧ ${escapeHtml(cueLabel(-1))}</button>`;
-  const cueDown = `<button type="button" class="cal-cue cal-cue-down" data-shift="1">∨ ${escapeHtml(cueLabel(1))}</button>`;
+  // One row, prev on the left and next on the right — the same shape the day
+  // view uses, now that both change with a left/right swipe.
+  const cues = `<div class="cal-cues">`
+    + `<button type="button" class="cal-cue cal-cue-side" data-shift="-1">‹ ${escapeHtml(cueLabel(-1))}</button>`
+    + `<span class="cal-cue-current">${escapeHtml(cueLabel(0))}</span>`
+    + `<button type="button" class="cal-cue cal-cue-side" data-shift="1">${escapeHtml(cueLabel(1))} ›</button>`
+    + `</div>`;
   calGrid.classList.toggle('cal-grid-week', calMode === 'week');
-  calGrid.innerHTML = cueUp + `<div class="cal-headrow">${head}</div><div class="cal-cells">${cells}</div>` + cueDown;
+  calGrid.innerHTML = cues + `<div class="cal-headrow">${head}</div><div class="cal-cells">${cells}</div>`;
   const modeBtn = document.getElementById('cal-mode');
   if (modeBtn) {
     // Labelled with where it GOES, not where you are — a button that says
@@ -1068,12 +1130,16 @@ function renderCalendarDay() {
     { label: dayMonth, go: 'calendar' },
     { label: dayCrumbLabel(calSelectedDate) },
   ]);
-  // Swipe cues, same idea as the month view's ∧/∨ — naming the day beats a bare
-  // arrow, and both are tappable for anyone who'd rather not swipe.
+  // Swipe cues, same idea as the month view's — naming the day beats a bare
+  // arrow, and both are tappable for anyone who'd rather not swipe. The day you
+  // are ON sits between them: two dates and nothing marking the current one
+  // meant the prev cue got read as today's date.
   const prevBtn = document.getElementById('cal-day-prev');
   const nextBtn = document.getElementById('cal-day-next');
+  const curDay = document.getElementById('cal-day-current');
   if (prevBtn) prevBtn.textContent = `‹ ${shortDay(shiftYmd(calSelectedDate, -1))}`;
   if (nextBtn) nextBtn.textContent = `${shortDay(shiftYmd(calSelectedDate, 1))} ›`;
+  if (curDay) curDay.textContent = shortDay(calSelectedDate);
 
   const canEdit = isAdminRole();
   const dayFab = document.getElementById('cal-day-fab');
@@ -1128,12 +1194,21 @@ function renderCalendarDay() {
     // The note often carries internal remarks, so customers don't get it.
     const note = isCustomerRole() ? '' : (j.description || '').trim();
     const roomForNote = height >= 76;
-    return `<div class="cal-block" data-job="${j.id}" style="top:${top}px;height:${height}px;left:${left};width:${width}">
+    // The customer and the crew share a line. Normally the row WRAPS, so the
+    // chips sit beside a short name and drop underneath a long one. On a short
+    // block there is no underneath — a half-hour job is ~24px — so `tight`
+    // forbids the wrap and lets the NAME truncate instead: losing the tail of
+    // a name you can read the start of beats losing the chips entirely.
+    const tight = height < 52;
+    const addr = j.address && !tight ? `<div class="cal-block-addr">${escapeHtml(j.address)}</div>` : '';
+    return `<div class="cal-block${tight ? ' cal-block-tight' : ''}" data-job="${j.id}" style="top:${top}px;height:${height}px;left:${left};width:${width}">
       <span class="cal-block-bar" style="${crewBarStyle(names)}"></span>
-      <div class="cal-block-time">${escapeHtml(timeTxt)}</div>
-      <div class="cal-block-who">${escapeHtml(who)}</div>
-      ${j.address ? `<div class="cal-block-addr">${escapeHtml(j.address)}</div>` : ''}
-      <div class="cal-block-chips">${chips}</div>
+      ${tight ? '' : `<div class="cal-block-time">${escapeHtml(timeTxt)}</div>`}
+      <div class="cal-block-head">
+        <div class="cal-block-who">${escapeHtml(who)}</div>
+        <div class="cal-block-chips">${chips}</div>
+      </div>
+      ${addr}
       ${note && roomForNote ? `<div class="cal-block-note">${escapeHtml(note)}</div>` : ''}
       ${canEdit ? '<div class="cal-resize" aria-hidden="true"></div>' : ''}
     </div>`;
@@ -1303,7 +1378,7 @@ function calShiftMonth(delta) {
   }
   renderCalendar();
   // renderCalendar rebuilds .cal-cells, so grab it after the render
-  calSlide(calGrid && calGrid.querySelector('.cal-cells'), delta > 0 ? 'up' : 'down');
+  calSlide(calGrid && calGrid.querySelector('.cal-cells'), delta > 0 ? 'left' : 'right');
 }
 function setCalMode(mode) {
   calMode = mode === 'week' ? 'week' : 'month';
@@ -1321,25 +1396,19 @@ function setCalMode(mode) {
   }
   renderCalendar();
 }
-// Desktop: the wheel changes months once the grid has nothing left to scroll,
-// which is the same feel as the swipe. The toolbar arrows are gone — the ∧/∨
-// cues above and below the grid remain clickable for anyone using a mouse.
+// Desktop: a SIDEWAYS wheel/trackpad scroll changes months, which is the same
+// feel as the swipe. Vertical is left alone so the grid can scroll its own
+// overflow; a plain mouse with no horizontal axis uses the ‹ › cues, which are
+// ordinary buttons.
 if (calGrid) {
   let lastWheel = 0;
   calGrid.addEventListener('wheel', (e) => {
-    if (Math.abs(e.deltaY) < Math.abs(e.deltaX)) return;   // horizontal scroll
-    const cells = calGrid.querySelector('.cal-cells');
-    if (cells) {
-      // Let the grid scroll itself first; only shift at the edges.
-      const atTop = cells.scrollTop <= 0;
-      const atBottom = cells.scrollTop + cells.clientHeight >= cells.scrollHeight - 1;
-      if (e.deltaY < 0 && !atTop) return;
-      if (e.deltaY > 0 && !atBottom) return;
-    }
+    if (Math.abs(e.deltaX) <= Math.abs(e.deltaY)) return;   // vertical scroll
+    if (Math.abs(e.deltaX) < 10) return;                    // stray sideways drift
     // One flick of a trackpad fires many events — don't jump three months.
     if (Date.now() - lastWheel < 300) return;
     lastWheel = Date.now();
-    calShiftMonth(e.deltaY > 0 ? 1 : -1);
+    calShiftMonth(e.deltaX > 0 ? 1 : -1);
   }, { passive: true });
 }
 
@@ -1354,8 +1423,10 @@ if (calGrid) {
     tracking = false;
     const t = e.changedTouches[0];
     const dx = t.clientX - sx, dy = t.clientY - sy;
-    if (Math.abs(dy) > 60 && Math.abs(dy) > Math.abs(dx) * 1.5) {
-      calShiftMonth(dy < 0 ? 1 : -1);
+    // Left = forward, matching the day view. Vertical is deliberately NOT
+    // handled here: the grid scrolls its own overflow that way.
+    if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.5) {
+      calShiftMonth(dx < 0 ? 1 : -1);
     }
   });
 }
@@ -1910,10 +1981,40 @@ function focusOpenPriceCell() {
   });
 }
 
+// Sort mode for the price rows. '' = the manual order you dragged them into;
+// 'latest' = whatever was priced most recently at the top. Per DEVICE, like
+// the zoom — a way of looking at the table, not a property of it.
+let priceSort = localStorage.getItem('na-price-sort') === 'latest' ? 'latest' : '';
+// When a row was last given a price, across ALL vendors. `added` is the moment
+// it was typed; `date` (the day the price is FOR) is the fallback for rows
+// imported from CSV, which carry no `added`.
+function priceItemLastTouched(item) {
+  let best = '';
+  const cells = (item && item.cells) || {};
+  Object.keys(cells).forEach(vid => {
+    (cells[vid] || []).forEach(e => {
+      const t = e.added || (e.date ? e.date + 'T00:00:00' : '');
+      if (t > best) best = t;
+    });
+  });
+  return best;
+}
+function sortPriceItems(items) {
+  if (priceSort !== 'latest') return items;
+  // Rows with no price at all sink: "latest first" has nothing to say about
+  // them, and they'd otherwise sit at the top on an empty-string comparison.
+  return items.slice().sort((a, b) => {
+    const ta = priceItemLastTouched(a), tb = priceItemLastTouched(b);
+    if (ta === tb) return (a.order ?? 0) - (b.order ?? 0);
+    if (!ta) return 1;
+    if (!tb) return -1;
+    return tb.localeCompare(ta);
+  });
+}
 function renderPriceTable() {
   if (!priceTableEl) return;
   const cfg = Storage.getPriceConfig();
-  const allItems = Storage.listPriceItems();
+  const allItems = sortPriceItems(Storage.listPriceItems());
   // Rows only: vendors are few and always visible, and filtering columns too
   // would leave you comparing prices you can't see the context for.
   const words = priceFilter.trim().toLowerCase().split(/\s+/).filter(Boolean);
@@ -1935,7 +2036,15 @@ function renderPriceTable() {
   const reorderBtn = document.getElementById('price-reorder');
   const importBtn = document.getElementById('price-import');
   const exportBtn = document.getElementById('price-export');
-  if (reorderBtn) reorderBtn.hidden = !canEdit;
+  // Dragging rows edits the MANUAL order, which isn't what you're looking at
+  // while sorted by latest — so it's offered only in Custom.
+  if (reorderBtn) reorderBtn.hidden = !canEdit || priceSort === 'latest';
+  const sortBtn = document.getElementById('price-sort');
+  if (sortBtn) {
+    sortBtn.hidden = !Storage.canViewPriceTable();
+    sortBtn.textContent = priceSort === 'latest' ? 'Sort: Latest' : 'Sort: Custom';
+    sortBtn.classList.toggle('active', priceSort === 'latest');
+  }
   if (importBtn) importBtn.hidden = !canEdit;
   if (exportBtn) exportBtn.hidden = !Storage.canViewPriceTable();
   // Hide the ⋯ button when every item inside it is hidden
@@ -2511,6 +2620,23 @@ if (priceMoreBtn) priceMoreBtn.addEventListener('click', (e) => {
   if (priceMoreDropdown) priceMoreDropdown.hidden = !priceMoreDropdown.hidden;
 });
 if (priceMoreDropdown) priceMoreDropdown.addEventListener('click', () => closePriceMenu());
+// The legend used to be a permanent strip under the table. It only needs
+// reading once, and it sat exactly where the keyboard wants to be while a
+// price is being typed — so it moved in here.
+const priceLegendBtn = document.getElementById('price-legend-btn');
+const priceLegendModal = document.getElementById('price-legend-modal');
+const priceLegendClose = document.getElementById('price-legend-close');
+if (priceLegendBtn && priceLegendModal) {
+  priceLegendBtn.addEventListener('click', () => { priceLegendModal.hidden = false; });
+}
+if (priceLegendClose && priceLegendModal) {
+  priceLegendClose.addEventListener('click', () => { priceLegendModal.hidden = true; });
+}
+if (priceLegendModal) {
+  priceLegendModal.addEventListener('click', (e) => {
+    if (e.target === priceLegendModal) priceLegendModal.hidden = true;
+  });
+}
 document.addEventListener('click', (e) => {
   if (priceMoreDropdown && !priceMoreDropdown.hidden
       && !priceMoreDropdown.contains(e.target) && e.target !== priceMoreBtn) closePriceMenu();
@@ -2555,6 +2681,23 @@ let priceReorderMode = false;
 // Rows/columns ticked in layout mode, to be moved to the top/front in one go
 const priceSelItems = new Set();
 const priceSelVendors = new Set();
+const priceSortBtn = document.getElementById('price-sort');
+if (priceSortBtn) priceSortBtn.addEventListener('click', () => {
+  priceSort = priceSort === 'latest' ? '' : 'latest';
+  if (priceSort) localStorage.setItem('na-price-sort', priceSort);
+  else localStorage.removeItem('na-price-sort');
+  // Leaving Layout mode on while the rows resort would show drag handles for
+  // an order that isn't the one being displayed.
+  if (priceSort === 'latest' && priceReorderMode) {
+    priceReorderMode = false;
+    if (priceReorderBtn) {
+      priceReorderBtn.setAttribute('aria-pressed', 'false');
+      priceReorderBtn.textContent = 'Layout';
+      priceReorderBtn.classList.remove('active');
+    }
+  }
+  renderPriceTable();
+});
 const priceReorderBtn = document.getElementById('price-reorder');
 if (priceReorderBtn) priceReorderBtn.addEventListener('click', () => {
   priceReorderMode = !priceReorderMode;
@@ -3352,6 +3495,8 @@ function showSettings() {
   window.scrollTo(0, 0);
   renderKeywordList();
   renderEmployeeList();
+  renderIifItemFields();
+  wireIifItemFields();
   renderCustomerLinks();
   if (accountEmailEl && auth.currentUser) accountEmailEl.textContent = auth.currentUser.email || '';
   // The company name only exists on orgs created from a founder invite; the
@@ -5186,16 +5331,16 @@ function newRecordCrumbs(rec) {
 function updateCancelBtn() {
   if (!editorCancelBtn) return;
   const show = !!pendingNewRecord && currentType === 'note' && currentId === pendingNewRecord.noteId;
-  editorCancelBtn.hidden = !show;
-  const doneBtn = document.getElementById('editor-done-btn');
-  if (doneBtn) doneBtn.hidden = !show;
+  // One wrapper holds both buttons now, so they can't get out of step.
+  const bar = document.getElementById('editor-new-actions');
+  if (bar) bar.hidden = !show;
   // Cancel already discards the record — showing 🗑 next to it is redundant.
   // (showEditor sets delete per role/note type; this only overrides while a
   // brand-new record is open.)
   if (show && deleteBtn) deleteBtn.style.display = 'none';
   // A real trail while creating, so you can still see (and use) where you came
   // from. Cancel used to live on this row and crowded it out on a phone; it's
-  // a red ✕ in the corner now, so the row is free. The customer's own name is
+  // a Cancel button at the bottom now, so the row is free. The customer's own name is
   // skipped for notes — the trail has to stay short.
   if (show) renderCrumbs('crumbs-editor', newRecordCrumbs(pendingNewRecord));
 }
@@ -5203,8 +5348,21 @@ function updateCancelBtn() {
 // button and Android's system back use, so save flushing and return-screen
 // logic are shared. commitAndCleanupEditor only discards a record that is still
 // completely empty, so anything typed survives.
+// FIRES ON POINTERDOWN, not click — the same trap the hours ✓ was written
+// around. This button sits at the bottom of the screen with the keyboard up:
+// the tap blurs the field, the keyboard closes, --app-vh changes, the layout
+// reflows and the button moves out from under the finger between pointerdown
+// and pointerup, so no click is ever dispatched. The first tap then looked
+// like it only lowered the keyboard, and it took a second one to save.
+// `click` stays wired for keyboard/assistive use; doneGuard makes whichever
+// arrives second a no-op.
 const editorDoneBtn = document.getElementById('editor-done-btn');
-if (editorDoneBtn) editorDoneBtn.addEventListener('click', () => {
+let doneGuard = 0;
+const editorDoneAction = (ev) => {
+  if (ev) { ev.preventDefault(); ev.stopPropagation(); }
+  // Two events for one press (pointerdown then click) must not run twice.
+  if (Date.now() - doneGuard < 700) return;
+  doneGuard = Date.now();
   // Captured now: commitAndCleanupEditor clears pendingNewRecord on the way out.
   const rec = pendingNewRecord;
   // Drop the keyboard first: leaving it up over the destination screen looks
@@ -5242,11 +5400,21 @@ if (editorDoneBtn) editorDoneBtn.addEventListener('click', () => {
     commitAndCleanupEditor();
     if (go) go();
   }
-});
+};
+if (editorDoneBtn) {
+  editorDoneBtn.addEventListener('pointerdown', editorDoneAction);
+  editorDoneBtn.addEventListener('click', editorDoneAction);
+}
 
-if (editorCancelBtn) editorCancelBtn.addEventListener('click', () => {
+// Same reflow problem, same treatment — Cancel sits beside Save with the keyboard up.
+let cancelGuard = 0;
+const editorCancelAction = (ev) => {
+  if (ev) { ev.preventDefault(); ev.stopPropagation(); }
+  if (Date.now() - cancelGuard < 700) return;
+  cancelGuard = Date.now();
   const rec = pendingNewRecord;
   if (!rec) return;
+  if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
   // Nothing to keep: drop the save timer so it can't resurrect the record
   if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
   pendingNewRecord = null;
@@ -5262,7 +5430,11 @@ if (editorCancelBtn) editorCancelBtn.addEventListener('click', () => {
     if (rec.customerId) showCustomerNotes(rec.customerId);
     else showNotes();
   }
-});
+};
+if (editorCancelBtn) {
+  editorCancelBtn.addEventListener('pointerdown', editorCancelAction);
+  editorCancelBtn.addEventListener('click', editorCancelAction);
+}
 
 deleteBtn.addEventListener('click', () => {
   if (!currentId) return;
@@ -6424,6 +6596,7 @@ function renderMembersList() {
         <li class="member-card">
           <div class="member-card-top">
             <span class="member-card-email">${escapeHtml(inv.email)}</span>
+            <button class="invite-resend-btn" data-resend="${escapeHtml(inv.email)}">Resend</button>
             <button class="member-remove-btn" data-email="${escapeHtml(inv.email)}" title="Cancel">✕</button>
           </div>
           <span class="member-field-label">${what}</span>
@@ -6433,6 +6606,29 @@ function renderMembersList() {
       btn.addEventListener('click', async () => {
         await Storage.cancelInvite(btn.dataset.email);
         renderMembersList();
+      });
+    });
+    // Resend sends the SAME link again — it doesn't touch the invite record, so
+    // an expiry is not extended by resending. Cancel and re-invite for that.
+    invitesList.querySelectorAll('.invite-resend-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const to = btn.dataset.resend;
+        btn.disabled = true;
+        const prev = btn.textContent;
+        btn.textContent = 'Sending…';
+        try {
+          await sendSignInLinkToEmail(auth, to, { url: APP_URL, handleCodeInApp: true });
+          btn.textContent = 'Sent';
+        } catch (err) {
+          console.error(err);
+          // Firebase throttles repeated sends to one address, and says so in
+          // the error — worth showing rather than a generic failure.
+          btn.textContent = 'Failed';
+          if (inviteStatus) inviteStatus.textContent = `Could not resend to ${to}: ${err.message || err}`;
+        }
+        // Stays disabled for a moment: Firebase rate-limits one address, and a
+        // button that can be hammered invites exactly that.
+        setTimeout(() => { btn.textContent = prev; btn.disabled = false; }, 4000);
       });
     });
   }
@@ -6553,6 +6749,11 @@ if (newOrgBtn) {
         console.error(mailErr);
         if (newOrgStatus) newOrgStatus.textContent = `Invite created, but the email failed: ${mailErr.message || mailErr}`;
       }
+      // Shown whether or not the email got through: the email is a convenience,
+      // not the mechanism. The invite is matched by EMAIL ADDRESS at sign-in, so
+      // any method — Google, a password, a link they request themselves —
+      // works as long as they use the invited address.
+      showHandoffPanel(email, company);
       if (newOrgEmail) newOrgEmail.value = '';
       if (newOrgName) newOrgName.value = '';
       renderMembersList();
@@ -6560,6 +6761,51 @@ if (newOrgBtn) {
       if (newOrgStatus) newOrgStatus.textContent = 'Failed: ' + (e.message || e);
     }
     newOrgBtn.disabled = false;
+  });
+}
+
+// What to send someone by hand when the automatic email doesn't arrive.
+//
+// It is NOT the sign-in link — sendSignInLinkToEmail generates that on the
+// server and never returns it to the browser, so there is nothing here to
+// display. It doesn't matter: the invite is keyed to the EMAIL ADDRESS, and any
+// sign-in method with that address finds it.
+const newOrgHandoff = document.getElementById('new-org-handoff');
+const newOrgHandoffText = document.getElementById('new-org-handoff-text');
+const newOrgHandoffCopy = document.getElementById('new-org-handoff-copy');
+
+function handoffMessage(email, company) {
+  return [
+    `You've been invited to set up ${company} in JobPilot.`,
+    '',
+    `1. Go to ${APP_URL}`,
+    `2. Sign in using ${email} — any method works (Google, a password, or the emailed link).`,
+    '3. Your company is created the first time you sign in, and you are its admin.',
+    '',
+    'The invitation lasts 14 days.',
+  ].join('\n');
+}
+function showHandoffPanel(email, company) {
+  if (!newOrgHandoff || !newOrgHandoffText) return;
+  newOrgHandoffText.value = handoffMessage(email, company);
+  newOrgHandoff.hidden = false;
+}
+if (newOrgHandoffCopy) {
+  newOrgHandoffCopy.addEventListener('click', async () => {
+    if (!newOrgHandoffText) return;
+    const prev = newOrgHandoffCopy.textContent;
+    try {
+      await navigator.clipboard.writeText(newOrgHandoffText.value);
+      newOrgHandoffCopy.textContent = 'Copied';
+    } catch (err) {
+      // Clipboard access is refused in plenty of ordinary situations (an
+      // insecure origin, an iOS gesture the browser didn't like). Selecting the
+      // text is the fallback, so it can still be copied by hand.
+      newOrgHandoffText.focus();
+      newOrgHandoffText.select();
+      newOrgHandoffCopy.textContent = 'Copy it by hand';
+    }
+    setTimeout(() => { newOrgHandoffCopy.textContent = prev; }, 2500);
   });
 }
 
@@ -7369,11 +7615,42 @@ let openIifCell = null;
 // So the records are gone from this screen. Editing an hours cell writes to the
 // job and that is the whole transaction. Existing timelog documents are left
 // alone in Firestore — nothing reads them now, and nothing deletes them.
+// Who the chart is narrowed to; '' is everyone. Per DEVICE, like the zoom —
+// it is a way of looking at the screen, not a property of the org.
+let iifEmpFilter = localStorage.getItem('na-iif-emp') || '';
+function setIifEmpFilter(name) {
+  iifEmpFilter = name || '';
+  if (iifEmpFilter) localStorage.setItem('na-iif-emp', iifEmpFilter);
+  else localStorage.removeItem('na-iif-emp');
+}
+// Every name with a row in the loaded range, plus the current filter even when
+// it has none — otherwise choosing a person who then falls out of the range
+// silently reverts to Everyone and the chart appears to ignore the pick.
+function iifEmployeesInRange() {
+  const set = new Set();
+  iifParsedEntries.forEach(e => (e.employees || []).forEach(n => { if (n) set.add(n); }));
+  if (iifEmpFilter) set.add(iifEmpFilter);
+  return [...set].sort((a, b) => a.localeCompare(b));
+}
+function renderIifEmpFilter() {
+  const sel = document.getElementById('iif-emp-filter');
+  if (!sel) return;
+  const names = iifEmployeesInRange();
+  sel.innerHTML = `<option value="">Everyone</option>`
+    + names.map(n => `<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`).join('');
+  sel.value = iifEmpFilter;
+  // A stored name from another org (or a since-renamed employee) isn't in the
+  // list; the select falls back to '' and the state has to follow it.
+  if (sel.value !== iifEmpFilter) setIifEmpFilter('');
+}
 function iifGridRows() {
   const rows = [];
   iifParsedEntries.forEach((e, idx) => {
     const emps = e.employees.length ? e.employees : [''];
     emps.forEach((emp, empIdx) => {
+      // The filter narrows the rendered rows, and the totals and the .iif are
+      // both built from those — so filtering to one person exports that person.
+      if (iifEmpFilter && emp !== iifEmpFilter) return;
       rows.push({ e, idx, emp, empIdx, first: empIdx === 0, kind: 'note', editable: true });
     });
   });
@@ -7460,7 +7737,7 @@ function iifCellHtml(row, col) {
         : `<td><span class="cal-chip cal-chip-none iif-emp-chip">Nobody</span></td>`;
     }
     if (col === 'customer') return `<td>${escapeHtml(v.cust || '—')}</td>`;
-    if (col === 'hours') return `<td>${escapeHtml(v.hoursText || '—')}</td>`;
+    if (col === 'hours') return `<td class="iif-hours-col">${escapeHtml(v.hoursText || '—')}</td>`;
     return '<td></td>';
   }
   const key = iifRowKey(idx, empIdx);
@@ -7473,22 +7750,40 @@ function iifCellHtml(row, col) {
     // safe only because Hours is the last column — the sticky tick and Date
     // columns paint over the left edge of whatever is being edited, which is
     // what killed two earlier attempts at in-cell buttons.
-    return `<td class="price-cell price-cell-editing" ${cellAttrs}>
+    return `<td class="price-cell price-cell-editing iif-hours-col" ${cellAttrs}>
       <div class="iif-edit-wrap">
         <input class="iif-edit-hours" type="text" inputmode="decimal" placeholder="3.5 or 3:30"
                value="${escapeHtml(v.hoursText)}" />
         <button type="button" class="iif-edit-done" aria-label="Save hours and close">✓</button>
       </div></td>`;
   }
-  return `<td class="price-cell" ${cellAttrs}>${escapeHtml(v.hoursText || '—')}</td>`;
+  return `<td class="price-cell iif-hours-col" ${cellAttrs}>${escapeHtml(v.hoursText || '—')}</td>`;
 }
 
 function renderIIFEntries(entries) {
   if (!iifGrid) return;
-  if (!entries.length) {
-    iifGrid.innerHTML = '<tbody><tr><td class="price-empty-state">No entries found.</td></tr></tbody>';
+  // Opening or closing a cell rebuilds the whole table. The scroller element
+  // survives, but the browser clamps its offsets while the new rows are being
+  // measured — which read as the chart jumping. Put them back afterwards.
+  const keepTop = iifScroll ? iifScroll.scrollTop : 0;
+  const keepLeft = iifScroll ? iifScroll.scrollLeft : 0;
+  const restoreScroll = () => {
+    if (!iifScroll) return;
+    if (iifScroll.scrollTop !== keepTop) iifScroll.scrollTop = keepTop;
+    if (iifScroll.scrollLeft !== keepLeft) iifScroll.scrollLeft = keepLeft;
+  };
+  renderIifEmpFilter();
+  // An empty chart with a filter set is not the same as an empty range — say
+  // which, or the filter looks like a broken screen.
+  const rowsNow = entries.length ? iifGridRows() : [];
+  if (!entries.length || !rowsNow.length) {
+    const msg = entries.length && iifEmpFilter
+      ? `No jobs for ${escapeHtml(iifEmpFilter)} between these dates.`
+      : 'No entries found.';
+    iifGrid.innerHTML = `<tbody><tr><td class="price-empty-state">${msg}</td></tr></tbody>`;
     const empty = document.getElementById('iif-totals');
     if (empty) { empty.hidden = true; empty.innerHTML = ''; }
+    iifRenderedRows = [];
     return;
   }
   const head = `<thead><tr>
@@ -7501,7 +7796,12 @@ function renderIIFEntries(entries) {
   </tr></thead>`;
 
   iifRenderedRows = iifGridRows();
+  // Alternate the shade by DAY, not by row: a day with three people on it is
+  // one band, so the eye can count days without reading the dates.
+  let bandDate = null, band = false;
   const body = iifRenderedRows.map((row, i) => {
+    const rowIso = iifRowValues(row).dateIso || '';
+    if (rowIso !== bandDate) { bandDate = rowIso; band = !band; }
     // No row states left. Green meant "on record" and red meant "the job
     // disagrees with the record"; with the records gone there is only one
     // version of a number and nothing for a colour to say about it.
@@ -7509,7 +7809,7 @@ function renderIIFEntries(entries) {
     // EVERY row is tickable, so anything visible can be exported — including a
     // record whose job has since been deleted.
     const tick = `<input type="checkbox" class="iif-row-check" data-row="${i}" ${iifRowTicked(row) ? 'checked' : ''} />`;
-    return `<tr class="${cls}">
+    return `<tr class="${cls}${band ? ' iif-day-band' : ''}">
       <td class="iif-check">${tick}</td>
       ${iifCellHtml(row, 'date')}
       ${iifCellHtml(row, 'employee')}
@@ -7523,6 +7823,9 @@ function renderIIFEntries(entries) {
   applyIifZoomVar();
   renderIifTotals();
   wireIifGrid();
+  // After the rows exist, so the scroller has something to scroll. focusOpenIifCell
+  // runs later and still moves it deliberately on a phone.
+  restoreScroll();
 }
 
 // ---- totals: each person, per day and per week ----
@@ -7992,6 +8295,15 @@ const iifRangeChanged = () => {
 };
 if (iifFromDate) iifFromDate.addEventListener('change', iifRangeChanged);
 if (iifToDate) iifToDate.addEventListener('change', iifRangeChanged);
+// Who-filter: a redraw, not a re-read — the jobs are already loaded, and a
+// re-parse would clear the ticks, which are keyed to entries the filter only
+// hides. Switching back to Everyone brings them back as they were.
+const iifEmpSelect = document.getElementById('iif-emp-filter');
+if (iifEmpSelect) iifEmpSelect.addEventListener('change', () => {
+  closeIifCell(false);
+  setIifEmpFilter(iifEmpSelect.value);
+  renderIIFEntries(iifParsedEntries);
+});
 
 if (iifDownloadBtn) iifDownloadBtn.addEventListener('click', () => {
   const includedEntries = iifExportEntries();
@@ -7999,7 +8311,7 @@ if (iifDownloadBtn) iifDownloadBtn.addEventListener('click', () => {
     iifStatus.textContent = 'Nothing ticked to export.';
     return;
   }
-  const iif = generateIIF(includedEntries, getEmployeeTypeMap());
+  const iif = generateIIF(includedEntries, getEmployeeTypeMap(), undefined, getIifItems());
   const blob = new Blob([iif], { type: 'text/plain' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -8293,8 +8605,8 @@ function tutorialSteps(part) {
       group: 'pricecells',
       requires: () => Storage.listPriceItems().length > 0 && Storage.getPriceConfig().vendors.length > 0,
       setup: () => { showPriceTable(); return true; },
-      target: () => document.querySelector('#price-view .price-legend'),
-      text: 'The dot shows availability: green now, amber 2–3 days, grey longer, red not available. A red dot with a dash means they had none and quoted no price.',
+      target: () => document.getElementById('price-more-btn'),
+      text: 'The dot shows availability: green now, amber 2–3 days, grey longer, red not available. A red dot with a dash means they had none and quoted no price. “What the colours mean” in this menu says the same thing whenever you need it.',
     },
     {
       screen: 'price',
@@ -8381,8 +8693,8 @@ function tutorialSteps(part) {
       {
         screen: 'calendar',
         setup: goMonth,
-        target: () => document.querySelector('#cal-grid .cal-cue-down'),
-        text: 'Swipe up for next month and down for last, the way the page moves. These strips name the month you’re heading to, and you can tap them instead.',
+        target: () => document.querySelector('#cal-grid .cal-cues'),
+        text: 'Swipe left for next month and right for last. These cues name the month you’re heading to, and you can tap them instead.',
       },
       {
         screen: 'calendar',

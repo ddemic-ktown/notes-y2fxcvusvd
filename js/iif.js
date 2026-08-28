@@ -386,17 +386,25 @@ export function parseHoursNote(text, customers, employees, range = {}) {
 
 // ---------- IIF generation ----------
 // QuickBooks service items per employee classification. These must exist as
-// Service-type items in the QB company file, with these exact names.
-//
-// NO SPACE AFTER THE COLON (v2026.08.19-1134). QuickBooks writes a sub-item as
-// Parent:Child with nothing between, and the name is matched literally — the
-// space made every apprentice row fail the import with "The specified Item is
+// Service-type items in the QB company file, with these EXACT names — the match
+// is literal, and a wrong character fails every row with "The specified Item is
 // not present in QuickBooks or is not Service Type Item [15182]".
-const ITEM_APPRENTICE = 'Service Rates:Labour Rate';
-const ITEM_JOURNEYMAN = 'Service Rates:Standard Labour';
+//
+// These are only the FALLBACK now (v2026.08.19-1223): the real values live in
+// Settings → Time Logger, because the correct spelling is a fact about someone's
+// QuickBooks file and nobody should need a code change to correct it. That is
+// exactly how the space after the colon became a problem — it was unarguable in
+// a constant and there was no way to try the other spelling.
+export const DEFAULT_ITEM_APPRENTICE = 'Service Rates:Labour Rate';
+export const DEFAULT_ITEM_JOURNEYMAN = 'Service Rates:Standard Labour';
 
 // employeeTypeMap: lowercased employee name → 'apprentice' | 'journeyman'
-export function generateIIF(entries, employeeTypeMap = {}, companyName = 'Company Organizer Ninja') {
+// items: { apprentice, journeyman } — blank or missing falls back to the
+// defaults above rather than writing an empty ITEM, which QuickBooks would
+// reject with a less obvious error than a wrong name.
+export function generateIIF(entries, employeeTypeMap = {}, companyName = 'Company Organizer Ninja', items = {}) {
+  const ITEM_APPRENTICE = String(items.apprentice || '').trim() || DEFAULT_ITEM_APPRENTICE;
+  const ITEM_JOURNEYMAN = String(items.journeyman || '').trim() || DEFAULT_ITEM_JOURNEYMAN;
   const lines = [
     `!TIMERHDR\tVER\tREV\tCOMPANYNAME`,
     `TIMERHDR\t8\t0\t${companyName}`,

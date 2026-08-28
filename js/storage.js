@@ -855,7 +855,12 @@ export const Storage = {
     if (!n) return null;
     const id = uid();
     const now = nowIso();
-    const item = { id, name: n, order: _cache.priceItems.length, cells: {}, created: now, updated: now };
+    // TOP, not bottom: a row you just added is the one you are about to type
+    // into, and on a long table the bottom is a scroll away. Orders are plain
+    // numbers with fractional midpoints already (see movePriceItem), so one
+    // below the current lowest needs no renumbering of anything else.
+    const lowest = _cache.priceItems.reduce((m, i) => Math.min(m, i.order ?? 0), 0);
+    const item = { id, name: n, order: lowest - 1, cells: {}, created: now, updated: now };
     _cache.priceItems.push(item);
     emit();
     await setDoc(doc(priceItemsCol(), id), stripId(item)).catch(err => console.warn("addPriceItem", err));

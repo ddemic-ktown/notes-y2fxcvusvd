@@ -261,6 +261,9 @@
     <main class="cal-day-main">
       <div class="cal-day-cues">
         <button type="button" id="cal-day-prev" class="cal-cue cal-cue-side" data-shift="-1"></button>
+        <!-- The day you are ON, between the two destinations — without it the
+             prev cue reads as the current date. -->
+        <span id="cal-day-current" class="cal-cue-current"></span>
         <button type="button" id="cal-day-next" class="cal-cue cal-cue-side" data-shift="1"></button>
       </div>
       <div id="cal-day-untimed" class="cal-untimed" hidden></div>
@@ -327,6 +330,9 @@
       <div class="customers-header-bottom price-actions">
         <button id="price-add-item" class="icon-btn date-btn" type="button">+ Item</button>
         <button id="price-add-vendor" class="icon-btn date-btn" type="button">+ Vendor</button>
+        <!-- Cycles Custom ⇄ Latest, like the Theme button in Settings: one
+             button that carries its own state instead of a pair of radios. -->
+        <button id="price-sort" class="icon-btn date-btn" type="button">Sort: Custom</button>
         <button id="price-reorder" class="icon-btn date-btn" type="button" aria-pressed="false">Layout</button>
         <div class="editor-more-wrap">
           <button id="price-more-btn" class="icon-btn date-btn editor-more-btn" type="button" aria-label="More price table options">⋯</button>
@@ -338,6 +344,7 @@
                  data-tutorial-solo ends it here instead of rolling into the
                  next part; data-tutorial-skip-home drops the opening step that
                  points at the home card, since you're already here. -->
+            <button id="price-legend-btn" class="editor-more-item" type="button">What the colours mean</button>
             <button class="editor-more-item" type="button" data-tutorial-part="4" data-tutorial-solo data-tutorial-skip-home>How the price table works</button>
           </div>
         </div>
@@ -360,13 +367,6 @@
       <div id="price-scroll" class="price-scroll">
         <table id="price-table" class="price-table"></table>
       </div>
-      <p class="price-legend">
-        <span class="avail-dot avail-yes"></span> available
-        <span class="avail-dot avail-soon"></span> 2–3 days
-        <span class="avail-dot avail-later"></span> longer
-        <span class="avail-dot avail-no"></span> not available
-        <span class="price-best-badge">✓</span> lowest price you can get today
-      </p>
     </main>
   </section>
 
@@ -439,6 +439,10 @@
       <div class="customers-header-bottom hours-actions">
         <label class="iif-range-label">From <input id="iif-from-date" type="date" class="iif-date-input" /></label>
         <label class="iif-range-label">To <input id="iif-to-date" type="date" class="iif-date-input" /></label>
+        <!-- Narrows the chart, the weekly totals AND the .iif to one person.
+             Options are the people with rows in the range, not the whole
+             employee list — picking someone with nothing to show is a dead end. -->
+        <label class="iif-range-label">Who <select id="iif-emp-filter" class="iif-date-input"></select></label>
       </div>
       <!-- (#iif-src-bar, which pinned the note line the open row was read
            from, was removed in v2026.08.18-2325 — rows come from calendar jobs
@@ -568,11 +572,22 @@
             <button id="customer-link-add">Link</button>
           </div>
           <ul id="customer-link-list" class="keyword-list employee-list"></ul>
+
+          <h4 class="setting-sub-title">QuickBooks service items</h4>
+          <p class="muted setting-hint">Which QuickBooks Service item each classification bills against. These must match your item list <strong>exactly</strong> — QuickBooks compares them character for character, and a single wrong character fails every row of the import. A sub-item is written parent:child. Leave blank to use the built-in default.</p>
+          <label class="employee-field">
+            <span class="employee-field-label">Journeyman item</span>
+            <input id="iif-item-journeyman" type="text" class="signin-input" autocomplete="off" spellcheck="false" placeholder="Service Rates:Standard Labour" />
+          </label>
+          <label class="employee-field">
+            <span class="employee-field-label">Apprentice item</span>
+            <input id="iif-item-apprentice" type="text" class="signin-input" autocomplete="off" spellcheck="false" placeholder="Service Rates:Labour Rate" />
+          </label>
         </div>
 
         <div data-role-iif>
           <h4 class="setting-sub-title">Export</h4>
-          <p class="muted setting-hint">Reads your "hours" note into an editable chart you can correct, then export as a .iif file for QuickBooks Desktop. The date range lives on that screen.</p>
+          <p class="muted setting-hint">Your calendar jobs' hours as an editable chart, then export as a .iif file for QuickBooks Desktop. The date range lives on that screen.</p>
           <button id="iif-btn" class="secondary setting-wide-btn">Hours</button>
         </div>
       </div>
@@ -648,6 +663,15 @@
           <button id="new-org-btn" class="primary">Invite</button>
         </div>
         <p id="new-org-status" class="muted" style="font-size:13px; margin-top:6px;"></p>
+        <!-- Shown after sending, whether or not the email got through. NOT the
+             sign-in link — that is generated server-side and never returned to
+             the browser. It doesn't need to be: the invite is matched by EMAIL
+             ADDRESS, so any sign-in method with that address finds it. -->
+        <div id="new-org-handoff" class="new-org-handoff" hidden>
+          <p class="muted setting-hint">If the email doesn't arrive, send them this:</p>
+          <textarea id="new-org-handoff-text" class="csv-textarea" rows="8" readonly></textarea>
+          <button id="new-org-handoff-copy" class="secondary setting-wide-btn" type="button">Copy</button>
+        </div>
       </div>
 
       <div class="setting-row setting-list-row">
@@ -698,7 +722,6 @@
         <button class="icon-btn date-btn app-back-btn" aria-label="Back">‹ Back</button>
         <nav class="crumbs" id="crumbs-editor" aria-label="Breadcrumb"></nav>
         <span id="editor-shared-badge" class="shared-badge" title="Shared with assigned users" hidden>Shared</span>
-        <button id="editor-cancel-btn" class="round-btn round-btn-danger" type="button" aria-label="Discard and cancel" hidden>✕</button>
         <div class="editor-more-wrap">
           <button id="editor-more-btn" class="icon-btn date-btn editor-more-btn" aria-label="More options">⋯</button>
           <div id="editor-more-dropdown" class="editor-more-dropdown" hidden>
@@ -747,7 +770,13 @@
         <textarea id="editor-body" class="editor-body editor-body-input" placeholder="Start typing…" autocomplete="off" autocorrect="on" spellcheck="true"></textarea>
       </div>
     </main>
-    <button id="editor-done-btn" class="fab fab-done" type="button" aria-label="Done" hidden>✓</button>
+    <!-- Cancel / Save for a just-created record. Both sit at the bottom, where
+         the thumb is; Cancel used to be a ✕ up in the breadcrumb row, and a
+         wide "Cancel" is what crowded that row before it became an icon. -->
+    <div id="editor-new-actions" class="editor-new-actions" hidden>
+      <button id="editor-cancel-btn" class="new-action-btn new-action-cancel" type="button">Cancel</button>
+      <button id="editor-done-btn" class="new-action-btn new-action-save" type="button">Save</button>
+    </div>
   </section>
 
   <!-- (The first-run welcome modal was removed in v2026.08.19-0020. The tour
@@ -756,6 +785,25 @@
        at anything, so the fastest way past it was to decline both.) -->
 
   <!-- Compiled Aggregator Resolve Modal -->
+  <!-- Price table legend. Lived as a permanent strip under the table until
+       v2026.08.27 — it was in the way while entering a price, and the colours
+       only need explaining once. -->
+  <div id="price-legend-modal" class="modal-overlay" hidden>
+    <div class="modal-panel">
+      <div class="modal-header">
+        <h2 class="modal-title">What the colours mean</h2>
+        <button id="price-legend-close" class="icon-btn" aria-label="Close">✕</button>
+      </div>
+      <ul class="price-legend-list">
+        <li><span class="avail-dot avail-yes"></span> Available now</li>
+        <li><span class="avail-dot avail-soon"></span> 2–3 days</li>
+        <li><span class="avail-dot avail-later"></span> Longer than 3 days</li>
+        <li><span class="avail-dot avail-no"></span> Not available</li>
+        <li><span class="price-best-badge">✓</span> Lowest price you can get today</li>
+      </ul>
+    </div>
+  </div>
+
   <div id="compiled-modal" class="modal-overlay" hidden>
     <div class="modal-panel">
       <div class="modal-header">

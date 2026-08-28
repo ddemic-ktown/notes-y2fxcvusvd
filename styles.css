@@ -432,6 +432,11 @@ body.hours-open {
   min-width: 0;
 }
 .iif-range-label .iif-date-input { flex: 1; min-width: 0; }
+/* The Who filter wears the date inputs' styling so the three read as one row */
+select.iif-date-input { appearance: none; -webkit-appearance: none; padding-right: 22px;
+  background-image: linear-gradient(45deg, transparent 50%, var(--ink-soft) 50%), linear-gradient(135deg, var(--ink-soft) 50%, transparent 50%);
+  background-position: calc(100% - 13px) 50%, calc(100% - 8px) 50%;
+  background-size: 5px 5px, 5px 5px; background-repeat: no-repeat; }
 .iif-date-input {
   background: var(--bg);
   color: var(--ink);
@@ -534,7 +539,8 @@ body.hours-open {
   .cal-today-long { display: none; }
   .cal-today-short { display: inline; }
 }
-/* Cues that there's a month above and below — named, and tappable */
+/* Cues that there's a month either side — named, and tappable */
+.cal-cues { display: flex; justify-content: space-between; align-items: center; gap: 4px; flex-shrink: 0; border-bottom: 1px dashed var(--line); }
 .cal-cue {
   display: block;
   width: 100%;
@@ -551,8 +557,20 @@ body.hours-open {
   flex-shrink: 0;
 }
 .cal-cue:active { color: var(--accent); }
-.cal-cue-up { border-bottom: 1px dashed var(--line); }
-.cal-cue-down { border-top: 1px dashed var(--line); }
+/* The month/day you are ON, sat between the two cues. Full-strength ink and a
+   size up, so the destinations either side read as destinations. */
+.cal-cue-current {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink);
+  padding: 4px 8px;
+  white-space: nowrap;
+}
+.cal-cues .cal-cue-side, .cal-day-cues .cal-cue-side { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cal-cues .cal-cue-side:first-child, .cal-day-cues .cal-cue-side:first-child { text-align: left; }
+.cal-cues .cal-cue-side:last-child, .cal-day-cues .cal-cue-side:last-child { text-align: right; }
 
 .cal-headrow, .cal-cells { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
 .cal-head {
@@ -654,9 +672,19 @@ body.hours-open {
 }
 .cal-block-dragging { opacity: 0.85; box-shadow: 0 6px 18px rgba(0,0,0,0.3); z-index: 5; }
 .cal-block-time { font-size: 10px; color: var(--ink-soft); }
-.cal-block-who { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.cal-block-chips { display: flex; flex-wrap: wrap; gap: 2px; margin-top: 2px; }
+/* Customer + crew on ONE row when they fit. `flex: 0 1 auto` on the name is
+   what allows it: the name takes only what it needs, so the chips sit beside a
+   short name and wrap under a long one. */
+.cal-block-head { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; min-width: 0; }
+.cal-block-who { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 0 1 auto; min-width: 0; }
+.cal-block-chips { display: flex; flex-wrap: wrap; gap: 2px; flex: 0 1 auto; min-width: 0; }
 .cal-block-chips .cal-chip { font-size: 9px; padding: 1px 5px; }
+/* Short block — nothing fits underneath, so the row may not wrap and the chips
+   keep their width. The name gives way instead. */
+.cal-block-tight { padding-top: 1px; padding-bottom: 1px; }
+.cal-block-tight .cal-block-head { flex-wrap: nowrap; }
+.cal-block-tight .cal-block-chips { flex: 0 0 auto; flex-wrap: nowrap; }
+.cal-block-tight .cal-block-who { font-size: 12px; }
 /* Job note — fills whatever room is left, clipped at two lines. */
 .cal-block-note {
   font-size: 10px;
@@ -725,6 +753,19 @@ body.hours-open {
   padding: 5px 8px; border-radius: 6px; flex-shrink: 0;
 }
 .employee-rename:active { opacity: 0.7; }
+
+/* Resend sits between the email and the ✕ in a pending-invite row. Quiet, and
+   word-shaped like Rename — an icon here would be guessed at. */
+.invite-resend-btn {
+  background: transparent; border: 1px solid var(--line); color: var(--ink-soft);
+  font-size: 12px; font-weight: 600; line-height: 1; cursor: pointer;
+  padding: 5px 8px; border-radius: 6px; flex-shrink: 0;
+}
+.invite-resend-btn:disabled { opacity: 0.55; cursor: default; }
+
+/* The hand-off text after inviting a new company. */
+.new-org-handoff { margin-top: 10px; }
+.new-org-handoff .csv-textarea { margin-bottom: 8px; }
 .employee-remove:hover { color: var(--danger); }
 /* Side by side when there's room, stacked on a narrow phone (below). */
 .employee-card-fields { display: flex; gap: 8px; }
@@ -798,7 +839,6 @@ body.hours-open {
 body.dark-mode .price-best { color: #4ade80; }
 .price-best-badge { color: #15803d; font-size: 11px; font-weight: 700; margin-left: 3px; }
 body.dark-mode .price-best-badge { color: #4ade80; }
-.price-legend .price-best-badge { margin-left: 12px; }
 .price-empty-state { color: var(--ink-soft); font-style: italic; padding: 24px 12px; white-space: normal; }
 .avail-dot {
   display: inline-block;
@@ -810,9 +850,11 @@ body.dark-mode .price-best-badge { color: #4ade80; }
 .avail-soon { background: #f59e0b; }
 .avail-later { background: #9ca3af; }
 .avail-no { background: #dc2626; }
-.price-legend { margin: 0; padding: 8px 12px; font-size: 12px; color: var(--ink-soft); border-top: 1px solid var(--line); }
-.price-legend .avail-dot { margin-left: 12px; margin-right: 3px; }
-.price-legend .avail-dot:first-child { margin-left: 0; }
+/* Legend, now a sheet off the ⋯ menu rather than a strip under the table */
+.price-legend-list { list-style: none; margin: 0; padding: 0; font-size: 14px; }
+.price-legend-list li { display: flex; align-items: center; gap: 10px; padding: 8px 2px; }
+.price-legend-list li + li { border-top: 1px solid var(--line); }
+.price-legend-list .avail-dot { flex-shrink: 0; }
 .price-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .price-zoom { display: flex; gap: 2px; flex-shrink: 0; }
 /* Inline cell entry */
@@ -1522,6 +1564,17 @@ body.dark-mode .compiled-action.danger-soft { color: #f87171; border-color: #b91
   box-shadow: 1px 0 0 var(--line);
 }
 .iif-grid thead .iif-date { z-index: 4; }
+/* Alternating day bands. Applied to EVERY cell in the row, the two sticky
+   columns included — those carry their own opaque `background: var(--bg)` so
+   they can pass under the rest of the table, and without this the band would
+   stop dead at the left edge. Listed before the row-state rules so a tinted
+   row still wins over the band. */
+.iif-grid tbody tr.iif-day-band td:not(.price-cell-editing),
+.iif-grid tbody tr.iif-day-band td.iif-check,
+.iif-grid tbody tr.iif-day-band td.iif-date { background: #eceef2; }
+body.dark-mode .iif-grid tbody tr.iif-day-band td:not(.price-cell-editing),
+body.dark-mode .iif-grid tbody tr.iif-day-band td.iif-check,
+body.dark-mode .iif-grid tbody tr.iif-day-band td.iif-date { background: #1b2433; }
 .iif-grid tbody tr.iif-needs-review td { background: #fff7ed; }
 body.dark-mode .iif-grid tbody tr.iif-needs-review td { background: #2d1a00; }
 /* GREEN = on record in timelogs. RED = the note now says something different.
@@ -1544,6 +1597,13 @@ body.dark-mode .iif-grid tbody tr.iif-differs td { background: #3f1212; }
    and Date columns paint over the left edge of whatever is being edited. */
 .iif-edit-wrap { display: flex; align-items: center; gap: 4px; }
 .iif-edit-wrap .iif-edit-hours { flex: 1; min-width: 0; }
+/* The Hours column reserves the width its EDITOR needs (input + ✓) whether or
+   not a cell is open. Without it, opening a cell widened the column, every
+   other column re-measured, and the whole chart shifted under the click. */
+.iif-grid .iif-hours-col {
+  width: calc(124px * var(--price-scale));
+  min-width: calc(124px * var(--price-scale));
+}
 .iif-edit-done {
   flex: 0 0 auto;
   min-width: 34px; min-height: 34px;      /* a thumb target, not a glyph */
@@ -2381,6 +2441,47 @@ input[type="search"]::-webkit-search-cancel-button {
   overflow: hidden;
 }
 #price-view .app-header { flex-shrink: 0; }
+/* Calendar day view — SAME treatment, same reason. The timeline is 24 hours
+   tall no matter what, so a plain `.screen` (min-height: 100vh) always makes
+   the DOCUMENT the scroller: the ‹ › cue row and the header scrolled away with
+   the top of the day. Pinning the section to the visible viewport makes
+   .cal-day-scroll the only thing that moves. */
+#calendar-day-view.active {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  height: 100dvh;
+  height: var(--app-vh, 100dvh);
+  min-height: 0;
+  max-height: var(--app-vh, 100dvh);
+  overflow: hidden;
+}
+#calendar-day-view .app-header { flex-shrink: 0; }
+/* Month/week grid — SAME treatment again. On Android Chrome `100vh` is the
+   URL-bar-HIDDEN height, so a plain `.screen` (min-height: 100vh) puts the last
+   week row below the visible area by exactly the height of the bar, and once
+   the page is pinch-zoomed that row cannot be panned into view at all. Sized to
+   the visible viewport, the grid always fits what you can see. */
+#calendar-view.active {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  height: 100dvh;
+  height: var(--app-vh, 100dvh);
+  min-height: 0;
+  max-height: var(--app-vh, 100dvh);
+  overflow: hidden;
+}
+#calendar-view .app-header { flex-shrink: 0; }
+.cal-day-main { overflow: hidden; }
 #editor-view .app-header,
 #editor-view .editor-title { flex-shrink: 0; }
 #editor-view .app-header {
@@ -2503,8 +2604,8 @@ input[type="search"]::-webkit-search-cancel-button {
 #refresh-btn.spinning { animation: refresh-spin 0.6s linear infinite; }
 @keyframes refresh-spin { to { transform: rotate(360deg); } }
 
-/* Day view: swipe cues, mirroring the month view's ∧/∨ pair */
-.cal-day-cues { display: flex; justify-content: space-between; align-items: center; padding: 0 8px; flex-shrink: 0; border-bottom: 1px dashed var(--line); }
+/* Day view: swipe cues, the same ‹ › pair the month grid uses */
+.cal-day-cues { display: flex; justify-content: space-between; align-items: center; gap: 4px; padding: 0 8px; flex-shrink: 0; border-bottom: 1px dashed var(--line); }
 .cal-cue-side { width: auto; padding: 5px 4px; }
 
 /* Calendar change-view animation: fade with a 5px nudge in the direction you
@@ -2529,24 +2630,36 @@ input[type="search"]::-webkit-search-cancel-button {
 /* Cancel a just-created note/customer: a red ✕ where the + normally sits.
    Moving it out of the header row leaves that row to the breadcrumb, which
    is what crowded it out before. */
-/* Done on a just-created record: half the size of the blue +, in the same
-   corner. Small on purpose — it's a confirmation, not the primary action —
-   but padded out to a ~44px tap target. */
-.fab-done {
-  width: 30px;
-  height: 30px;
-  font-size: 16px;
-  background: #15803d;
-  color: #fff;
-  box-shadow: 0 3px 10px rgba(0,0,0,0.25);
-  /* keeps the visible circle 30px while the hit area stays thumb-sized */
-  border: 7px solid transparent;
-  background-clip: padding-box;
-  box-sizing: content-box;
+/* Cancel / Save for a just-created record — a floating pair in the corner the
+   ✓ FAB used to occupy. --kb-inset for the same reason the FABs need it:
+   `position: fixed` anchors to the layout viewport, which does not shrink for
+   the keyboard, so without it both sit behind it. */
+.editor-new-actions {
+  position: fixed;
+  right: 20px;
+  bottom: calc(24px + var(--kb-inset, 0px) + env(safe-area-inset-bottom, 0));
+  z-index: 60;
+  display: flex;
+  gap: 10px;
+  align-items: center;
 }
+.editor-new-actions[hidden] { display: none; }
+.new-action-btn {
+  font-family: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  padding: 12px 20px;
+  border-radius: 999px;
+  border: 0;
+  cursor: pointer;
+  box-shadow: 0 6px 16px rgba(0,0,0,0.2);
+  min-height: 44px;
+}
+.new-action-cancel { background: var(--surface); color: var(--ink); border: 1px solid var(--line); }
+.new-action-save { background: #15803d; color: #fff; }
 
-/* Discard, in the editor header's top-right. Half-size round button rather
-   than the old wide "Cancel", which is what crowded this row before. */
+/* Round icon button. Was the editor's ✕ discard until v2026.08.27, which is
+   now a labelled Cancel at the bottom beside Save. */
 .round-btn {
   width: 30px;
   height: 30px;
