@@ -20,6 +20,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 20, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.08.27-2106', 'The price table gets a blue + in the corner for a new item or vendor, replacing the two header buttons'],
   ['v2026.08.27-2031', 'Opening an hours cell no longer shifts the chart on a desktop; on a phone it still brings the row into view'],
   ['v2026.08.27-1940', 'The hours chart shades alternate days, so a day’s rows read as one block'],
   ['v2026.08.27-1936', 'In the day view the crew now sits beside the customer name when it fits, so short jobs stop hiding who is on them'],
@@ -2027,11 +2028,11 @@ function renderPriceTable() {
     : '';
   const canEdit = Storage.canEditPriceTable();
   // Action buttons are admin/shared-employee only; Share is admin only
-  const addItemBtn = document.getElementById('price-add-item');
-  const addVendorBtn = document.getElementById('price-add-vendor');
   const shareBtn = document.getElementById('price-share');
-  if (addItemBtn) addItemBtn.hidden = !canEdit;
-  if (addVendorBtn) addVendorBtn.hidden = !canEdit;
+  // Both add actions live in the FAB menu now, so one control carries them.
+  const priceFabEl = document.getElementById('price-fab');
+  if (priceFabEl) priceFabEl.hidden = !canEdit;
+  if (!canEdit) { const m = document.getElementById('price-fab-menu'); if (m) m.hidden = true; }
   if (shareBtn) shareBtn.hidden = !isAdminRole();
   const reorderBtn = document.getElementById('price-reorder');
   const importBtn = document.getElementById('price-import');
@@ -2410,6 +2411,19 @@ if (priceHistoryClose) priceHistoryClose.addEventListener('click', () => { price
 if (priceHistoryModal) priceHistoryModal.addEventListener('click', (e) => { if (e.target === priceHistoryModal) priceHistoryModal.hidden = true; });
 
 // ---------- price table header actions ----------
+// The + and its two-item menu, same shape as the home screen's.
+const priceFab = document.getElementById('price-fab');
+const priceFabMenu = document.getElementById('price-fab-menu');
+function closePriceFabMenu() { if (priceFabMenu) priceFabMenu.hidden = true; }
+if (priceFab) priceFab.addEventListener('click', (e) => {
+  e.stopPropagation();
+  if (priceFabMenu) priceFabMenu.hidden = !priceFabMenu.hidden;
+});
+if (priceFabMenu) priceFabMenu.addEventListener('click', () => closePriceFabMenu());
+document.addEventListener('click', (e) => {
+  if (priceFabMenu && !priceFabMenu.hidden
+      && !priceFabMenu.contains(e.target) && e.target !== priceFab) closePriceFabMenu();
+});
 const priceAddItemBtn = document.getElementById('price-add-item');
 const priceAddVendorBtn = document.getElementById('price-add-vendor');
 const priceShareBtn = document.getElementById('price-share');
@@ -3019,6 +3033,8 @@ function hideAllScreens() {
   if (fm) fm.hidden = true;
   const pm = document.getElementById('price-more-dropdown');
   if (pm) pm.hidden = true;
+  const pfm = document.getElementById('price-fab-menu');
+  if (pfm) pfm.hidden = true;
   // The calendar and hours ⋯ menus, same reason — a dropdown left open would
   // reappear over whatever screen you came back to.
   ['cal-more-dropdown', 'hours-more-dropdown'].forEach(id => {
@@ -8585,15 +8601,15 @@ function tutorialSteps(part) {
     {
       screen: 'price',
       setup: () => { showPriceTable(); return true; },
-      target: () => document.getElementById('price-add-vendor'),
-      text: 'Add your suppliers with + Vendor, and the things you buy with + Item. Tap a name later to rename it.',
+      target: () => document.getElementById('price-fab'),
+      text: 'The + adds a supplier as a column, or a thing you buy as a row. Tap a name later to rename it.',
     },
     {
       screen: 'price',
       group: 'pricecells',
       requires: () => Storage.listPriceItems().length > 0 && Storage.getPriceConfig().vendors.length > 0,
       fallback: {
-        target: () => document.getElementById('price-add-vendor'),
+        target: () => document.getElementById('price-fab'),
         text: 'Add a vendor and an item first, then run this part again to see how prices work.',
       },
       setup: () => { showPriceTable(); return true; },

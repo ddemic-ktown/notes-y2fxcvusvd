@@ -328,8 +328,6 @@
         </div>
       </div>
       <div class="customers-header-bottom price-actions">
-        <button id="price-add-item" class="icon-btn date-btn" type="button">+ Item</button>
-        <button id="price-add-vendor" class="icon-btn date-btn" type="button">+ Vendor</button>
         <!-- Cycles Custom ⇄ Latest, like the Theme button in Settings: one
              button that carries its own state instead of a pair of radios. -->
         <button id="price-sort" class="icon-btn date-btn" type="button">Sort: Custom</button>
@@ -368,6 +366,13 @@
         <table id="price-table" class="price-table"></table>
       </div>
     </main>
+    <!-- + moved out of the header row (it was "+ Item" / "+ Vendor" there) into
+         the same FAB-and-menu shape the home screen uses. -->
+    <div id="price-fab-menu" class="fab-menu" hidden>
+      <button id="price-add-item" class="fab-menu-item" type="button">New item</button>
+      <button id="price-add-vendor" class="fab-menu-item" type="button">New vendor</button>
+    </div>
+    <button id="price-fab" class="fab" type="button" aria-label="Add to the price table" hidden>+</button>
   </section>
 
   <!-- PRICE CELL HISTORY SHEET (long-press a cell) -->
