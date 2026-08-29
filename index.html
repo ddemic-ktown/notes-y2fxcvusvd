@@ -437,7 +437,7 @@
         <div class="editor-more-wrap">
           <button id="hours-more-btn" class="icon-btn date-btn editor-more-btn" type="button" aria-label="More hours options">⋯</button>
           <div id="hours-more-dropdown" class="editor-more-dropdown" hidden>
-            <button class="editor-more-item" type="button" data-tutorial-part="7" data-tutorial-solo data-tutorial-skip-home>How the hours chart works</button>
+            <button class="editor-more-item" type="button" id="editor-help-hours" data-tutorial-part="7" data-tutorial-solo data-tutorial-skip-home>How the hours chart works</button>
           </div>
         </div>
       </div>
@@ -537,7 +537,16 @@
         </label>
       </div>
 
+      <!-- Features: per-user show/hide. Each checkbox is SHOWN-when-checked, so
+           the default (all boxes ticked) is the app as it has always been. The
+           list is generated from FEATURE_TOGGLES in app.js. -->
       <div class="setting-row setting-list-row" data-staff-only>
+        <h3 class="setting-list-title">Features</h3>
+        <p class="muted setting-hint">Turn off what you don't use and it disappears from the app. Nothing is deleted — turn it back on and everything is where you left it. This is your account only; it follows you to your other devices and doesn't change what anyone else sees.</p>
+        <div id="feature-toggle-list"></div>
+      </div>
+
+      <div class="setting-row setting-list-row" id="keyword-settings-card" data-staff-only>
         <h3 class="setting-list-title">Aggregator Keywords</h3>
         <div class="keyword-add">
           <input id="keyword-input" type="text" placeholder="Add a keyword" autocomplete="off" />
@@ -549,7 +558,7 @@
       <!-- Card is role-gated as a whole (admin + bookkeeper); the Employees
            half is admin-only, so a bookkeeper sees Export only. -->
       <div class="setting-row setting-list-row" data-role-iif>
-        <h3 class="setting-list-title">Time Logger — QuickBooks</h3>
+        <h3 class="setting-list-title" id="timelogger-card-title">Time Logger — QuickBooks</h3>
 
         <div data-staff-only>
           <h4 class="setting-sub-title" style="margin-top:0;">Employees</h4>
@@ -578,6 +587,7 @@
           </div>
           <ul id="customer-link-list" class="keyword-list employee-list"></ul>
 
+          <div id="qb-items-block">
           <h4 class="setting-sub-title">QuickBooks service items</h4>
           <p class="muted setting-hint">Which QuickBooks Service item each classification bills against. These must match your item list <strong>exactly</strong> — QuickBooks compares them character for character, and a single wrong character fails every row of the import. A sub-item is written parent:child. Leave blank to use the built-in default.</p>
           <label class="employee-field">
@@ -588,9 +598,10 @@
             <span class="employee-field-label">Apprentice item</span>
             <input id="iif-item-apprentice" type="text" class="signin-input" autocomplete="off" spellcheck="false" placeholder="Service Rates:Labour Rate" />
           </label>
+          </div>
         </div>
 
-        <div data-role-iif>
+        <div id="hours-export-block" data-role-iif>
           <h4 class="setting-sub-title">Export</h4>
           <p class="muted setting-hint">Your calendar jobs' hours as an editable chart, then export as a .iif file for QuickBooks Desktop. The date range lives on that screen.</p>
           <button id="iif-btn" class="secondary setting-wide-btn">Hours</button>

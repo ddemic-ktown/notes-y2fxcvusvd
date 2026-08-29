@@ -20,6 +20,13 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 20, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.08.29-1156', 'On a desktop the month grid grows a busy week taller than a quiet one, and lists every job for the day instead of stopping at three'],
+  ['v2026.08.29-1152', 'On a desktop each day in the month and week grid lists its jobs one per entry — customer on top, the crew underneath'],
+  ['v2026.08.29-1148', 'On a desktop the month and week grids show each person’s hours beside their name, the way the day view does'],
+  ['v2026.08.29-1144', 'Hours joins the Features list as two switches — one hides the whole hours chart and QuickBooks export, the other just its home screen button'],
+  ['v2026.08.29-1123', 'New Features section in Settings — switch off Aggregators and they disappear from the app, your account only, nothing deleted'],
+  ['v2026.08.29-1035', 'Overlapping jobs in the day view now stack with the later one on top and indented, instead of squeezing side by side'],
+  ['v2026.08.29-1024', 'Pinch-zooming no longer blows the floating + button up into a slab over the screen — it hides until you zoom back out'],
   ['v2026.08.27-2210', 'Day groups in the hours chart alternate between the two theme shades across the whole row'],
   ['v2026.08.27-2200', 'The hours chart’s day shading now reads evenly across the whole row, in both light and dark'],
   ['v2026.08.27-2156', 'The price table’s + hides while you are entering a price'],
@@ -502,23 +509,106 @@ function getPinnedOrder() {
   return filtered;
 }
 function movePinnedSection(key, direction) {
+  // Swap against the VISIBLE neighbour — with a section hidden, the stored
+  // order has a gap in it and swapping there would look like nothing happened.
+  const visible = getVisiblePinnedOrder();
+  const vi = visible.indexOf(key);
+  if (vi === -1) return;
+  const vj = vi + direction;
+  if (vj < 0 || vj >= visible.length) return;
   const order = getPinnedOrder();
-  const i = order.indexOf(key);
-  if (i === -1) return;
-  const j = i + direction;
-  if (j < 0 || j >= order.length) return;
+  const i = order.indexOf(key), j = order.indexOf(visible[vj]);
+  if (i === -1 || j === -1) return;
   [order[i], order[j]] = [order[j], order[i]];
   queueSetting('pinnedOrder', order); // debounced write, instant UI
 }
+// ---------- hideable features (per user, synced) ----------
+// A feature the user has switched off vanishes from the app but keeps all its
+// data — the toggle only controls what is rendered. Stored as a list of keys in
+// the synced pref `na-hidden-features`, so it follows the person to their other
+// devices without touching anyone else in the org. Adding another hideable
+// feature is one entry here plus a check wherever it renders.
+const FEATURE_TOGGLES = [
+  { key: 'aggregator', label: 'Aggregators',
+    hint: 'The keyword sections on the home screen and the Aggregator Keywords list in Settings.' },
+  { key: 'hours', label: 'Hours & QuickBooks export',
+    hint: 'The hours chart and the QuickBooks .iif export, including the service item names in Settings. Employees and customer accounts stay — the calendar needs them.' },
+  { key: 'hoursCard', label: 'Hours button on the home screen',
+    hint: 'Just the home screen shortcut. With this off and Hours on, the chart is still there under Settings.' },
+];
+
+function getHiddenFeatures() {
+  try {
+    const raw = JSON.parse(localStorage.getItem('na-hidden-features') || '[]');
+    return Array.isArray(raw) ? raw.filter(k => FEATURE_TOGGLES.some(f => f.key === k)) : [];
+  } catch { return []; }
+}
+function isFeatureOn(key) { return !getHiddenFeatures().includes(key); }
+function setFeatureOn(key, on) {
+  const next = getHiddenFeatures().filter(k => k !== key);
+  if (!on) next.push(key);
+  localStorage.setItem('na-hidden-features', JSON.stringify(next));
+  pushUserPrefs();
+}
+// The stored pinned order is left alone when a section is hidden, so switching
+// the feature back on returns it to its old position rather than the bottom.
+function getVisiblePinnedOrder() {
+  return getPinnedOrder().filter(k => k !== 'aggregator' || isFeatureOn('aggregator'));
+}
+// Checkbox per feature, SHOWN-when-checked. Rebuilt on every Settings visit so
+// a change synced from another device is reflected without a reload.
+function renderFeatureToggles() {
+  const wrap = document.getElementById('feature-toggle-list');
+  if (!wrap) return;
+  wrap.innerHTML = FEATURE_TOGGLES.map(f => `
+    <label class="setting-check">
+      <input type="checkbox" data-feature="${f.key}" ${isFeatureOn(f.key) ? 'checked' : ''} />
+      <span>
+        ${escapeHtml(f.label)}
+        <em class="setting-check-hint">${escapeHtml(f.hint)}</em>
+      </span>
+    </label>`).join('');
+  wrap.querySelectorAll('input[data-feature]').forEach(box => {
+    box.addEventListener('change', () => {
+      setFeatureOn(box.dataset.feature, box.checked);
+      applyFeatureVisibility();
+      renderNotesList();     // the home screen is what the toggle mostly affects
+    });
+  });
+}
+// Anything OUTSIDE the home screen that a hidden feature owns. The home screen
+// itself is handled by getVisiblePinnedOrder inside renderNotesList.
+function applyFeatureVisibility() {
+  const kw = document.getElementById('keyword-settings-card');
+  if (kw) kw.hidden = !isFeatureOn('aggregator');
+
+  // Hours has two switches. The big one takes everything the chart and the
+  // QuickBooks export own; the small one takes only the home screen shortcut.
+  // Employees and customer accounts are NOT part of either — the calendar
+  // schedules against that list, so it has to survive.
+  const hoursOn = isFeatureOn('hours');
+  ['hours-export-block', 'qb-items-block', 'tutorial-btn-7', 'editor-help-hours']
+    .forEach(id => { const el = document.getElementById(id); if (el) el.hidden = !hoursOn; });
+  // With the export gone, the card is no longer about QuickBooks at all.
+  const tlTitle = document.getElementById('timelogger-card-title');
+  if (tlTitle) tlTitle.textContent = hoursOn
+    ? 'Time Logger — QuickBooks'
+    : 'Employees & customer accounts';
+}
+// The home shortcut needs BOTH: hiding the feature outright must not leave a
+// card pointing at a screen that now sends you straight back home.
+function isHoursCardOn() { return isFeatureOn('hours') && isFeatureOn('hoursCard'); }
+
 // ---------- preferences that follow the user ----------
-// These five describe the PERSON, so they sync via users/{uid}/prefs/app and
+// These describe the PERSON, so they sync via users/{uid}/prefs/app and
 // show up on every device they sign in on. Deliberately excluded:
 // na-price-zoom and jp-gallery-cols (screen-size dependent — a phone value is
 // wrong on a desktop) and na-install-hint-dismissed (per device by nature).
 // localStorage stays the working copy: everything applies instantly and still
 // works offline; the cloud copy is written through.
 const SYNCED_PREFS = ['na-theme', 'na-clock-24', 'na-move-checked',
-                      'na-collapse-search', 'na-customer-sort'];
+                      'na-collapse-search', 'na-customer-sort',
+                      'na-hidden-features'];
 let prefsLoaded = false;      // don't write back the values we just read in
 
 function collectLocalPrefs() {
@@ -549,6 +639,10 @@ async function initUserPrefs() {
     if (mc) mc.checked = getMoveCheckedToBottom();
     const cs = document.getElementById('setting-collapse-search');
     if (cs) cs.checked = getCollapseSearch();
+    renderFeatureToggles();
+    // A feature switched off on another device changes what the home screen
+    // shows, so redraw it if that is what is on screen right now.
+    if (listView && listView.classList.contains('active')) renderNotesList();
     prefsLoaded = true;
   } else {
     // First sign-in on this account: seed the cloud from whatever is already
@@ -556,6 +650,10 @@ async function initUserPrefs() {
     prefsLoaded = true;
     pushUserPrefs();
   }
+  // Unconditional: some of what this hides (the ⋯ menu's hours help, the
+  // Tutorial 7 button) lives outside Settings, so it must be applied at
+  // startup whether or not a cloud copy came back.
+  applyFeatureVisibility();
 }
 
 // Customer sort is a per-device viewing preference (localStorage), NOT an org
@@ -956,27 +1054,55 @@ function renderCalendar() {
     if (otherMonth) classes.push('cal-other');
     if (!jobs.length) classes.push('cal-empty');   // greyed when nobody is on
     if (s === todayStr) classes.push('cal-today');
-    // Group by crew so the same names aren't repeated for every job
-    const groups = groupByCrew(jobs);
+    // DESKTOP: one job per entry, two lines — customer on top, the crew
+    // underneath. There is room for it, and grouping by crew meant a cell read
+    // as a list of names with the customers bolted on the end. The phone keeps
+    // the grouped layout below: a thumbnail-sized cell cannot carry two lines
+    // per job, and there the colour is what you read a week by anyway.
+    // The desktop month grid grows its rows to fit, so there is nothing to
+    // hide behind a +N — it lists every job. Week view keeps the cap: its rows
+    // are a fixed share of one screen.
+    const deskCap = (calMode === 'month') ? Infinity : MAX_CHIPS;
     let shown = 0;
-    const lines = groups.map(g => {
-      if (shown >= MAX_CHIPS) return '';
-      const chips = g.names.length
-        ? g.names.map(n => {
+    const lines = shortPills ? '' : jobs.slice(0, deskCap).map(j => {
+      shown++;
+      const who = j.customerName || (j.customerId ? customerCrumbLabel(j.customerId) : '—');
+      const jh = j.employeeHours || {};
+      const chips = (j.employeeNames || []).length
+        ? j.employeeNames.map(n => {
             const first = n.split(/[\s(]+/)[0];
-            const label = shortPills ? first.slice(0, 1).toUpperCase() : first;
-            return `<span class="cal-chip${shortPills ? ' cal-chip-initial' : ''}" style="${chipStyle(n)}" title="${escapeHtml(n)}">${escapeHtml(label)}</span>`;
+            const h = parseFloat(jh[n]);
+            const label = first + (Number.isFinite(h) && h ? `: ${+h.toFixed(2)}` : '');
+            return `<span class="cal-chip" style="${chipStyle(n)}" title="${escapeHtml(n)}">${escapeHtml(label)}</span>`;
           }).join('')
         : '<span class="cal-chip cal-chip-none">—</span>';
+      return `<div class="cal-job cal-job-stacked">
+        <span class="cal-job-who">${escapeHtml(who)}</span>
+        <span class="cal-job-crew">${chips}</span>
+      </div>`;
+    }).join('');
+
+    // PHONE: group by crew so the same names aren't repeated for every job.
+    // One letter per person, no hours — there is no room for either.
+    const groups = groupByCrew(jobs);
+    const groupedLines = !shortPills ? '' : groups.map(g => {
+      if (shown >= MAX_CHIPS) return '';
       const room = MAX_CHIPS - shown;
       const take = g.jobs.slice(0, room);
       shown += take.length;
+      const chips = g.names.length
+        ? g.names.map(n => {
+            const first = n.split(/[\s(]+/)[0];
+            return `<span class="cal-chip cal-chip-initial" style="${chipStyle(n)}" title="${escapeHtml(n)}">${escapeHtml(first.slice(0, 1).toUpperCase())}</span>`;
+          }).join('')
+        : '<span class="cal-chip cal-chip-none">—</span>';
       const whos = take.map(j => j.customerName || (j.customerId ? customerCrumbLabel(j.customerId) : '—'));
       return `<div class="cal-job">${chips}<span class="cal-job-who">${escapeHtml(whos.join(', '))}</span></div>`;
     }).join('');
+
     const more = jobs.length > shown ? `<div class="cal-more">+${jobs.length - shown}</div>` : '';
     return `<div class="${classes.join(' ')}" data-date="${s}">
-      <div class="cal-daynum">${d.getDate()}</div>${lines}${more}
+      <div class="cal-daynum">${d.getDate()}</div>${lines}${groupedLines}${more}
     </div>`;
   }).join('');
   // Cues so it's obvious there's more either side — naming the month beats
@@ -999,6 +1125,10 @@ function renderCalendar() {
     + `<button type="button" class="cal-cue cal-cue-side" data-shift="1">${escapeHtml(cueLabel(1))} ›</button>`
     + `</div>`;
   calGrid.classList.toggle('cal-grid-week', calMode === 'week');
+  // Desktop month only: week rows size to their content, so a busy week is
+  // taller than a quiet one. Week view already gives each day a full row, and a
+  // phone has no height to spend, so neither gets it.
+  calGrid.classList.toggle('cal-grid-tall', calMode === 'month' && !shortPills);
   calGrid.innerHTML = cues + `<div class="cal-headrow">${head}</div><div class="cal-cells">${cells}</div>`;
   const modeBtn = document.getElementById('cal-mode');
   if (modeBtn) {
@@ -1106,17 +1236,62 @@ function jobSpan(job) {
 }
 // Side-by-side lanes so overlapping jobs don't hide each other: walk them in
 // start order and reuse the first lane whose last job has finished.
+// Overlapping jobs used to split the width evenly across the whole day, so a
+// single overlapping pair squeezed every other block. Now they CASCADE: the
+// later job draws on top of the earlier one, indented from the left, provided
+// the earlier one's start is far enough above that its text still reads. Only
+// jobs that start at (or within a few minutes of) the same time still need
+// their own column, and the column count is per overlap cluster rather than
+// per day.
+const CASCADE_INDENT = 14;   // px the later block is pushed in by
+const CASCADE_CLEAR  = 28;   // px of the earlier block that must stay visible
+
 function layoutLanes(spans) {
-  const laneEnds = [];
-  const placed = spans.map(() => ({ lane: 0, lanes: 1 }));
-  spans.map((s, i) => ({ s, i })).sort((a, b) => a.s.start - b.s.start).forEach(({ s, i }) => {
-    let lane = laneEnds.findIndex(end => end <= s.start);
-    if (lane === -1) { lane = laneEnds.length; laneEnds.push(0); }
-    laneEnds[lane] = s.end;
-    placed[i].lane = lane;
+  const placed = spans.map(() => ({ lane: 0, lanes: 1, depth: 0, visible: Infinity }));
+  const order = spans.map((s, i) => ({ s, i })).sort((a, b) =>
+    a.s.start - b.s.start || a.s.end - b.s.end);
+
+  // Cluster: a run of jobs joined by time overlap. Blocks in different clusters
+  // never touch, so each cluster gets its own column count.
+  let cluster = [], clusterEnd = -Infinity;
+  const clusters = [];
+  order.forEach(o => {
+    if (cluster.length && o.s.start >= clusterEnd) { clusters.push(cluster); cluster = []; }
+    cluster.push(o);
+    clusterEnd = Math.max(clusterEnd, o.s.end);
   });
-  const total = Math.max(1, laneEnds.length);
-  placed.forEach(p => { p.lanes = total; });
+  if (cluster.length) clusters.push(cluster);
+
+  const clearMin = (CASCADE_CLEAR / HOUR_PX) * 60;   // px of clearance, in minutes
+
+  clusters.forEach(items => {
+    // Each column tracks the last block placed in it: a new job joins that
+    // column if the previous job has ENDED (a plain reuse, as before) or if it
+    // starts far enough below the previous block's top to cascade over it.
+    const cols = [];   // { end, top, depth, lastIdx }
+    items.forEach(({ s, i }) => {
+      let col = -1, cascade = false;
+      for (let c = 0; c < cols.length; c++) {
+        if (s.start >= cols[c].end) { col = c; cascade = false; break; }
+        if (s.start >= cols[c].top + clearMin) { col = c; cascade = true; break; }
+      }
+      if (col === -1) { col = cols.length; cols.push({ end: 0, top: -Infinity, depth: -1, lastIdx: -1 }); }
+      const depth = cascade ? cols[col].depth + 1 : 0;
+      // The block being cascaded over only shows down to the new block's top,
+      // so its text has to be laid out for that strip, not its full height.
+      if (cascade && cols[col].lastIdx >= 0) {
+        placed[cols[col].lastIdx].visible = Math.min(
+          placed[cols[col].lastIdx].visible,
+          ((s.start - spans[cols[col].lastIdx].start) / 60) * HOUR_PX);
+      }
+      placed[i].lane = col;
+      placed[i].depth = depth;
+      cols[col] = { end: Math.max(cascade ? cols[col].end : 0, s.end), top: s.start, depth, lastIdx: i };
+    });
+    const total = Math.max(1, cols.length);
+    items.forEach(({ i }) => { placed[i].lanes = total; });
+  });
+
   return placed;
 }
 
@@ -1179,11 +1354,17 @@ function renderCalendarDay() {
     </div>`).join('');
   const blocks = timed.map((j, i) => {
     const { start, end } = spans[i];
-    const { lane, lanes: n } = lanes[i];
+    const { lane, lanes: n, depth, visible } = lanes[i];
     const top = (start / 60) * HOUR_PX;
     const height = Math.max(22, ((end - start) / 60) * HOUR_PX - 2);
-    const width = `calc((100% - 52px) / ${n} - 4px)`;
-    const left = `calc(52px + ((100% - 52px) / ${n}) * ${lane} + 2px)`;
+    // A cascaded block is pushed in from the left and keeps its right edge, so
+    // the block underneath stays visible along its left flank as well as above.
+    const indent = depth * CASCADE_INDENT;
+    const width = `calc((100% - 52px) / ${n} - 4px - ${indent}px)`;
+    const left = `calc(52px + ((100% - 52px) / ${n}) * ${lane} + 2px + ${indent}px)`;
+    // Only the strip above the next block is on screen, so lay the text out for
+    // that instead of the block's real height.
+    const shown = Math.min(height, visible);
     const who = j.customerName || (j.customerId ? customerCrumbLabel(j.customerId) : 'No customer');
     const names = (j.employeeNames || []);
     const timeTxt = `${fmtClock(start)}–${fmtClock(end)}`;
@@ -1200,15 +1381,15 @@ function renderCalendarDay() {
       : '<span class="cal-chip cal-chip-none">—</span>';
     // The note often carries internal remarks, so customers don't get it.
     const note = isCustomerRole() ? '' : (j.description || '').trim();
-    const roomForNote = height >= 76;
+    const roomForNote = shown >= 76;
     // The customer and the crew share a line. Normally the row WRAPS, so the
     // chips sit beside a short name and drop underneath a long one. On a short
     // block there is no underneath — a half-hour job is ~24px — so `tight`
     // forbids the wrap and lets the NAME truncate instead: losing the tail of
     // a name you can read the start of beats losing the chips entirely.
-    const tight = height < 52;
+    const tight = shown < 52;
     const addr = j.address && !tight ? `<div class="cal-block-addr">${escapeHtml(j.address)}</div>` : '';
-    return `<div class="cal-block${tight ? ' cal-block-tight' : ''}" data-job="${j.id}" style="top:${top}px;height:${height}px;left:${left};width:${width}">
+    return `<div class="cal-block${tight ? ' cal-block-tight' : ''}" data-job="${j.id}" style="top:${top}px;height:${height}px;left:${left};width:${width};z-index:${1 + depth}">
       <span class="cal-block-bar" style="${crewBarStyle(names)}"></span>
       ${tight ? '' : `<div class="cal-block-time">${escapeHtml(timeTxt)}</div>`}
       <div class="cal-block-head">
@@ -2563,11 +2744,22 @@ function updateAppVh() {
   const kb = keyboardInset(vv);
   if (kb > 0) kbLastUpAt = Date.now();   // feeds keyboardIsUp's grace window
   document.documentElement.style.setProperty('--kb-inset', kb + 'px');
+  // PINCH ZOOM. A `position: fixed` control is laid out against the layout
+  // viewport, so the browser magnifies it with everything else: the calendar's
+  // + grew into a blue slab across the bottom of the grid. Counter-scaling was
+  // rejected — a fixed element also drifts as you pan, so it would end up the
+  // right size in the wrong place. Zoomed in, you are reading, not adding.
+  document.body.classList.toggle('vv-zoomed', !!vv && vv.scale > 1.05);
 }
 updateAppVh();
 window.addEventListener('resize', updateAppVh);
 window.addEventListener('orientationchange', updateAppVh);
-if (window.visualViewport) window.visualViewport.addEventListener('resize', updateAppVh);
+if (window.visualViewport) {
+  window.visualViewport.addEventListener('resize', updateAppVh);
+  // A pinch fires `scroll` too, and on some browsers ONLY scroll once the
+  // gesture settles — without it the class lags a zoom by a whole gesture.
+  window.visualViewport.addEventListener('scroll', updateAppVh);
+}
 // The keyboard announces itself through focus, not only through resize.
 window.addEventListener('focusin', updateAppVh);
 window.addEventListener('focusout', () => setTimeout(updateAppVh, 50));
@@ -3412,6 +3604,9 @@ function clearCompiledState() {
 }
 
 function showSection(key) {
+  // A hidden feature has no section screen — back/forward history could still
+  // land on one, so send that home instead of showing an orphaned list.
+  if (key === 'aggregator' && !isFeatureOn('aggregator')) { goHome(); return; }
   hideAllScreens();
   activeSectionKey = key;
   const titles = { aggregator: 'Aggregators', recent: "Recent Customer's Notes", notes: 'General Notes' };
@@ -3566,6 +3761,8 @@ function showSettings() {
   if (moveCheckedInput) moveCheckedInput.checked = getMoveCheckedToBottom();
   const collapseSearchInput = document.getElementById('setting-collapse-search');
   if (collapseSearchInput) collapseSearchInput.checked = getCollapseSearch();
+  renderFeatureToggles();
+  applyFeatureVisibility();
   settingsView.classList.add('active');
   if (!handlingPopstate) history.pushState({ screen: 'settings' }, '');
   applyTheme();
@@ -3976,7 +4173,7 @@ function renderNotesList() {
   ` : '';
   // Hours card — same audience as the Settings entry: admin (full) and
   // bookkeeper (read-only export).
-  const hoursCard = (isAdminRole() || isBookkeeperRole()) ? `
+  const hoursCard = ((isAdminRole() || isBookkeeperRole()) && isHoursCardOn()) ? `
     <article class="note-card nav-card" data-nav="hours">
       <div class="note-head">
         <p class="note-title">Hours</p>
@@ -4064,7 +4261,7 @@ function renderNotesList() {
     : '';
 
   // Section heading with inline controls: − + move up/down, See all
-  const order = getPinnedOrder();
+  const order = getVisiblePinnedOrder();
   const sectionLabel = (text, key) => {
     const i = order.indexOf(key);
     const upDisabled = i <= 0 ? 'disabled' : '';
@@ -4081,7 +4278,7 @@ function renderNotesList() {
       <button class="section-label-all" data-section="${key}">See all ›</button>
     </p>`;
   };
-  const pinnedBlock = getPinnedOrder().map(key => {
+  const pinnedBlock = getVisiblePinnedOrder().map(key => {
     if (key === 'aggregator') return sectionLabel('Aggregators:', 'aggregator') + keywordHtml;
     if (key === 'recent') return sectionLabel("Recent Customer's Notes:", 'recent') + recentHtml;
     if (key === 'notes') return sectionLabel('General Notes:', 'notes') + notesHtml;
@@ -8329,6 +8526,9 @@ function iifExportEntries() {
 // are re-read, so an uncommitted cell edit does not survive leaving. (A
 // COMMITTED one does: it was written to the job.)
 function showHoursView() {
+  // Feature switched off — the entry points are gone, but back/forward can
+  // still land on this screen's history entry.
+  if (!isFeatureOn('hours')) { goHome(); return; }
   if (!hoursView) return;
   // Same gate as the Settings card: admin writes, bookkeeper reads.
   if (!isAdminRole() && !isBookkeeperRole()) return;
@@ -8621,7 +8821,7 @@ function tutorialSteps(part) {
         },
       ],
     };
-    const ordered = getPinnedOrder().flatMap(key => sectionSteps[key] || []);
+    const ordered = getVisiblePinnedOrder().flatMap(key => sectionSteps[key] || []);
     if (ordered.length) ordered[0] = { ...ordered[0], setup: () => goHome() };
     ordered.push({
       screen: 'home',

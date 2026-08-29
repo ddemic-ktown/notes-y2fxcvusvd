@@ -617,12 +617,31 @@ select.iif-date-input { appearance: none; -webkit-appearance: none; padding-righ
    become tall enough to read, which is the whole point of the mode on a phone:
    grid-auto-rows goes from "fit 5 rows on screen" to "fill the space you have".
    The row still scrolls if a day is busy enough to overflow. */
+/* DESKTOP MONTH — rows sized by their content instead of an even split of the
+   viewport, so a week with six jobs in it is taller than a week with two.
+   `minmax(64px, auto)` keeps a quiet week from collapsing; `align-content:
+   start` stops a short month from stretching its rows to fill the leftover
+   space, which would undo the whole effect. The grid itself scrolls. */
+.cal-grid-tall .cal-cells { grid-auto-rows: minmax(64px, auto); align-content: start; }
+/* Content decides the height now, so a cell must not clip its own jobs. */
+.cal-grid-tall .cal-cell { overflow: visible; }
+
 .cal-grid-week .cal-cells { grid-auto-rows: minmax(0, 1fr); }
 .cal-grid-week .cal-cell { padding: 5px 6px; gap: 3px; overflow-y: auto; }
 .cal-grid-week .cal-daynum { font-size: 13px; }
 .cal-grid-week .cal-chip { font-size: 10px; padding: 1px 6px; }
 .cal-grid-week .cal-job-who { font-size: 11px; white-space: normal; }
 .cal-job-who { font-size: 10px; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Desktop grid: one entry per job, customer on its own line with the crew
+   underneath. `column` is the whole difference from the phone's single row —
+   .cal-job is a flex container either way. A small left border keeps two jobs
+   in one cell from reading as four unrelated lines. */
+.cal-job-stacked {
+  flex-direction: column; align-items: stretch; gap: 1px;
+  border-left: 2px solid var(--line); padding-left: 5px;
+}
+.cal-job-stacked .cal-job-who { font-weight: 600; }
+.cal-job-crew { display: flex; flex-wrap: wrap; gap: 2px; min-width: 0; }
 .cal-more { font-size: 10px; color: var(--ink-soft); font-weight: 600; }
 .cal-day-card .cal-day-chips { display: flex; flex-wrap: wrap; gap: 4px; margin: 4px 0; }
 .cal-day-card .cal-chip { font-size: 11px; padding: 2px 8px; }
@@ -670,7 +689,7 @@ select.iif-date-input { appearance: none; -webkit-appearance: none; padding-righ
      this to `none` only once a long-press turns into a drag. */
   touch-action: pan-y;
 }
-.cal-block-dragging { opacity: 0.85; box-shadow: 0 6px 18px rgba(0,0,0,0.3); z-index: 5; }
+.cal-block-dragging { opacity: 0.85; box-shadow: 0 6px 18px rgba(0,0,0,0.3); z-index: 50 !important; }
 .cal-block-time { font-size: 10px; color: var(--ink-soft); }
 /* Customer + crew on ONE row when they fit. `flex: 0 1 auto` on the name is
    what allows it: the name takes only what it needs, so the chips sit beside a
@@ -2354,6 +2373,12 @@ input[type="search"]::-webkit-search-cancel-button {
 .reorder-item button:disabled { color: #d1d5db; cursor: not-allowed; }
 
 /* FAB */
+/* Pinch-zoomed: every floating control is hidden. The browser magnifies a
+   `position: fixed` element along with the page, so a 60px + becomes a slab
+   over whatever you zoomed in to read. Set from JS (visualViewport.scale). */
+body.vv-zoomed .fab,
+body.vv-zoomed .fab-menu,
+body.vv-zoomed .editor-new-actions { display: none !important; }
 .fab {
   position: fixed;
   right: 20px;
