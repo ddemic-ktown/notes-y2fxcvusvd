@@ -642,6 +642,12 @@ select.iif-date-input { appearance: none; -webkit-appearance: none; padding-righ
 }
 .cal-job-stacked .cal-job-who { font-weight: 600; }
 .cal-job-crew { display: flex; flex-wrap: wrap; gap: 2px; min-width: 0; }
+/* Job note, one clamped line under the crew. Softer than the customer so the
+   entry still reads top-down: who, then who's going, then the detail. */
+.cal-job-note {
+  font-size: 10px; color: var(--ink-soft);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 .cal-more { font-size: 10px; color: var(--ink-soft); font-weight: 600; }
 .cal-day-card .cal-day-chips { display: flex; flex-wrap: wrap; gap: 4px; margin: 4px 0; }
 .cal-day-card .cal-chip { font-size: 11px; padding: 2px 8px; }
@@ -714,6 +720,8 @@ select.iif-date-input { appearance: none; -webkit-appearance: none; padding-righ
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
 }
+/* Middle tier — the block has room for the note but not for two lines of it. */
+.cal-block-note-1 { -webkit-line-clamp: 1; }
 .cal-resize {
   position: absolute; right: 0; bottom: 0; width: 22px; height: 18px;
   touch-action: none;   /* the handle is only ever a drag */

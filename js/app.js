@@ -17,9 +17,11 @@ import { LocalFiles } from "./files.js";
 
 // Version format: vYYYY.MM.DD-HHMM (Pacific time).
 // On every change: add a new entry at the TOP of CHANGELOG (APP_VERSION follows automatically),
-// delete entries beyond 20, and set sw.js VERSION to match.
+// delete entries beyond 100, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.09.16-1808', 'Job notes now show on the calendar wherever they fit — shorter blocks in the day view, and every job in the desktop month and week grids'],
+  ['v2026.09.16-1805', 'What’s new in Settings now goes back 100 changes instead of 20'],
   ['v2026.08.29-1156', 'On a desktop the month grid grows a busy week taller than a quiet one, and lists every job for the day instead of stopping at three'],
   ['v2026.08.29-1152', 'On a desktop each day in the month and week grid lists its jobs one per entry — customer on top, the crew underneath'],
   ['v2026.08.29-1148', 'On a desktop the month and week grids show each person’s hours beside their name, the way the day view does'],
@@ -1076,9 +1078,14 @@ function renderCalendar() {
             return `<span class="cal-chip" style="${chipStyle(n)}" title="${escapeHtml(n)}">${escapeHtml(label)}</span>`;
           }).join('')
         : '<span class="cal-chip cal-chip-none">—</span>';
+      // The note is the third line. Customers don't get it, same rule as the
+      // day view — it often carries internal remarks.
+      const jnote = isCustomerRole() ? '' : (j.description || '').trim();
+      const noteLine = jnote ? `<span class="cal-job-note">${escapeHtml(jnote)}</span>` : '';
       return `<div class="cal-job cal-job-stacked">
         <span class="cal-job-who">${escapeHtml(who)}</span>
         <span class="cal-job-crew">${chips}</span>
+        ${noteLine}
       </div>`;
     }).join('');
 
@@ -1381,7 +1388,11 @@ function renderCalendarDay() {
       : '<span class="cal-chip cal-chip-none">—</span>';
     // The note often carries internal remarks, so customers don't get it.
     const note = isCustomerRole() ? '' : (j.description || '').trim();
-    const roomForNote = shown >= 76;
+    // Three tiers rather than two. A block used to need 76px before the note
+    // appeared at all, which on a phone meant most jobs never showed one. From
+    // ~56px there is room for a single clamped line, and the note is usually
+    // the thing you actually wanted to read.
+    const noteLines = shown >= 76 ? 2 : (shown >= 56 ? 1 : 0);
     // The customer and the crew share a line. Normally the row WRAPS, so the
     // chips sit beside a short name and drop underneath a long one. On a short
     // block there is no underneath — a half-hour job is ~24px — so `tight`
@@ -1397,7 +1408,7 @@ function renderCalendarDay() {
         <div class="cal-block-chips">${chips}</div>
       </div>
       ${addr}
-      ${note && roomForNote ? `<div class="cal-block-note">${escapeHtml(note)}</div>` : ''}
+      ${note && noteLines ? `<div class="cal-block-note${noteLines === 1 ? ' cal-block-note-1' : ''}">${escapeHtml(note)}</div>` : ''}
       ${canEdit ? '<div class="cal-resize" aria-hidden="true"></div>' : ''}
     </div>`;
   }).join('');
@@ -7748,10 +7759,10 @@ if (fileLightboxShare) {
   });
 }
 
-// "What's new" list in Settings — shows at most the 10 latest changelog entries.
+// "What's new" list in Settings — shows at most the 100 latest changelog entries.
 const changelogList = document.getElementById('changelog-list');
 if (changelogList) {
-  changelogList.innerHTML = CHANGELOG.slice(0, 20).map(([ver, desc]) => `
+  changelogList.innerHTML = CHANGELOG.slice(0, 100).map(([ver, desc]) => `
     <li class="changelog-item"><span class="changelog-ver">${ver}</span> ${desc}</li>
   `).join('');
 }
