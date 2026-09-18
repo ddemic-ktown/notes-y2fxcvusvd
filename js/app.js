@@ -20,6 +20,8 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 100, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.09.18-0648', 'Holding a price cell to see its history no longer leaves text highlighted in the popup'],
+  ['v2026.09.18-0645', 'Day view: a job with room to spare is now set in bigger type, and its name, address and note wrap onto more lines instead of being cut off'],
   ['v2026.09.16-1808', 'Job notes now show on the calendar wherever they fit — shorter blocks in the day view, and every job in the desktop month and week grids'],
   ['v2026.09.16-1805', 'What’s new in Settings now goes back 100 changes instead of 20'],
   ['v2026.08.29-1156', 'On a desktop the month grid grows a busy week taller than a quiet one, and lists every job for the day instead of stopping at three'],
@@ -1388,11 +1390,21 @@ function renderCalendarDay() {
       : '<span class="cal-chip cal-chip-none">—</span>';
     // The note often carries internal remarks, so customers don't get it.
     const note = isCustomerRole() ? '' : (j.description || '').trim();
-    // Three tiers rather than two. A block used to need 76px before the note
-    // appeared at all, which on a phone meant most jobs never showed one. From
-    // ~56px there is room for a single clamped line, and the note is usually
-    // the thing you actually wanted to read.
-    const noteLines = shown >= 76 ? 2 : (shown >= 56 ? 1 : 0);
+    // TEXT SIZE follows the room the block actually has. A whole afternoon on
+    // one job used to be rendered at the same 13px as a half-hour call, with
+    // most of the block empty underneath. Tier 1 and 2 step the type up and
+    // also RELAX the line caps: below them the name and address are one
+    // ellipsised line each, which is what wasted the space.
+    let sizeTier = shown >= 150 ? 2 : (shown >= 96 ? 1 : 0);
+    // Width matters as much as height. A block sharing its column is a
+    // fraction of the screen wide, and big type in a narrow box is worse than
+    // small type — every line wraps after two words.
+    sizeTier = Math.max(0, sizeTier - (n >= 3 ? 2 : (n >= 2 ? 1 : 0)));
+    const sizeClass = sizeTier === 2 ? ' cal-block-xl' : (sizeTier === 1 ? ' cal-block-lg' : '');
+    // Note lines scale with the tier, since each line is taller there too.
+    const noteLines = sizeTier === 2 ? (shown >= 210 ? 4 : 3)
+      : sizeTier === 1 ? (shown >= 130 ? 3 : 2)
+      : (shown >= 76 ? 2 : (shown >= 56 ? 1 : 0));
     // The customer and the crew share a line. Normally the row WRAPS, so the
     // chips sit beside a short name and drop underneath a long one. On a short
     // block there is no underneath — a half-hour job is ~24px — so `tight`
@@ -1400,7 +1412,7 @@ function renderCalendarDay() {
     // a name you can read the start of beats losing the chips entirely.
     const tight = shown < 52;
     const addr = j.address && !tight ? `<div class="cal-block-addr">${escapeHtml(j.address)}</div>` : '';
-    return `<div class="cal-block${tight ? ' cal-block-tight' : ''}" data-job="${j.id}" style="top:${top}px;height:${height}px;left:${left};width:${width};z-index:${1 + depth}">
+    return `<div class="cal-block${tight ? ' cal-block-tight' : ''}${sizeClass}" data-job="${j.id}" style="top:${top}px;height:${height}px;left:${left};width:${width};z-index:${1 + depth}">
       <span class="cal-block-bar" style="${crewBarStyle(names)}"></span>
       ${tight ? '' : `<div class="cal-block-time">${escapeHtml(timeTxt)}</div>`}
       <div class="cal-block-head">
@@ -1408,7 +1420,7 @@ function renderCalendarDay() {
         <div class="cal-block-chips">${chips}</div>
       </div>
       ${addr}
-      ${note && noteLines ? `<div class="cal-block-note${noteLines === 1 ? ' cal-block-note-1' : ''}">${escapeHtml(note)}</div>` : ''}
+      ${note && noteLines ? `<div class="cal-block-note" style="-webkit-line-clamp:${noteLines};line-clamp:${noteLines}">${escapeHtml(note)}</div>` : ''}
       ${canEdit ? '<div class="cal-resize" aria-hidden="true"></div>' : ''}
     </div>`;
   }).join('');
@@ -2621,6 +2633,12 @@ function openPriceHistory(key) {
       renderPriceTable();
     });
   });
+  // The sheet appears WHILE the finger is still down — the 500ms timer fires
+  // mid-gesture. The cell itself is user-select:none, so the browser carries
+  // the selection it was starting into whatever appears under the finger, and
+  // the sheet came up with its own text highlighted. Dropping the range here
+  // (and the CSS on the sheet) leaves it nothing to select.
+  try { window.getSelection()?.removeAllRanges(); } catch {}
   priceHistoryModal.hidden = false;
 }
 const priceHistoryClose = document.getElementById('price-history-close');
