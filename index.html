@@ -353,13 +353,18 @@
         </div>
       </div>
       <div class="customers-header-bottom price-actions">
-        <!-- Cycles Custom ⇄ Latest, like the Theme button in Settings: one
-             button that carries its own state instead of a pair of radios. -->
-        <button id="price-sort" class="icon-btn date-btn" type="button">Sorted: Custom</button>
-        <button id="price-reorder" class="icon-btn date-btn" type="button" aria-pressed="false">Layout</button>
+        <!-- Only shown while the filter is being picked or is on. Off, the
+             header carries nothing but the ⋯ — Sort and Layout moved inside it
+             so the row stops competing with the table for width. -->
+        <button id="price-filter-btn" class="icon-btn date-btn" type="button" hidden>Filter</button>
         <div class="editor-more-wrap">
           <button id="price-more-btn" class="icon-btn date-btn editor-more-btn" type="button" aria-label="More price table options">⋯</button>
           <div id="price-more-dropdown" class="editor-more-dropdown" hidden>
+            <!-- Cycles Custom ⇄ Latest: one item carrying its own state, like
+                 the Theme button in Settings. -->
+            <button id="price-sort" class="editor-more-item" type="button">Sorted: Custom</button>
+            <button id="price-reorder" class="editor-more-item" type="button" aria-pressed="false">Layout</button>
+            <button id="price-filter-start" class="editor-more-item" type="button">Filter rows &amp; columns</button>
             <button id="price-export" class="editor-more-item" type="button">Export CSV</button>
             <button id="price-import" class="editor-more-item" type="button">Import CSV</button>
             <button id="price-share" class="editor-more-item" type="button">Share with employees</button>

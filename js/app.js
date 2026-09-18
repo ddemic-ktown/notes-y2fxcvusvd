@@ -20,6 +20,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 100, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.09.18-1626', 'Price table: tick the rows and columns you want and filter to just those — it stays that way until you turn it off; Sort and Layout moved into the ⋯ menu'],
   ['v2026.09.18-1554', 'Confirmations and messages now look like the rest of the app instead of a browser box with the website address printed above them'],
   ['v2026.09.18-1552', 'Naming a new item, vendor or employee now opens a proper field with the keyboard already up, instead of a browser box you had to tap first'],
   ['v2026.09.18-1550', 'Every save now applies straight away whether or not you have signal — no screen waits on the network any more'],
@@ -2573,6 +2574,45 @@ function priceItemLastTouched(item) {
   });
   return best;
 }
+// ---------- price table: pick-and-keep filter ----------
+// Three states, because picking what to keep and looking at the result are
+// different jobs and the same button cannot mean both:
+//   'off'     — no filter, no button
+//   'picking' — checkboxes on every row and column, everything still visible,
+//               the header button reads "Filter" and applies the ticks
+//   'on'      — only the ticked rows/columns, button reads "Turn filter off"
+// Remembered across sessions: a filtered table is a deliberate working set, so
+// it should survive closing the app and stay until switched off.
+let priceFilterMode = localStorage.getItem('na-price-filter-mode') === 'on' ? 'on' : 'off';
+const pricePickItems = new Set(readFilterSet('na-price-filter-items'));
+const pricePickVendors = new Set(readFilterSet('na-price-filter-vendors'));
+function readFilterSet(key) {
+  try {
+    const raw = JSON.parse(localStorage.getItem(key) || '[]');
+    return Array.isArray(raw) ? raw.filter(v => typeof v === 'string') : [];
+  } catch { return []; }
+}
+function savePriceFilter() {
+  try {
+    localStorage.setItem('na-price-filter-mode', priceFilterMode === 'on' ? 'on' : 'off');
+    localStorage.setItem('na-price-filter-items', JSON.stringify([...pricePickItems]));
+    localStorage.setItem('na-price-filter-vendors', JSON.stringify([...pricePickVendors]));
+  } catch {}
+}
+function clearPriceFilter() {
+  priceFilterMode = 'off';
+  pricePickItems.clear();
+  pricePickVendors.clear();
+  savePriceFilter();
+}
+// An empty pick set means "everything", NOT "nothing". Applying a filter that
+// hides an entire axis leaves a table you cannot read or get out of, so a
+// filter on rows alone still shows every column and vice versa.
+function applyPriceFilter(list, picks) {
+  if (priceFilterMode !== 'on' || !picks.size) return list;
+  return list.filter(x => picks.has(x.id));
+}
+
 function sortPriceItems(items) {
   if (priceSort !== 'latest') return items;
   // Rows with no price at all sink: "latest first" has nothing to say about
@@ -2592,9 +2632,12 @@ function renderPriceTable() {
   // Rows only: vendors are few and always visible, and filtering columns too
   // would leave you comparing prices you can't see the context for.
   const words = priceFilter.trim().toLowerCase().split(/\s+/).filter(Boolean);
-  const items = words.length
+  const searched = words.length
     ? allItems.filter(i => words.every(w => (i.name || '').toLowerCase().includes(w)))
     : allItems;
+  // The kept-set filter sits on TOP of the search box: search narrows what you
+  // are looking at now, the filter is the working set you chose to keep.
+  const items = applyPriceFilter(searched, pricePickItems);
   const filterCount = document.getElementById('price-filter-count');
   if (filterCount) filterCount.textContent = words.length
     ? `showing ${items.length} of ${allItems.length} items`
@@ -2624,10 +2667,26 @@ function renderPriceTable() {
   }
   if (importBtn) importBtn.hidden = !canEdit;
   if (exportBtn) exportBtn.hidden = !Storage.canViewPriceTable();
+  const filterStart = document.getElementById('price-filter-start');
+  if (filterStart) {
+    // Only an entry POINT: once picking or on, the header button drives it.
+    filterStart.hidden = !Storage.canViewPriceTable() || priceFilterMode !== 'off';
+  }
+  // Layout's checkboxes and the filter's look alike but mean different things,
+  // so only one set is ever on screen — entering Layout leaves picking.
+  const picking = priceFilterMode === 'picking';
+  const priceViewEl = document.getElementById('price-view');
+  if (priceViewEl) priceViewEl.classList.toggle('price-view-picking', picking);
+  const filterBtn = document.getElementById('price-filter-btn');
+  if (filterBtn) {
+    filterBtn.hidden = priceFilterMode === 'off';
+    filterBtn.textContent = priceFilterMode === 'on' ? 'Turn filter off' : 'Filter';
+    filterBtn.classList.toggle('active', priceFilterMode === 'on');
+  }
   // Hide the ⋯ button when every item inside it is hidden
   const moreWrap = priceMoreBtn ? priceMoreBtn.closest('.editor-more-wrap') : null;
   if (moreWrap) {
-    const anyVisible = [reorderBtn, importBtn, exportBtn, shareBtn].some(b => b && !b.hidden);
+    const anyVisible = [reorderBtn, importBtn, exportBtn, shareBtn, sortBtn, filterStart].some(b => b && !b.hidden);
     moreWrap.style.display = anyVisible ? '' : 'none';
   }
 
@@ -2641,11 +2700,15 @@ function renderPriceTable() {
       : 'The price table is empty.'}</td></tr></tbody>`;
     return;
   }
-  const vendors = cfg.vendors.slice().sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+  const vendors = applyPriceFilter(
+    cfg.vendors.slice().sort((a, b) => (a.order ?? 0) - (b.order ?? 0)),
+    pricePickVendors);
   const reorder = priceReorderMode && canEdit;
   const head = `<thead><tr><th class="price-corner">Item</th>${
     vendors.map((v, i) => `<th class="price-vendor" data-vendor="${v.id}">${
       reorder ? `<input type="checkbox" class="price-pick" data-pick-vendor="${v.id}" ${priceSelVendors.has(v.id) ? 'checked' : ''} aria-label="Select ${escapeHtml(v.name)}" />` : ''
+    }${
+      picking ? `<input type="checkbox" class="price-pick price-keep" data-keep-vendor="${v.id}" ${pricePickVendors.has(v.id) ? 'checked' : ''} aria-label="Keep ${escapeHtml(v.name)}" />` : ''
     }${escapeHtml(v.name)}${
       reorder ? `<span class="reorder-arrows"><button type="button" class="v-left" data-vendor="${v.id}" ${i === 0 ? 'disabled' : ''}>←</button><button type="button" class="v-right" data-vendor="${v.id}" ${i === vendors.length - 1 ? 'disabled' : ''}>→</button></span>` : ''
     }</th>`).join('')
@@ -2653,6 +2716,8 @@ function renderPriceTable() {
   const body = `<tbody>${items.map((item, i) => `<tr>
       <th class="price-item" data-item="${item.id}">${
         reorder ? `<input type="checkbox" class="price-pick" data-pick-item="${item.id}" ${priceSelItems.has(item.id) ? 'checked' : ''} aria-label="Select ${escapeHtml(item.name)}" />` : ''
+      }${
+        picking ? `<input type="checkbox" class="price-pick price-keep" data-keep-item="${item.id}" ${pricePickItems.has(item.id) ? 'checked' : ''} aria-label="Keep ${escapeHtml(item.name)}" />` : ''
       }${escapeHtml(item.name)}${
         reorder ? `<span class="reorder-arrows"><button type="button" class="i-up" data-item="${item.id}" ${i === 0 ? 'disabled' : ''}>↑</button><button type="button" class="i-down" data-item="${item.id}" ${i === items.length - 1 ? 'disabled' : ''}>↓</button></span>` : ''
       }</th>
@@ -2910,6 +2975,30 @@ function wirePriceTable(canEdit) {
       if (e.key === 'Enter') { e.preventDefault(); save(); }
       if (e.key === 'Escape') { cancelPriceEdit(); }
     });
+  }
+  // Filter picking: the boxes are the only interactive thing on the headers —
+  // a tap must not also open the rename dialog underneath.
+  if (priceFilterMode === 'picking') {
+    priceTableEl.querySelectorAll('.price-keep').forEach(cb => {
+      cb.addEventListener('click', (e) => e.stopPropagation());
+      cb.addEventListener('change', () => {
+        const set = cb.dataset.keepItem ? pricePickItems : pricePickVendors;
+        const id = cb.dataset.keepItem || cb.dataset.keepVendor;
+        if (cb.checked) set.add(id); else set.delete(id);
+        savePriceFilter();
+      });
+    });
+    // Tapping the header itself while picking toggles its box, so the whole
+    // row label is a target rather than a 20px checkbox on a phone.
+    priceTableEl.querySelectorAll('.price-item, .price-vendor').forEach(th => {
+      th.addEventListener('click', () => {
+        const cb = th.querySelector('.price-keep');
+        if (!cb) return;
+        cb.checked = !cb.checked;
+        cb.dispatchEvent(new Event('change'));
+      });
+    });
+    return;
   }
   // Reorder mode: arrows move rows/columns; taps don't rename
   if (priceReorderMode && canEdit) {
@@ -3337,6 +3426,32 @@ function exitPriceReorderMode() {
     priceReorderBtn.classList.remove('active');
   }
 }
+const priceFilterStartBtn = document.getElementById('price-filter-start');
+if (priceFilterStartBtn) priceFilterStartBtn.addEventListener('click', () => {
+  priceFilterMode = 'picking';
+  // Layout's checkboxes mean "move these to the top" and the filter's mean
+  // "keep these" — two sets of identical boxes on one table is unreadable.
+  if (priceReorderMode) exitPriceReorderMode();
+  savePriceFilter();
+  renderPriceTable();
+});
+const priceFilterBtn = document.getElementById('price-filter-btn');
+if (priceFilterBtn) priceFilterBtn.addEventListener('click', () => {
+  if (priceFilterMode === 'picking') {
+    // Nothing ticked would hide the whole table and the way back out of it.
+    if (!pricePickItems.size && !pricePickVendors.size) {
+      showAlert('Tick the rows and columns you want to keep first.', 'Nothing picked');
+      return;
+    }
+    priceFilterMode = 'on';
+  } else {
+    clearPriceFilter();
+  }
+  savePriceFilter();
+  openCellKey = null;
+  renderPriceTable();
+});
+
 const priceReorderBtn = document.getElementById('price-reorder');
 if (priceReorderBtn) priceReorderBtn.addEventListener('click', () => {
   // Dragging edits the MANUAL order, so entering Layout puts the table back
@@ -3345,6 +3460,9 @@ if (priceReorderBtn) priceReorderBtn.addEventListener('click', () => {
     priceSort = '';
     localStorage.removeItem('na-price-sort');
   }
+  // Reordering a filtered table would move rows relative to ones you cannot
+  // see, so the filter goes on the way in — same rule the search box follows.
+  if (!priceReorderMode && priceFilterMode !== 'off') clearPriceFilter();
   priceReorderMode = !priceReorderMode;
   priceReorderBtn.setAttribute('aria-pressed', String(priceReorderMode));
   priceReorderBtn.textContent = priceReorderMode ? 'Done' : 'Layout';

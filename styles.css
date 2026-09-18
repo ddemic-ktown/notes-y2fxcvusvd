@@ -741,6 +741,15 @@ select.iif-date-input { appearance: none; -webkit-appearance: none; padding-righ
 /* The line count is set inline per block (JS picks it from the size tier), so
    there is no fixed 1-line class any more. */
 
+/* Filter: a "keep" box reads as a different act from Layout's "move these",
+   so it is accented rather than plain, and the header is a tap target while
+   picking. The button carries `active` only when the filter is ON, so
+   "Filter" (pick these) and "Turn filter off" never look the same. */
+.price-keep { accent-color: var(--accent); }
+.price-view-picking .price-item,
+.price-view-picking .price-vendor { cursor: pointer; }
+#price-filter-btn.active { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+
 /* Name prompt — deliberately narrow: it holds one field, and a full-width
    panel makes a one-line question look like a form. */
 .name-modal-panel { max-width: 420px; }
