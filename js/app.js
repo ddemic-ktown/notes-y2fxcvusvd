@@ -20,6 +20,11 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 100, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.09.18-1554', 'Confirmations and messages now look like the rest of the app instead of a browser box with the website address printed above them'],
+  ['v2026.09.18-1552', 'Naming a new item, vendor or employee now opens a proper field with the keyboard already up, instead of a browser box you had to tap first'],
+  ['v2026.09.18-1550', 'Every save now applies straight away whether or not you have signal — no screen waits on the network any more'],
+  ['v2026.09.18-1548', 'Saving a job while offline now closes the editor instead of leaving it open — the job was always saved, the screen just never noticed'],
+  ['v2026.09.18-1542', 'Adding someone to a job is one tap on “+ Add employee”, each line gets its own note box, and the old colour stripe is gone from day blocks now the pills carry the same thing'],
   ['v2026.09.18-1013', 'Search the calendar by customer, address, note or who was on the job — tap a result to open that day'],
   ['v2026.09.18-1006', 'The offline notice is now a toast at the bottom instead of a badge in the header, so it can no longer push the settings button off the side of the screen'],
   ['v2026.09.18-0912', 'Build a job’s crew line by line with +, so the same person can be on it twice — one line billable, one not; non-billable hours are exported as not billable to the customer'],
@@ -415,11 +420,18 @@ function renderEmployeeList() {
     });
   });
   employeeListEl.querySelectorAll('button[data-emp-rename]').forEach(btn => {
-    btn.addEventListener('click', async () => {
+    btn.addEventListener('click', () => {
       const from = btn.dataset.empRename;
-      // prompt, not a bespoke modal: this is a rare admin action on a settings
-      // screen, and the whole interaction is "type the correct spelling".
-      const to = (prompt(`Rename “${from}” to what?\n\nThis changes the name on every job they are on, past and future — and it is the name that lands in QuickBooks.`, from) || '').trim();
+      // askForName rather than window.prompt: the prompt often showed without
+      // raising the keyboard in an installed PWA. It must be the FIRST thing in
+      // the handler — an await before it breaks the gesture and the focus with
+      // it. Everything that follows moved into the .then().
+      askForName({
+        title: `Rename “${from}”`,
+        hint: 'This changes the name on every job they are on, past and future — and it is the name that lands in QuickBooks.',
+        value: from,
+        saveLabel: 'Rename',
+      }).then(async to => {
       if (!to || to === from) return;
       btn.disabled = true;
       const prev = btn.textContent;
@@ -433,8 +445,9 @@ function renderEmployeeList() {
       btn.disabled = false;
       btn.textContent = prev;
       renderEmployeeList();
-      if (!res || !res.ok) { alert((res && res.msg) || 'Could not rename.'); return; }
-      alert(`Renamed to “${to}”.\n\n${res.jobs} job${res.jobs === 1 ? '' : 's'} updated.`);
+      if (!res || !res.ok) { showAlert((res && res.msg) || 'Could not rename.', 'Rename failed'); return; }
+      showAlert(`${res.jobs} job${res.jobs === 1 ? '' : 's'} updated.`, `Renamed to “${to}”`);
+      });
     });
   });
 }
@@ -911,16 +924,10 @@ function chipStyle(name) {
 function crewKey(job) {
   return (job.employeeNames || []).slice().sort().join('|');
 }
-// One colour for a solo crew; a stripe of colours for a pair or more, so the
-// bar on a block matches the legend at a glance.
-function crewBarStyle(names) {
-  if (!names.length) return 'background: var(--ink-soft)';
-  const cols = names.slice(0, 3).map(employeeColour);
-  if (cols.length === 1) return `background:${cols[0]}`;
-  const step = 100 / cols.length;
-  const stops = cols.map((c, i) => `${c} ${i * step}%, ${c} ${(i + 1) * step}%`).join(', ');
-  return `background: linear-gradient(180deg, ${stops})`;
-}
+// crewBarStyle is gone as of v2026.09.18-1542. It painted a stripe of employee
+// colours down the left of a day block, from when the block showed no names —
+// the crew pills carry the same colours and the names as well, so the stripe
+// was saying the same thing twice in less detail.
 // ---------- job crew ----------
 // A job's people are a LIST, not a set: the same person can appear twice on one
 // job, once billable and once not (travel, warranty, shop time). Older jobs
@@ -933,6 +940,7 @@ function jobCrew(job) {
       name: String(c.name || ''),
       hours: Number.isFinite(Number(c.hours)) && Number(c.hours) > 0 ? Number(c.hours) : null,
       billable: c.billable !== false,
+      note: String(c.note || ''),
     })).filter(c => c.name);
   }
   const hrs = job.employeeHours || {};
@@ -940,6 +948,7 @@ function jobCrew(job) {
     name: n,
     hours: Number.isFinite(Number(hrs[n])) && Number(hrs[n]) > 0 ? Number(hrs[n]) : null,
     billable: true,
+    note: '',
   }));
 }
 // employeeNames / employeeHours stay on the record, derived from the crew. They
@@ -1078,6 +1087,110 @@ function showCalendar() {
   renderCalendar();
   if (!handlingPopstate) history.pushState({ screen: 'calendar' }, '');
 }
+
+// ---------- name prompt ----------
+// window.prompt() in an installed PWA frequently shows WITHOUT raising the
+// keyboard — every rename began with an extra tap on the field. A real input
+// can be focused, but only if the focus call happens in the same task as the
+// tap that opened it: an `await` before it breaks the gesture chain and the
+// keyboard stays down. So this shows and focuses SYNCHRONOUSLY and hands back a
+// promise for the answer. Call it as the first thing in a click handler.
+//
+// Resolves to the trimmed string, '' when Delete was pressed (only offered when
+// onDelete is set), or null when cancelled.
+let nameModalResolve = null;
+function askForName({ title, hint = '', value = '', saveLabel = 'Save', deletable = false }) {
+  const modal = document.getElementById('name-modal');
+  const input = document.getElementById('name-modal-input');
+  const hintEl = document.getElementById('name-modal-hint');
+  const saveBtn = document.getElementById('name-modal-save');
+  const delBtn = document.getElementById('name-modal-delete');
+  if (!modal || !input) return Promise.resolve(null);
+  // A second call while one is open cancels the first rather than stranding it.
+  if (nameModalResolve) { const r = nameModalResolve; nameModalResolve = null; r(null); }
+  document.getElementById('name-modal-title').textContent = title;
+  hintEl.textContent = hint;
+  hintEl.hidden = !hint;
+  saveBtn.textContent = saveLabel;
+  delBtn.hidden = !deletable;
+  input.value = value;
+  modal.hidden = false;
+  input.focus();
+  input.select();
+  return new Promise(res => { nameModalResolve = res; });
+}
+function closeNameModal(answer) {
+  const modal = document.getElementById('name-modal');
+  if (modal) modal.hidden = true;
+  const r = nameModalResolve;
+  nameModalResolve = null;
+  if (r) r(answer);
+}
+(() => {
+  const modal = document.getElementById('name-modal');
+  const input = document.getElementById('name-modal-input');
+  if (!modal || !input) return;
+  document.getElementById('name-modal-save').addEventListener('click',
+    () => closeNameModal(input.value.trim()));
+  document.getElementById('name-modal-delete').addEventListener('click',
+    () => closeNameModal(''));
+  document.getElementById('name-modal-close').addEventListener('click',
+    () => closeNameModal(null));
+  modal.addEventListener('click', e => { if (e.target === modal) closeNameModal(null); });
+  // Enter is the fast path on a phone: the keyboard's own Go key.
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); closeNameModal(input.value.trim()); }
+    if (e.key === 'Escape') { e.preventDefault(); closeNameModal(null); }
+  });
+})();
+
+// ---------- confirm / alert ----------
+// Same modal for both. No keyboard involved, so unlike askForName these can be
+// called from anywhere — but askConfirm returns a PROMISE, so a caller that
+// used `if (!confirm(x)) return;` has to await it or move into .then().
+// showAlert is fire-and-forget: nothing waits on an acknowledgement.
+let askModalResolve = null;
+function openAskModal({ title, message, okLabel, danger, withCancel }) {
+  const modal = document.getElementById('ask-modal');
+  if (!modal) return Promise.resolve(!withCancel);
+  if (askModalResolve) { const r = askModalResolve; askModalResolve = null; r(false); }
+  document.getElementById('ask-modal-title').textContent = title;
+  document.getElementById('ask-modal-message').textContent = message || '';
+  const ok = document.getElementById('ask-modal-ok');
+  ok.textContent = okLabel;
+  ok.classList.toggle('danger-item', !!danger);
+  document.getElementById('ask-modal-cancel').hidden = !withCancel;
+  modal.hidden = false;
+  return new Promise(res => { askModalResolve = res; });
+}
+function closeAskModal(answer) {
+  const modal = document.getElementById('ask-modal');
+  if (modal) modal.hidden = true;
+  const r = askModalResolve;
+  askModalResolve = null;
+  if (r) r(answer);
+}
+// Destructive by default — every current caller is a delete or a removal.
+function askConfirm(message, { title = 'Are you sure?', okLabel = 'Delete', danger = true } = {}) {
+  return openAskModal({ title, message, okLabel, danger, withCancel: true });
+}
+function showAlert(message, title = 'JobPilot') {
+  return openAskModal({ title, message, okLabel: 'OK', danger: false, withCancel: false });
+}
+(() => {
+  const modal = document.getElementById('ask-modal');
+  if (!modal) return;
+  document.getElementById('ask-modal-ok').addEventListener('click', () => closeAskModal(true));
+  document.getElementById('ask-modal-cancel').addEventListener('click', () => closeAskModal(false));
+  document.getElementById('ask-modal-close').addEventListener('click', () => closeAskModal(false));
+  // Backdrop and Escape both mean "no" — the safe answer for a delete.
+  modal.addEventListener('click', e => { if (e.target === modal) closeAskModal(false); });
+  document.addEventListener('keydown', e => {
+    if (modal.hidden) return;
+    if (e.key === 'Escape') { e.preventDefault(); closeAskModal(false); }
+    if (e.key === 'Enter') { e.preventDefault(); closeAskModal(true); }
+  });
+})();
 
 // ---------- calendar search ----------
 // Searches the jobs the app HAS: the live window (~3 months) plus any month
@@ -1557,7 +1670,6 @@ function renderCalendarDay() {
     const tight = shown < 52;
     const addr = j.address && !tight ? `<div class="cal-block-addr">${escapeHtml(j.address)}</div>` : '';
     return `<div class="cal-block${tight ? ' cal-block-tight' : ''}${sizeClass}${j.noWork ? ' cal-nowork' : ' cal-working'}" data-job="${j.id}" style="top:${top}px;height:${height}px;left:${left};width:${width};z-index:${1 + depth}">
-      <span class="cal-block-bar" style="${crewBarStyle(names)}"></span>
       ${tight ? '' : `<div class="cal-block-time">${escapeHtml(timeTxt)}</div>`}
       <div class="cal-block-head">
         <div class="cal-block-who">${escapeHtml(who)}</div>
@@ -1909,35 +2021,59 @@ let jobCrewDraft = [];
 function renderJobEmployees(crew) {
   jobCrewDraft = crew.map(c => ({ ...c }));
   const ul = document.getElementById('job-employees');
-  const picker = document.getElementById('job-crew-picker');
   const addBtn = document.getElementById('job-crew-add-btn');
   if (!ul) return;
   const names = getEmployeeNames();
-
-  if (picker) {
-    picker.innerHTML = '<option value="">Add an employee…</option>'
-      + names.map(n => `<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`).join('');
-    picker.hidden = true;
-  }
   if (addBtn) addBtn.hidden = !names.length;
+
+  // Index of the line whose picker should be open. The + adds an UNNAMED line
+  // and points this at it, so one tap gets you a row with the list already
+  // open instead of a tap to reveal a picker and another to use it.
+  let openPicker = -1;
 
   const draw = () => {
     ul.innerHTML = jobCrewDraft.length
-      ? jobCrewDraft.map((c, i) => `<li class="member-item job-crew-row">
-          <span class="cal-chip job-crew-name" style="${chipStyle(c.name)}">${escapeHtml(c.name)}</span>
-          <input type="number" class="job-emp-hours" data-crew-hours="${i}"
-                 min="0" step="0.25" inputmode="decimal" placeholder="hrs"
-                 value="${c.hours != null ? c.hours : ''}" aria-label="Hours for ${escapeHtml(c.name)}" />
-          <label class="job-crew-bill" title="Billable to the customer">
-            <input type="checkbox" data-crew-bill="${i}" ${c.billable ? 'checked' : ''} />
-            <span>Billable</span>
-          </label>
-          <button type="button" class="job-crew-del" data-crew-del="${i}" aria-label="Remove ${escapeHtml(c.name)}">✕</button>
-        </li>`).join('')
+      ? jobCrewDraft.map((c, i) => {
+        const nameCell = (!c.name || openPicker === i)
+          ? `<select class="signin-input job-crew-pick" data-crew-pick="${i}" aria-label="Choose an employee">
+               <option value="">Choose an employee…</option>
+               ${names.map(n => `<option value="${escapeHtml(n)}" ${n === c.name ? 'selected' : ''}>${escapeHtml(n)}</option>`).join('')}
+             </select>`
+          : `<button type="button" class="cal-chip job-crew-name" data-crew-rename="${i}" style="${chipStyle(c.name)}">${escapeHtml(c.name)}</button>`;
+        return `<li class="member-item job-crew-row">
+          <div class="job-crew-line">
+            ${nameCell}
+            <input type="number" class="job-emp-hours" data-crew-hours="${i}"
+                   min="0" step="0.25" inputmode="decimal" placeholder="hrs"
+                   value="${c.hours != null ? c.hours : ''}" aria-label="Hours for ${escapeHtml(c.name || 'this line')}" />
+            <label class="job-crew-bill" title="Billable to the customer">
+              <input type="checkbox" data-crew-bill="${i}" ${c.billable ? 'checked' : ''} />
+              <span>Billable</span>
+            </label>
+            <button type="button" class="job-crew-del" data-crew-del="${i}" aria-label="Remove this line">✕</button>
+          </div>
+          <input type="text" class="signin-input job-crew-note" data-crew-note="${i}"
+                 placeholder="Note — travel, warranty, shop…" autocomplete="off"
+                 value="${escapeHtml(c.note || '')}" aria-label="Note for this line" />
+        </li>`;
+      }).join('')
       : `<li class="member-item job-crew-empty">${names.length
-          ? 'Nobody on this job yet — tap + to add someone.'
+          ? 'Nobody on this job yet.'
           : 'Add employees in Settings → Time Logger first.'}</li>`;
 
+    ul.querySelectorAll('[data-crew-pick]').forEach(sel => {
+      sel.addEventListener('change', () => {
+        const i = +sel.dataset.crewPick;
+        jobCrewDraft[i].name = sel.value;
+        openPicker = -1;
+        draw();
+      });
+    });
+    // Tapping the chip reopens the picker on that line — the only way back to
+    // it once a name is chosen, short of deleting the line and starting again.
+    ul.querySelectorAll('[data-crew-rename]').forEach(btn => {
+      btn.addEventListener('click', () => { openPicker = +btn.dataset.crewRename; draw(); });
+    });
     ul.querySelectorAll('[data-crew-hours]').forEach(inp => {
       inp.addEventListener('input', () => {
         const v = parseFloat(inp.value);
@@ -1949,32 +2085,38 @@ function renderJobEmployees(crew) {
         jobCrewDraft[+box.dataset.crewBill].billable = box.checked;
       });
     });
+    ul.querySelectorAll('[data-crew-note]').forEach(inp => {
+      inp.addEventListener('input', () => {
+        jobCrewDraft[+inp.dataset.crewNote].note = inp.value;
+      });
+    });
     ul.querySelectorAll('[data-crew-del]').forEach(btn => {
       btn.addEventListener('click', () => {
         jobCrewDraft.splice(+btn.dataset.crewDel, 1);
+        if (openPicker >= jobCrewDraft.length) openPicker = -1;
         draw();   // indices shift, so redraw rather than patch
       });
     });
+
+    // Focus the open picker and, where the browser allows it, drop the list
+    // down as well. showPicker throws if the browser judges the call to be
+    // outside a user gesture, which is exactly the case a redraw creates.
+    if (openPicker >= 0) {
+      const sel = ul.querySelector(`[data-crew-pick="${openPicker}"]`);
+      if (sel) {
+        sel.focus();
+        try { sel.showPicker && sel.showPicker(); } catch {}
+      }
+    }
   };
   draw();
 
   if (addBtn && !addBtn.dataset.wired) {
     addBtn.dataset.wired = '1';
     addBtn.addEventListener('click', () => {
-      const p = document.getElementById('job-crew-picker');
-      if (!p) return;
-      p.hidden = !p.hidden;
-      if (!p.hidden) p.focus();
-    });
-  }
-  if (picker && !picker.dataset.wired) {
-    picker.dataset.wired = '1';
-    picker.addEventListener('change', () => {
-      if (!picker.value) return;
       // Billable by default: the exception is the exception.
-      jobCrewDraft.push({ name: picker.value, hours: null, billable: true });
-      picker.value = '';
-      picker.hidden = true;
+      jobCrewDraft.push({ name: '', hours: null, billable: true, note: '' });
+      openPicker = jobCrewDraft.length - 1;
       draw();
     });
   }
@@ -2184,7 +2326,7 @@ if (jobModal) jobModal.addEventListener('click', (e) => { if (e.target === jobMo
 const jobSave = document.getElementById('job-save');
 if (jobSave) jobSave.addEventListener('click', async () => {
   const date = document.getElementById('job-date').value;
-  if (!date) { alert('A job needs a date.'); return; }
+  if (!date) { showAlert('A job needs a date.', 'Nothing saved'); return; }
   // jobCrewDraft is the live list; the derived fields follow from it.
   const crew = jobCrewDraft.filter(c => c && c.name);
   const { employeeNames: names, employeeHours } = crewLegacyFields(crew);
@@ -2229,7 +2371,7 @@ if (jobDuplicate) jobDuplicate.addEventListener('click', () => {
 const jobDelete = document.getElementById('job-delete');
 if (jobDelete) jobDelete.addEventListener('click', async () => {
   if (!jobEditingId) return;
-  if (!confirm('Delete this job?')) return;
+  if (!await askConfirm('Delete this job?')) return;
   await Storage.deleteJob(jobEditingId);
   jobModal.hidden = true;
   if (calendarDayView.classList.contains('active')) renderCalendarDay(); else renderCalendar();
@@ -2792,31 +2934,35 @@ function wirePriceTable(canEdit) {
     priceTableEl.querySelectorAll('.price-item').forEach(th => wirePriceHeaderDrag(th, 'y', th.dataset.item));
     priceTableEl.querySelectorAll('.price-vendor').forEach(th => wirePriceHeaderDrag(th, 'x', th.dataset.vendor));
     priceTableEl.querySelectorAll('.price-item').forEach(th => {
-      th.addEventListener('click', async () => {
+      th.addEventListener('click', () => {
         const item = Storage.listPriceItems().find(i => i.id === th.dataset.item);
         if (!item) return;
-        const name = prompt('Item name (blank to delete):', item.name);
-        if (name === null) return;
-        if (!name.trim()) {
-          if (confirm(`Delete item "${item.name}" and its prices?`)) await Storage.removePriceItem(item.id);
-        } else {
-          await Storage.savePriceItem(item.id, { name: name.trim() });
-        }
-        renderPriceTable();
+        askForName({ title: 'Item name', value: item.name, deletable: true }).then(async name => {
+          if (name === null) return;
+          if (!name) {
+            if (!await askConfirm(`Delete “${item.name}” and every price recorded against it?`, { title: 'Delete item' })) return;
+            await Storage.removePriceItem(item.id);
+          } else {
+            await Storage.savePriceItem(item.id, { name });
+          }
+          renderPriceTable();
+        });
       });
     });
     priceTableEl.querySelectorAll('.price-vendor').forEach(th => {
-      th.addEventListener('click', async () => {
+      th.addEventListener('click', () => {
         const v = Storage.getPriceConfig().vendors.find(x => x.id === th.dataset.vendor);
         if (!v) return;
-        const name = prompt('Vendor name (blank to delete):', v.name);
-        if (name === null) return;
-        if (!name.trim()) {
-          if (confirm(`Delete vendor "${v.name}" and its prices?`)) await Storage.removePriceVendor(v.id);
-        } else {
-          await Storage.renamePriceVendor(v.id, name.trim());
-        }
-        renderPriceTable();
+        askForName({ title: 'Vendor name', value: v.name, deletable: true }).then(async name => {
+          if (name === null) return;
+          if (!name) {
+            if (!await askConfirm(`Delete “${v.name}” and every price recorded against it?`, { title: 'Delete vendor' })) return;
+            await Storage.removePriceVendor(v.id);
+          } else {
+            await Storage.renamePriceVendor(v.id, name);
+          }
+          renderPriceTable();
+        });
       });
     });
   }
@@ -2889,13 +3035,21 @@ const priceShareClose = document.getElementById('price-share-close');
 const priceZoomIn = document.getElementById('price-zoom-in');
 const priceZoomOut = document.getElementById('price-zoom-out');
 
-if (priceAddItemBtn) priceAddItemBtn.addEventListener('click', async () => {
-  const name = prompt('New item name:');
-  if (name && name.trim()) { await Storage.addPriceItem(name.trim()); renderPriceTable(); }
+if (priceAddItemBtn) priceAddItemBtn.addEventListener('click', () => {
+  // askForName FIRST, with nothing awaited before it — that is what keeps the
+  // focus inside the tap and the keyboard up.
+  askForName({ title: 'New item', saveLabel: 'Add item' }).then(async name => {
+    if (!name) return;
+    await Storage.addPriceItem(name);
+    renderPriceTable();
+  });
 });
-if (priceAddVendorBtn) priceAddVendorBtn.addEventListener('click', async () => {
-  const name = prompt('New vendor name:');
-  if (name && name.trim()) { await Storage.addPriceVendor(name.trim()); renderPriceTable(); }
+if (priceAddVendorBtn) priceAddVendorBtn.addEventListener('click', () => {
+  askForName({ title: 'New vendor', saveLabel: 'Add vendor' }).then(async name => {
+    if (!name) return;
+    await Storage.addPriceVendor(name);
+    renderPriceTable();
+  });
 });
 // Zoom by scaling type and spacing rather than transforming the table: a
 // CSS transform on an ancestor establishes a containing block, which stops
@@ -4050,7 +4204,7 @@ function showCustomerNotes(customerId, returnTo) {
   if (customerNotesSearchInput) customerNotesSearchInput.value = '';
   const customer = Storage.getCustomer(customerId);
   if (!customer) {
-    alert('This customer no longer exists — it may have been deleted.');
+    showAlert('This customer no longer exists — it may have been deleted.', 'Not found');
     showCustomers();
     return;
   }
@@ -5949,7 +6103,7 @@ if (editorCancelBtn) {
   editorCancelBtn.addEventListener('click', editorCancelAction);
 }
 
-deleteBtn.addEventListener('click', () => {
+deleteBtn.addEventListener('click', async () => {
   if (!currentId) return;
   if (currentType === 'note' && currentIsDefault) return;
   // Say where it goes and that it comes back. The cascade is intentional (a
@@ -5957,9 +6111,9 @@ deleteBtn.addEventListener('click', () => {
   // guessable — people looked for the notes in Orphaned notes and concluded
   // they'd been lost.
   const label = currentType === 'customer'
-    ? 'Delete this customer?\n\nTheir notes will be deleted too. Everything goes to Settings → Trash, where you can restore it for 30 days.'
-    : 'Delete this note?\n\nIt goes to Settings → Trash, where you can restore it for 30 days.';
-  if (confirm(label)) {
+    ? 'Their notes go too. Everything lands in Settings → Trash, where you can restore it for 30 days.'
+    : 'It goes to Settings → Trash, where you can restore it for 30 days.';
+  if (await askConfirm(label, { title: currentType === 'customer' ? 'Delete this customer?' : 'Delete this note?' })) {
     if (currentType === 'customer') {
       Storage.deleteCustomer(currentId);
       currentId = null; currentType = null; currentIsDefault = false;
@@ -6747,7 +6901,7 @@ function renderTrashList() {
   });
   el.querySelectorAll('.trash-purge').forEach(btn => {
     btn.addEventListener('click', async () => {
-      if (!confirm('Delete this permanently? This cannot be undone.')) return;
+      if (!await askConfirm('This cannot be undone.', { title: 'Delete permanently', okLabel: 'Delete for good' })) return;
       await Storage.purgeFromTrash(btn.dataset.kind, btn.dataset.id);
       renderTrashList();
       renderTrashButton();
@@ -6831,7 +6985,8 @@ if (unseedBtn) {
       refreshSeedButtons();
       return;
     }
-    if (!confirm(`Remove ${what}?\n\nThis deletes only the sample data. Anything you created yourself is not affected.`)) {
+    if (!await askConfirm(`Remove ${what}? This deletes only the sample data — anything you created yourself is not affected.`,
+        { title: 'Remove sample data', okLabel: 'Remove' })) {
       unseedBtn.disabled = false;
       return;
     }
@@ -7096,7 +7251,8 @@ function renderMembersList() {
   });
   membersList.querySelectorAll('.member-remove-btn').forEach(btn => {
     btn.addEventListener('click', async () => {
-      if (confirm('Remove this user from the org?')) {
+      if (await askConfirm('They lose access to everything in this company.',
+          { title: 'Remove this user?', okLabel: 'Remove' })) {
         await Storage.removeMember(btn.dataset.uid);
         renderMembersList();
       }
@@ -7258,7 +7414,8 @@ if (newOrgBtn) {
     // A confirm, not because the write is dangerous to you, but because it is
     // irreversible for THEM once accepted — an org with their data in it can't
     // be un-created from here.
-    if (!confirm(`Invite ${email} to start their own company, "${company}"?\n\nThey become the admin of a separate company with its own customers, calendar and hours. None of your data goes with it.`)) return;
+    if (!await askConfirm(`${email} becomes the admin of “${company}” — a separate company with its own customers, calendar and hours. None of your data goes with it.`,
+        { title: 'Invite a new company?', okLabel: 'Send invite', danger: false })) return;
     newOrgBtn.disabled = true;
     if (newOrgStatus) newOrgStatus.textContent = 'Sending…';
     try {
@@ -7829,7 +7986,7 @@ async function renderFileGallery(customerId) {
   galleryGrid.querySelectorAll('[data-del]').forEach(btn => {
     btn.addEventListener('click', async (ev) => {
       ev.stopPropagation();
-      if (!confirm('Delete this file from this device?')) return;
+      if (!await askConfirm('It is stored on this device only, so this cannot be undone.', { title: 'Delete this file?' })) return;
       await LocalFiles.remove(btn.dataset.del);
       renderFileGallery(customerId);
     });
@@ -7979,7 +8136,7 @@ if (fileLightboxDelete) {
   fileLightboxDelete.addEventListener('click', async (ev) => {
     ev.stopPropagation();
     if (!lightboxRecId) return;
-    if (!confirm('Delete this file from this device?')) return;
+    if (!await askConfirm('It is stored on this device only, so this cannot be undone.', { title: 'Delete this file?' })) return;
     const customerId = activeCustomerId;
     await LocalFiles.remove(lightboxRecId);
     lightboxRecId = null;
@@ -8096,6 +8253,7 @@ function jobEntriesInRange(range) {
         employeeName: name,
         crewIndex: crew.length ? ci : -1,   // which crew line an edit writes to
         billable: c.billable !== false,
+        note: c.note || '',
         date: d,
         dateFormatted: Number.isNaN(d.getTime()) ? '' : iifFormatDate(d),
         employees: name ? [name] : [],

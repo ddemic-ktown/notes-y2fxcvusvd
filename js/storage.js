@@ -465,7 +465,8 @@ export const Storage = {
     if (_role !== 'admin' || !_orgId) return;
     _orgName = String(name || '').trim();
     emit();
-    await tracked(setDoc(orgDoc(), { name: _orgName }, { merge: true }))
+    // Not awaited — see the note in saveJob.
+    tracked(setDoc(orgDoc(), { name: _orgName }, { merge: true }))
       .catch(err => console.warn('setOrgName', err));
   },
   // Whether the signed-in account may hand someone a whole new company. The
@@ -488,7 +489,8 @@ export const Storage = {
   async saveUserPrefs(values) {
     if (!_uid) return;
     const payload = { ...values, updated: nowIso() };
-    await tracked(setDoc(doc(db, "users", _uid, "prefs", "app"), payload))
+    // Not awaited — see the note in saveJob.
+    tracked(setDoc(doc(db, "users", _uid, "prefs", "app"), payload))
       .catch(err => console.warn("saveUserPrefs", err));
   },
 
@@ -1043,6 +1045,10 @@ export const Storage = {
         name: String(c.name || ''),
         hours: Number.isFinite(Number(c.hours)) && Number(c.hours) > 0 ? Number(c.hours) : null,
         billable: c.billable !== false,
+        // Why this line's time was what it was — travel, warranty, shop. Goes
+        // out in the .iif NOTE column. A line with no name is dropped here:
+        // the editor can hold an empty row while you pick someone.
+        note: String(c.note || ''),
       })).filter(c => c.name) : [],
       employeeUids: this.employeeUidsFor(job.employeeNames),
       customerUids: this.customerUidsFor(job.customerId),
@@ -1059,7 +1065,15 @@ export const Storage = {
     const i = _cache.jobs.findIndex(j => j.id === id);
     if (i === -1) _cache.jobs.push(next); else _cache.jobs[i] = next;
     emit();
-    await tracked(setDoc(doc(jobsCol(), id), stripId(next))).catch(err => console.warn("saveJob", err));
+// OFFLINE-SAFE WRITE (v2026.09.18-1548). Firestore's setDoc/deleteDoc promise
+// does NOT settle while the device is offline: the write applies to the local
+// cache at once and the promise stays pending until it reaches the server. Any
+// caller that `await`ed one therefore hung offline — the job was saved and
+// visible, but the line closing the job editor never ran. The cache update and
+// emit() above are what the UI actually needs, so the network write is left to
+// tracked(), which keeps counting it for the sync toast and retries it on
+// reconnect. Do not put an await back in front of these.
+    tracked(setDoc(doc(jobsCol(), id), stripId(next))).catch(err => console.warn("saveJob", err));
     return next;
   },
   // Rename an employee EVERYWHERE, in one action.
@@ -1101,7 +1115,8 @@ export const Storage = {
     if (from in links) { links[to] = links[from]; delete links[from]; }
     _cache.settings = { ..._cache.settings, employees: nextEmps, employeeLinks: links };
     emit();
-    await tracked(setDoc(settingsDoc(), _cache.settings, { merge: true }))
+    // Not awaited — see the note in saveJob.
+    tracked(setDoc(settingsDoc(), _cache.settings, { merge: true }))
       .catch(err => console.warn('renameEmployee.settings', err));
 
     // ---- every job, from the server ----
@@ -1124,7 +1139,10 @@ export const Storage = {
         const nextCrew = crew.map(c => (c && c.name === from ? { ...c, name: to } : c));
         const patch = { employeeNames: nextNames, employeeHours: nextHours };
         if (crew.length) patch.crew = nextCrew;
-        await tracked(setDoc(doc(jobsCol(), d.id), patch, { merge: true }))
+        // Not awaited — see saveJob. The sweep still reports how many jobs it
+        // MATCHED, which is the number the user cares about; offline it would
+        // otherwise stall on the first job and report none.
+        tracked(setDoc(doc(jobsCol(), d.id), patch, { merge: true }))
           .catch(err => console.warn('renameEmployee.job', err));
         const i = _cache.jobs.findIndex(x => x.id === d.id);
         if (i !== -1) _cache.jobs[i] = { ..._cache.jobs[i], ...patch };
@@ -1158,7 +1176,8 @@ export const Storage = {
       const wantCust = this.customerUidsFor(data.customerId || null);
       const haveCust = Array.isArray(data.customerUids) ? data.customerUids : [];
       if (same(want, have) && same(wantCust, haveCust)) continue;
-      await tracked(setDoc(doc(jobsCol(), d.id), { employeeUids: want, customerUids: wantCust }, { merge: true }))
+      // Not awaited — see the note in saveJob.
+      tracked(setDoc(doc(jobsCol(), d.id), { employeeUids: want, customerUids: wantCust }, { merge: true }))
         .catch(err => console.warn('relinkJobEmployeeUids', err));
       const i = _cache.jobs.findIndex(j => j.id === d.id);
       if (i !== -1) _cache.jobs[i] = { ..._cache.jobs[i], employeeUids: want, customerUids: wantCust };
@@ -1170,7 +1189,8 @@ export const Storage = {
   async deleteJob(id) {
     _cache.jobs = _cache.jobs.filter(j => j.id !== id);
     emit();
-    await tracked(deleteDoc(doc(jobsCol(), id))).catch(err => console.warn("deleteJob", err));
+    // Not awaited — see the note in saveJob.
+    tracked(deleteDoc(doc(jobsCol(), id))).catch(err => console.warn("deleteJob", err));
   },
 
   // ---------- Time logs (hours actually worked) ----------
@@ -1230,7 +1250,8 @@ export const Storage = {
     const i = _cache.timelogs.findIndex(t => t.id === id);
     if (i === -1) _cache.timelogs.push(next); else _cache.timelogs[i] = next;
     emit();
-    await tracked(setDoc(doc(timelogsCol(), id), stripId(next)))
+    // Not awaited — see the note in saveJob.
+    tracked(setDoc(doc(timelogsCol(), id), stripId(next)))
       .catch(err => console.warn('saveTimeLog', err));
     return next;
   },
@@ -1245,7 +1266,8 @@ export const Storage = {
   async deleteTimeLog(id) {
     _cache.timelogs = _cache.timelogs.filter(t => t.id !== id);
     emit();
-    await tracked(deleteDoc(doc(timelogsCol(), id))).catch(err => console.warn('deleteTimeLog', err));
+    // Not awaited — see the note in saveJob.
+    tracked(deleteDoc(doc(timelogsCol(), id))).catch(err => console.warn('deleteTimeLog', err));
   },
 
   // ---------- Sample data ----------
@@ -1793,21 +1815,17 @@ export const Storage = {
     emit();
   },
   async writeSettings() {
-    try {
-      await tracked(setDoc(settingsDoc(), _cache.settings, { merge: true }));
-    } catch (err) {
-      console.warn("writeSettings", err);
-    }
+    // Not awaited — see the note in saveJob.
+    tracked(setDoc(settingsDoc(), _cache.settings, { merge: true }))
+      .catch(err => console.warn("writeSettings", err));
   },
 
   async setSetting(key, value) {
     _cache.settings = { ...DEFAULT_SETTINGS, ..._cache.settings, [key]: value };
     emit();
-    try {
-      await tracked(setDoc(settingsDoc(), _cache.settings, { merge: true }));
-    } catch (err) {
-      console.warn("setSetting", err);
-    }
+    // Not awaited — see the note in saveJob.
+    tracked(setDoc(settingsDoc(), _cache.settings, { merge: true }))
+      .catch(err => console.warn("setSetting", err));
   },
 
   // ---------- Members ----------
@@ -1859,7 +1877,8 @@ export const Storage = {
     const i = _cache.members.findIndex(m => m.uid === _uid);
     if (i !== -1) _cache.members[i] = { ..._cache.members[i], gettingStarted: next };
     emit();
-    await tracked(setDoc(doc(membersCol(), _uid), { gettingStarted: next }, { merge: true }))
+    // Not awaited — see the note in saveJob.
+    tracked(setDoc(doc(membersCol(), _uid), { gettingStarted: next }, { merge: true }))
       .catch(err => console.warn('dismissGettingStarted', err));
   },
 

@@ -420,6 +420,9 @@ export function generateIIF(entries, employeeTypeMap = {}, companyName = 'Compan
     const billing = e.billable === false ? 0 : 1;
     for (const emp of e.employees) {
       const item = employeeTypeMap[emp.toLowerCase()] === 'apprentice' ? ITEM_APPRENTICE : ITEM_JOURNEYMAN;
+      // NOTE stays EMPTY. The crew line's note ("travel", "warranty") is
+      // internal — it explains the hours to you, not to QuickBooks. The entry
+      // still carries `e.note` if that decision is ever revisited.
       lines.push(`TIMEACT\t${e.dateFormatted}\t${e.customerMatched}\t${emp}\t${item}\t${e.hoursFormatted}\t${billing}\t`);
     }
   }

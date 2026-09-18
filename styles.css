@@ -687,7 +687,6 @@ select.iif-date-input { appearance: none; -webkit-appearance: none; padding-righ
   background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius);
   cursor: pointer;
 }
-.cal-block-bar { position: absolute; left: 0; top: 0; bottom: 0; width: 4px; border-radius: 6px 0 0 6px; }
 .cal-block-addr { font-size: 10px; color: var(--ink-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .cal-day-scroll { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; }
@@ -702,7 +701,6 @@ select.iif-date-input { appearance: none; -webkit-appearance: none; padding-righ
 }
 .cal-block {
   position: absolute;
-  padding-left: 10px;   /* room for the crew bar */
   background: var(--surface);
   border: 1px solid var(--accent);
   border-left: 4px solid var(--accent);
@@ -743,6 +741,14 @@ select.iif-date-input { appearance: none; -webkit-appearance: none; padding-righ
 /* The line count is set inline per block (JS picks it from the size tier), so
    there is no fixed 1-line class any more. */
 
+/* Name prompt — deliberately narrow: it holds one field, and a full-width
+   panel makes a one-line question look like a form. */
+.name-modal-panel { max-width: 420px; }
+/* Confirm/alert message: full sentences, so it wraps rather than ellipsising
+   like the hints this class is normally used for. */
+.ask-modal-message { white-space: pre-line; margin-bottom: 4px; }
+.name-modal-panel #name-modal-input { margin-bottom: 4px; }
+
 /* ---- Calendar search results --------------------------------------------
    These REPLACE the grid rather than floating over it: a phone has no room for
    both, and the grid is not useful while you are reading a list of matches. */
@@ -771,15 +777,19 @@ select.iif-date-input { appearance: none; -webkit-appearance: none; padding-righ
 /* ---- Job crew editor ----------------------------------------------------
    One row per LINE, not per employee: the same person can be added twice, so
    nothing here can be keyed on the name. */
-.job-crew-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.job-crew-name { flex: 0 1 auto; min-width: 0; }
-.job-crew-row .job-emp-hours { width: 74px; flex: 0 0 auto; }
+/* Two rows per line: name + hours + billable on top, the note underneath. */
+.job-crew-row { display: flex; flex-direction: column; align-items: stretch; gap: 6px; }
+.job-crew-line { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+/* The name is a BUTTON styled as a chip — tapping it reopens the picker, which
+   is the only way back to it once a name is chosen. */
+.job-crew-name { flex: 0 1 auto; min-width: 0; border: 0; cursor: pointer; font: inherit; }
+.job-crew-pick { flex: 1 1 140px; min-width: 0; }
+.job-crew-line .job-emp-hours { width: 74px; flex: 0 0 auto; }
 .job-crew-bill { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--ink-soft); cursor: pointer; }
 .job-crew-del { background: none; border: none; color: var(--danger); cursor: pointer; font-size: 15px; padding: 4px 6px; margin-left: auto; }
+.job-crew-note { font-size: 13px; }
 .job-crew-empty { color: var(--ink-soft); font-size: 13px; }
-.job-crew-add { display: flex; align-items: center; gap: 8px; margin: 6px 0 4px; }
-.job-crew-add button { min-width: 44px; font-size: 18px; line-height: 1; padding: 6px 10px; }
-.job-crew-add select { flex: 1; min-width: 0; }
+.job-crew-add { margin: 6px 0 4px; }
 /* Hours chart: the spare column marks rows that aren't chargeable. */
 .iif-flag { text-align: center; }
 .iif-nb {

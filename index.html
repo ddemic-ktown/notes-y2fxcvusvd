@@ -315,8 +315,7 @@
            billable, once not. The picker is a plain <select> that resets to its
            placeholder after each pick. -->
       <div class="job-crew-add">
-        <button id="job-crew-add-btn" class="secondary" type="button" aria-label="Add employee">+</button>
-        <select id="job-crew-picker" class="signin-input" hidden aria-label="Add an employee"></select>
+        <button id="job-crew-add-btn" class="secondary setting-wide-btn" type="button">+ &nbsp;Add employee</button>
       </div>
       <h4 class="setting-sub-title">Customer</h4>
       <!-- column-reverse when there's more room above the field, so matches
@@ -937,6 +936,44 @@
   </div>
 
   <script type="module" src="js/app.js"></script>
+  <!-- NAME PROMPT — replaces window.prompt() for naming things.
+       The reason is the KEYBOARD: a native prompt in an installed PWA often
+       appears without raising it, so every rename started with an extra tap on
+       the field. A real input can be focused inside the tap handler, which is
+       what actually raises it. -->
+  <div id="name-modal" class="modal-overlay" hidden>
+    <div class="modal-panel name-modal-panel">
+      <div class="modal-header">
+        <h2 class="modal-title" id="name-modal-title">Name</h2>
+        <button id="name-modal-close" class="icon-btn" aria-label="Close">✕</button>
+      </div>
+      <p id="name-modal-hint" class="modal-hint" hidden></p>
+      <input id="name-modal-input" class="signin-input" type="text" autocomplete="off" autocapitalize="words" />
+      <div class="setting-btn-col">
+        <button id="name-modal-save" class="primary setting-wide-btn" type="button">Save</button>
+        <button id="name-modal-delete" class="secondary setting-wide-btn danger-item" type="button" hidden>Delete</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- CONFIRM / ALERT — in-app replacements for window.confirm and
+       window.alert. Not a keyboard problem like the name prompt: these just
+       look like the browser rather than the app, and on iOS they print
+       "<domain> says…" above every message. -->
+  <div id="ask-modal" class="modal-overlay" hidden>
+    <div class="modal-panel name-modal-panel">
+      <div class="modal-header">
+        <h2 class="modal-title" id="ask-modal-title">Are you sure?</h2>
+        <button id="ask-modal-close" class="icon-btn" aria-label="Close">✕</button>
+      </div>
+      <p id="ask-modal-message" class="modal-hint ask-modal-message"></p>
+      <div class="setting-btn-col">
+        <button id="ask-modal-ok" class="primary setting-wide-btn" type="button">OK</button>
+        <button id="ask-modal-cancel" class="secondary setting-wide-btn" type="button">Cancel</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Sync toast. Lives OUTSIDE every screen and is position:fixed, so it can
        never widen a header row — which is what the old inline pill did, pushing
        the settings button past the right edge of the header's background. -->
