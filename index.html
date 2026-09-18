@@ -103,7 +103,6 @@
       <div class="home-header-top">
         <h1>JobPilot</h1>
         <span id="app-version" class="app-version"></span>
-        <span id="sync-status" class="sync-status" role="status" hidden></span>
         <button id="refresh-btn" class="icon-btn" type="button" aria-label="Refresh">⟳</button>
         <button id="layout-btn" class="icon-btn date-btn" type="button" aria-pressed="false" aria-label="Change home screen layout">Layout</button>
         <button id="settings-btn" class="icon-btn" aria-label="Settings">⚙</button>
@@ -243,8 +242,19 @@
           </div>
         </div>
       </div>
+      <!-- Admin/bookkeeper only; hidden for employees and customers by
+           applyRoleVisibility. Searches the jobs the app has LOADED — the live
+           window plus any month you have visited. -->
+      <div id="cal-search-wrap" class="customers-header-bottom" hidden>
+        <div class="search-wrap">
+          <input id="cal-search" class="search-input" type="search" placeholder="Search jobs…" autocomplete="off" />
+          <button class="search-clear" type="button" aria-label="Clear search" hidden>✕</button>
+          <button class="search-open icon-btn" type="button" aria-label="Open search">🔍</button>
+        </div>
+      </div>
     </header>
     <main class="cal-main">
+      <div id="cal-results" class="cal-results" hidden></div>
       <div id="cal-grid" class="cal-grid"></div>
     </main>
     <button id="cal-fab" class="fab" aria-label="New job">+</button>
@@ -283,6 +293,15 @@
       </div>
       <label class="setting-inline-label" for="job-date">Date</label>
       <input id="job-date" class="signin-input" type="date" />
+      <!-- A day off. Times stay live so it can still be drawn as a block; the
+           customer and address are disabled, since it has neither. -->
+      <label class="setting-check" style="margin-top:8px;">
+        <input id="job-nowork" type="checkbox" />
+        <span>
+          No work
+          <em class="setting-check-hint">A day off rather than a job. Shows as <strong>No Work</strong> with a red outline, and is left out of the hours chart and the QuickBooks export.</em>
+        </span>
+      </label>
       <div class="job-time-row">
         <label class="setting-inline-label">Start <input id="job-start" class="signin-input" type="time" /></label>
         <label class="setting-inline-label">End <input id="job-end" class="signin-input" type="time" /></label>
@@ -291,7 +310,14 @@
       <label class="setting-inline-label" for="job-desc">Description</label>
       <textarea id="job-desc" class="csv-textarea" rows="2" placeholder="Optional"></textarea>
       <h4 class="setting-sub-title">Who's working</h4>
-      <ul id="job-employees" class="members-list"></ul>
+      <ul id="job-employees" class="members-list job-crew-list"></ul>
+      <!-- One line per entry, so the same person can be added twice — once
+           billable, once not. The picker is a plain <select> that resets to its
+           placeholder after each pick. -->
+      <div class="job-crew-add">
+        <button id="job-crew-add-btn" class="secondary" type="button" aria-label="Add employee">+</button>
+        <select id="job-crew-picker" class="signin-input" hidden aria-label="Add an employee"></select>
+      </div>
       <h4 class="setting-sub-title">Customer</h4>
       <!-- column-reverse when there's more room above the field, so matches
            aren't stuck behind the keyboard -->
@@ -911,5 +937,9 @@
   </div>
 
   <script type="module" src="js/app.js"></script>
+  <!-- Sync toast. Lives OUTSIDE every screen and is position:fixed, so it can
+       never widen a header row — which is what the old inline pill did, pushing
+       the settings button past the right edge of the header's background. -->
+  <div id="sync-status" class="sync-toast" role="status" aria-live="polite" hidden></div>
 </body>
 </html>

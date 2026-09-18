@@ -20,6 +20,10 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 100, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.09.18-1013', 'Search the calendar by customer, address, note or who was on the job — tap a result to open that day'],
+  ['v2026.09.18-1006', 'The offline notice is now a toast at the bottom instead of a badge in the header, so it can no longer push the settings button off the side of the screen'],
+  ['v2026.09.18-0912', 'Build a job’s crew line by line with +, so the same person can be on it twice — one line billable, one not; non-billable hours are exported as not billable to the customer'],
+  ['v2026.09.18-0846', 'Tick “No work” on a job to mark a day off — it shows as No Work with a red outline, ordinary jobs get a green one, and it stays out of the hours chart and QuickBooks export'],
   ['v2026.09.18-0648', 'Holding a price cell to see its history no longer leaves text highlighted in the popup'],
   ['v2026.09.18-0645', 'Day view: a job with room to spare is now set in bigger type, and its name, address and note wrap onto more lines instead of being cut off'],
   ['v2026.09.16-1808', 'Job notes now show on the calendar wherever they fit — shorter blocks in the day view, and every job in the desktop month and week grids'],
@@ -917,6 +921,63 @@ function crewBarStyle(names) {
   const stops = cols.map((c, i) => `${c} ${i * step}%, ${c} ${(i + 1) * step}%`).join(', ');
   return `background: linear-gradient(180deg, ${stops})`;
 }
+// ---------- job crew ----------
+// A job's people are a LIST, not a set: the same person can appear twice on one
+// job, once billable and once not (travel, warranty, shop time). Older jobs
+// have only employeeNames + employeeHours, so this rebuilds the list from them
+// — everything before this existed was billable by definition.
+function jobCrew(job) {
+  if (!job) return [];
+  if (Array.isArray(job.crew) && job.crew.length) {
+    return job.crew.map(c => ({
+      name: String(c.name || ''),
+      hours: Number.isFinite(Number(c.hours)) && Number(c.hours) > 0 ? Number(c.hours) : null,
+      billable: c.billable !== false,
+    })).filter(c => c.name);
+  }
+  const hrs = job.employeeHours || {};
+  return (job.employeeNames || []).map(n => ({
+    name: n,
+    hours: Number.isFinite(Number(hrs[n])) && Number(hrs[n]) > 0 ? Number(hrs[n]) : null,
+    billable: true,
+  }));
+}
+// employeeNames / employeeHours stay on the record, derived from the crew. They
+// are what the calendar chips, the employee-role read filter, employeeUids and
+// the rename sweep still key on, and dropping them would break all four.
+// employeeHours holds each person's TOTAL across their lines, billable or not.
+function crewLegacyFields(crew) {
+  const names = [];
+  const hours = {};
+  crew.forEach(c => {
+    if (!names.includes(c.name)) names.push(c.name);
+    if (c.hours) hours[c.name] = Math.round(((hours[c.name] || 0) + c.hours) * 100) / 100;
+  });
+  return { employeeNames: names, employeeHours: hours };
+}
+// "Dave: 4/2" when someone has two lines on the job, "Dave: 4" when they have
+// one, bare "Dave" when no hours are entered. Entry order, so the numbers read
+// in the order they were added.
+function crewChipLabel(crew, name, short) {
+  const label = short ? name.split(/[\s(]+/)[0] : name;
+  const nums = crew.filter(c => c.name === name && c.hours).map(c => +c.hours.toFixed(2));
+  return nums.length ? `${label}: ${nums.join('/')}` : label;
+}
+// Distinct names, in the order they first appear.
+function crewNames(crew) {
+  const out = [];
+  crew.forEach(c => { if (!out.includes(c.name)) out.push(c.name); });
+  return out;
+}
+
+// One place decides what a job is titled on the calendar. A no-work entry has
+// no customer by construction, so it would otherwise read "No customer".
+const NO_WORK_LABEL = 'No Work';
+function jobTitle(j) {
+  if (j.noWork) return NO_WORK_LABEL;
+  return j.customerName || (j.customerId ? customerCrumbLabel(j.customerId) : '');
+}
+
 function groupByCrew(jobs) {
   const map = new Map();
   jobs.forEach(j => {
@@ -1018,6 +1079,90 @@ function showCalendar() {
   if (!handlingPopstate) history.pushState({ screen: 'calendar' }, '');
 }
 
+// ---------- calendar search ----------
+// Searches the jobs the app HAS: the live window (~3 months) plus any month
+// already visited. A wider search would mean a server query per keystroke,
+// which is a different feature.
+let calSearchTerm = '';
+
+function clearCalSearch() {
+  calSearchTerm = '';
+  const input = document.getElementById('cal-search');
+  if (input) input.value = '';
+  const box = document.getElementById('cal-results');
+  if (box) { box.hidden = true; box.innerHTML = ''; }
+  const grid = document.getElementById('cal-grid');
+  if (grid) grid.hidden = false;
+}
+
+function calSearchMatches(term) {
+  const q = term.trim().toLowerCase();
+  if (!q) return [];
+  const hideNotes = isCustomerRole();
+  return Storage.listJobs().filter(j => {
+    const hay = [
+      jobTitle(j),
+      j.address || '',
+      hideNotes ? '' : (j.description || ''),
+      crewNames(jobCrew(j)).join(' '),
+    ].join(' ').toLowerCase();
+    return hay.includes(q);
+  }).sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
+}
+
+function renderCalSearchResults() {
+  const box = document.getElementById('cal-results');
+  const grid = document.getElementById('cal-grid');
+  if (!box || !grid) return;
+  if (!calSearchTerm.trim()) {
+    box.hidden = true; box.innerHTML = '';
+    grid.hidden = false;
+    return;
+  }
+  // The results REPLACE the grid rather than floating over it: a phone has no
+  // room for both, and a list you have to dismiss to see the calendar again is
+  // worse than one that simply is the calendar while you are searching.
+  grid.hidden = true;
+  box.hidden = false;
+  const hits = calSearchMatches(calSearchTerm);
+  if (!hits.length) {
+    box.innerHTML = `<p class="empty-state">No jobs match “${escapeHtml(calSearchTerm.trim())}”.</p>`;
+    return;
+  }
+  box.innerHTML = `<p class="cal-results-count">${hits.length} job${hits.length === 1 ? '' : 's'}</p>`
+    + hits.map(j => {
+    const crew = jobCrew(j);
+    const chips = crewNames(crew).map(n =>
+      `<span class="cal-chip" style="${chipStyle(n)}">${escapeHtml(crewChipLabel(crew, n, true))}</span>`).join('');
+    const when = j.date ? prettyDate(j.date) : '—';
+    const time = (j.start || j.end) ? `${j.start || ''}${j.end ? '–' + j.end : ''}` : '';
+    const note = isCustomerRole() ? '' : (j.description || '').trim();
+    return `<article class="cal-result${j.noWork ? ' cal-nowork' : ' cal-working'}" data-date="${escapeHtml(j.date || '')}">
+      <p class="cal-result-when">${escapeHtml(when)}${time ? ` · ${escapeHtml(time)}` : ''}</p>
+      <p class="cal-result-who">${escapeHtml(jobTitle(j) || 'No customer')}</p>
+      ${j.address ? `<p class="cal-result-addr">${escapeHtml(j.address)}</p>` : ''}
+      <div class="cal-result-crew">${chips}</div>
+      ${note ? `<p class="cal-result-note">${escapeHtml(note)}</p>` : ''}
+    </article>`;
+  }).join('');
+  box.querySelectorAll('.cal-result[data-date]').forEach(card => {
+    card.addEventListener('click', () => {
+      const d = card.dataset.date;
+      if (!d) return;
+      calCursor = parseYmd(d);
+      showCalendarDay(d);
+    });
+  });
+}
+
+const calSearchInput = document.getElementById('cal-search');
+if (calSearchInput) {
+  calSearchInput.addEventListener('input', () => {
+    calSearchTerm = calSearchInput.value;
+    renderCalSearchResults();
+  });
+}
+
 function renderCalendar() {
   // Older months aren't in the live window — pull them once, on demand. The
   // grid draws trailing days of both neighbours, so cover those too.
@@ -1070,21 +1215,19 @@ function renderCalendar() {
     let shown = 0;
     const lines = shortPills ? '' : jobs.slice(0, deskCap).map(j => {
       shown++;
-      const who = j.customerName || (j.customerId ? customerCrumbLabel(j.customerId) : '—');
-      const jh = j.employeeHours || {};
-      const chips = (j.employeeNames || []).length
-        ? j.employeeNames.map(n => {
-            const first = n.split(/[\s(]+/)[0];
-            const h = parseFloat(jh[n]);
-            const label = first + (Number.isFinite(h) && h ? `: ${+h.toFixed(2)}` : '');
-            return `<span class="cal-chip" style="${chipStyle(n)}" title="${escapeHtml(n)}">${escapeHtml(label)}</span>`;
-          }).join('')
+      const who = jobTitle(j) || '—';
+      const jcrew = jobCrew(j);
+      const jnames = crewNames(jcrew);
+      const chips = jnames.length
+        ? jnames.map(n =>
+            `<span class="cal-chip" style="${chipStyle(n)}" title="${escapeHtml(n)}">${escapeHtml(crewChipLabel(jcrew, n, true))}</span>`
+          ).join('')
         : '<span class="cal-chip cal-chip-none">—</span>';
       // The note is the third line. Customers don't get it, same rule as the
       // day view — it often carries internal remarks.
       const jnote = isCustomerRole() ? '' : (j.description || '').trim();
       const noteLine = jnote ? `<span class="cal-job-note">${escapeHtml(jnote)}</span>` : '';
-      return `<div class="cal-job cal-job-stacked">
+      return `<div class="cal-job cal-job-stacked${j.noWork ? ' cal-nowork' : ' cal-working'}">
         <span class="cal-job-who">${escapeHtml(who)}</span>
         <span class="cal-job-crew">${chips}</span>
         ${noteLine}
@@ -1105,8 +1248,9 @@ function renderCalendar() {
             return `<span class="cal-chip cal-chip-initial" style="${chipStyle(n)}" title="${escapeHtml(n)}">${escapeHtml(first.slice(0, 1).toUpperCase())}</span>`;
           }).join('')
         : '<span class="cal-chip cal-chip-none">—</span>';
-      const whos = take.map(j => j.customerName || (j.customerId ? customerCrumbLabel(j.customerId) : '—'));
-      return `<div class="cal-job">${chips}<span class="cal-job-who">${escapeHtml(whos.join(', '))}</span></div>`;
+      const whos = take.map(j => jobTitle(j) || '—');
+      const anyNoWork = take.some(j => j.noWork);
+      return `<div class="cal-job${anyNoWork ? ' cal-nowork-text' : ''}">${chips}<span class="cal-job-who">${escapeHtml(whos.join(', '))}</span></div>`;
     }).join('');
 
     const more = jobs.length > shown ? `<div class="cal-more">+${jobs.length - shown}</div>` : '';
@@ -1139,6 +1283,8 @@ function renderCalendar() {
   // phone has no height to spend, so neither gets it.
   calGrid.classList.toggle('cal-grid-tall', calMode === 'month' && !shortPills);
   calGrid.innerHTML = cues + `<div class="cal-headrow">${head}</div><div class="cal-cells">${cells}</div>`;
+  // A redraw while a search is open must not put the grid back on screen.
+  renderCalSearchResults();
   const modeBtn = document.getElementById('cal-mode');
   if (modeBtn) {
     // Labelled with where it GOES, not where you are — a button that says
@@ -1344,11 +1490,11 @@ function renderCalendarDay() {
   if (untimed.length) {
     untimedWrap.hidden = false;
     untimedWrap.innerHTML = '<p class="cal-untimed-label">Any time</p>' + untimed.map(j => {
-      const who = j.customerName || (j.customerId ? customerCrumbLabel(j.customerId) : 'No customer');
-      const jh = j.employeeHours || {};
-      const chips = (j.employeeNames || []).map(n =>
-        `<span class="cal-chip" style="${chipStyle(n)}">${escapeHtml(n + (jh[n] ? `: ${jh[n]}` : ''))}</span>`).join('');
-      return `<div class="cal-untimed-job" data-job="${j.id}">${escapeHtml(who)} ${chips}</div>`;
+      const who = jobTitle(j) || 'No customer';
+      const ucrew = jobCrew(j);
+      const chips = crewNames(ucrew).map(n =>
+        `<span class="cal-chip" style="${chipStyle(n)}">${escapeHtml(crewChipLabel(ucrew, n, false))}</span>`).join('');
+      return `<div class="cal-untimed-job${j.noWork ? ' cal-nowork' : ' cal-working'}" data-job="${j.id}">${escapeHtml(who)} ${chips}</div>`;
     }).join('');
   } else {
     untimedWrap.hidden = true;
@@ -1374,19 +1520,17 @@ function renderCalendarDay() {
     // Only the strip above the next block is on screen, so lay the text out for
     // that instead of the block's real height.
     const shown = Math.min(height, visible);
-    const who = j.customerName || (j.customerId ? customerCrumbLabel(j.customerId) : 'No customer');
-    const names = (j.employeeNames || []);
+    const who = jobTitle(j) || 'No customer';
+    const bcrew = jobCrew(j);
+    const names = crewNames(bcrew);
     const timeTxt = `${fmtClock(start)}–${fmtClock(end)}`;
     // Who's on the job is shown on the block itself now (the legend that used
     // to carry it is gone). The note follows only when the block is tall
     // enough to hold a line without slicing it.
-    const jobHours = j.employeeHours || {};
     const chips = names.length
-      ? names.map(n => {
-          const h = jobHours[n];
-          const label = n.split(/[\s(]+/)[0] + (h ? `: ${h}` : '');
-          return `<span class="cal-chip" style="${chipStyle(n)}">${escapeHtml(label)}</span>`;
-        }).join('')
+      ? names.map(n =>
+          `<span class="cal-chip" style="${chipStyle(n)}">${escapeHtml(crewChipLabel(bcrew, n, true))}</span>`
+        ).join('')
       : '<span class="cal-chip cal-chip-none">—</span>';
     // The note often carries internal remarks, so customers don't get it.
     const note = isCustomerRole() ? '' : (j.description || '').trim();
@@ -1412,7 +1556,7 @@ function renderCalendarDay() {
     // a name you can read the start of beats losing the chips entirely.
     const tight = shown < 52;
     const addr = j.address && !tight ? `<div class="cal-block-addr">${escapeHtml(j.address)}</div>` : '';
-    return `<div class="cal-block${tight ? ' cal-block-tight' : ''}${sizeClass}" data-job="${j.id}" style="top:${top}px;height:${height}px;left:${left};width:${width};z-index:${1 + depth}">
+    return `<div class="cal-block${tight ? ' cal-block-tight' : ''}${sizeClass}${j.noWork ? ' cal-nowork' : ' cal-working'}" data-job="${j.id}" style="top:${top}px;height:${height}px;left:${left};width:${width};z-index:${1 + depth}">
       <span class="cal-block-bar" style="${crewBarStyle(names)}"></span>
       ${tight ? '' : `<div class="cal-block-time">${escapeHtml(timeTxt)}</div>`}
       <div class="cal-block-head">
@@ -1721,7 +1865,7 @@ function openJobModal(jobId, dateStr) {
   jobChosenCustomer = job && job.customerId
     ? { id: job.customerId, name: job.customerName || customerCrumbLabel(job.customerId) }
     : null;
-  renderJobEmployees(job ? (job.employeeNames || []) : [], job ? (job.employeeHours || {}) : {});
+  renderJobEmployees(jobCrew(job));
   renderJobCustomer('');
   document.getElementById('job-address-wrap').hidden = !jobChosenCustomer && !(job && job.address);
   const delBtn = document.getElementById('job-delete');
@@ -1729,33 +1873,111 @@ function openJobModal(jobId, dateStr) {
   // Duplicate only makes sense for a job that exists — a new one isn't saved yet.
   const dupBtn = document.getElementById('job-duplicate');
   if (dupBtn) dupBtn.hidden = !job;
+  const noWorkBox = document.getElementById('job-nowork');
+  if (noWorkBox) noWorkBox.checked = !!(job && job.noWork);
+  applyNoWorkState();
   jobModal.hidden = false;
 }
 
-function renderJobEmployees(selected, hours) {
+// A no-work entry has no customer and no address, so those fields are disabled
+// while the box is ticked. The TIMES stay live on purpose — a day off is often
+// a half day, and leaving them usable is what lets it draw as a block on the
+// clock instead of sitting in the "Any time" strip.
+function applyNoWorkState() {
+  const on = !!(document.getElementById('job-nowork') || {}).checked;
+  const picker = document.getElementById('job-customer-picker');
+  const addrWrap = document.getElementById('job-address-wrap');
+  const chosen = document.getElementById('job-customer-chosen');
+  [picker, addrWrap, chosen].forEach(el => {
+    if (!el) return;
+    el.style.opacity = on ? '0.4' : '';
+    el.style.pointerEvents = on ? 'none' : '';
+  });
+  ['job-customer-search', 'job-address'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.disabled = on;
+  });
+}
+const jobNoWorkBox = document.getElementById('job-nowork');
+if (jobNoWorkBox) jobNoWorkBox.addEventListener('change', applyNoWorkState);
+
+// The crew being edited in the modal, as a working array. Rebuilt from the job
+// on open and read back on save — the DOM is never the source of truth, so
+// adding the same person twice can't collide on an id or a name key.
+let jobCrewDraft = [];
+
+function renderJobEmployees(crew) {
+  jobCrewDraft = crew.map(c => ({ ...c }));
   const ul = document.getElementById('job-employees');
+  const picker = document.getElementById('job-crew-picker');
+  const addBtn = document.getElementById('job-crew-add-btn');
   if (!ul) return;
   const names = getEmployeeNames();
-  const hrs = hours || {};
-  ul.innerHTML = names.length
-    ? names.map(n => `<li class="member-item">
-        <label style="display:flex;align-items:center;gap:8px;flex:1;min-width:0;cursor:pointer;">
-          <input type="checkbox" data-emp-name="${escapeHtml(n)}" ${selected.includes(n) ? 'checked' : ''} />
-          <span class="cal-chip" style="${chipStyle(n)}">${escapeHtml(n)}</span>
-        </label>
-        <input type="number" class="job-emp-hours" data-emp-hours="${escapeHtml(n)}"
-               min="0" step="0.25" inputmode="decimal" placeholder="hrs"
-               value="${hrs[n] != null ? hrs[n] : ''}" aria-label="Hours worked by ${escapeHtml(n)}" />
-      </li>`).join('')
-    : '<li class="member-item">Add employees in Settings → Time Logger first.</li>';
-  // Typing hours implies the person was there — tick them automatically.
-  ul.querySelectorAll('[data-emp-hours]').forEach(inp => {
-    inp.addEventListener('input', () => {
-      if (!inp.value) return;
-      const cb = ul.querySelector(`input[data-emp-name="${CSS.escape(inp.dataset.empHours)}"]`);
-      if (cb) cb.checked = true;
+
+  if (picker) {
+    picker.innerHTML = '<option value="">Add an employee…</option>'
+      + names.map(n => `<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`).join('');
+    picker.hidden = true;
+  }
+  if (addBtn) addBtn.hidden = !names.length;
+
+  const draw = () => {
+    ul.innerHTML = jobCrewDraft.length
+      ? jobCrewDraft.map((c, i) => `<li class="member-item job-crew-row">
+          <span class="cal-chip job-crew-name" style="${chipStyle(c.name)}">${escapeHtml(c.name)}</span>
+          <input type="number" class="job-emp-hours" data-crew-hours="${i}"
+                 min="0" step="0.25" inputmode="decimal" placeholder="hrs"
+                 value="${c.hours != null ? c.hours : ''}" aria-label="Hours for ${escapeHtml(c.name)}" />
+          <label class="job-crew-bill" title="Billable to the customer">
+            <input type="checkbox" data-crew-bill="${i}" ${c.billable ? 'checked' : ''} />
+            <span>Billable</span>
+          </label>
+          <button type="button" class="job-crew-del" data-crew-del="${i}" aria-label="Remove ${escapeHtml(c.name)}">✕</button>
+        </li>`).join('')
+      : `<li class="member-item job-crew-empty">${names.length
+          ? 'Nobody on this job yet — tap + to add someone.'
+          : 'Add employees in Settings → Time Logger first.'}</li>`;
+
+    ul.querySelectorAll('[data-crew-hours]').forEach(inp => {
+      inp.addEventListener('input', () => {
+        const v = parseFloat(inp.value);
+        jobCrewDraft[+inp.dataset.crewHours].hours = Number.isFinite(v) && v > 0 ? v : null;
+      });
     });
-  });
+    ul.querySelectorAll('[data-crew-bill]').forEach(box => {
+      box.addEventListener('change', () => {
+        jobCrewDraft[+box.dataset.crewBill].billable = box.checked;
+      });
+    });
+    ul.querySelectorAll('[data-crew-del]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        jobCrewDraft.splice(+btn.dataset.crewDel, 1);
+        draw();   // indices shift, so redraw rather than patch
+      });
+    });
+  };
+  draw();
+
+  if (addBtn && !addBtn.dataset.wired) {
+    addBtn.dataset.wired = '1';
+    addBtn.addEventListener('click', () => {
+      const p = document.getElementById('job-crew-picker');
+      if (!p) return;
+      p.hidden = !p.hidden;
+      if (!p.hidden) p.focus();
+    });
+  }
+  if (picker && !picker.dataset.wired) {
+    picker.dataset.wired = '1';
+    picker.addEventListener('change', () => {
+      if (!picker.value) return;
+      // Billable by default: the exception is the exception.
+      jobCrewDraft.push({ name: picker.value, hours: null, billable: true });
+      picker.value = '';
+      picker.hidden = true;
+      draw();
+    });
+  }
 }
 
 // How tall the match list can be: whatever is left between the bottom of the
@@ -1963,15 +2185,10 @@ const jobSave = document.getElementById('job-save');
 if (jobSave) jobSave.addEventListener('click', async () => {
   const date = document.getElementById('job-date').value;
   if (!date) { alert('A job needs a date.'); return; }
-  const names = [...document.querySelectorAll('#job-employees input[data-emp-name]:checked')]
-    .map(cb => cb.dataset.empName);
-  // Hours are kept only for people on the job — unticking someone drops theirs.
-  const employeeHours = {};
-  document.querySelectorAll('#job-employees input[data-emp-hours]').forEach(inp => {
-    const n = inp.dataset.empHours;
-    const v = parseFloat(inp.value);
-    if (names.includes(n) && !isNaN(v) && v > 0) employeeHours[n] = v;
-  });
+  // jobCrewDraft is the live list; the derived fields follow from it.
+  const crew = jobCrewDraft.filter(c => c && c.name);
+  const { employeeNames: names, employeeHours } = crewLegacyFields(crew);
+  const noWork = !!(document.getElementById('job-nowork') || {}).checked;
   await Storage.saveJob({
     employeeHours,
     id: jobEditingId,
@@ -1980,9 +2197,13 @@ if (jobSave) jobSave.addEventListener('click', async () => {
     end: document.getElementById('job-end').value,
     description: document.getElementById('job-desc').value,
     employeeNames: names,
-    customerId: jobChosenCustomer ? jobChosenCustomer.id : null,
-    customerName: jobChosenCustomer ? jobChosenCustomer.name : '',
-    address: document.getElementById('job-address').value,
+    crew,
+    noWork,
+    // Ticking the box after a customer was chosen would otherwise leave the
+    // old one on the record, invisible but still there.
+    customerId: noWork ? null : (jobChosenCustomer ? jobChosenCustomer.id : null),
+    customerName: noWork ? '' : (jobChosenCustomer ? jobChosenCustomer.name : ''),
+    address: noWork ? '' : document.getElementById('job-address').value,
   });
   jobModal.hidden = true;
   calCursor = parseYmd(date);
@@ -6263,6 +6484,7 @@ function clearAllSearches() {
   priceFilter = '';
   const ps = document.getElementById('price-search');
   if (ps) ps.value = '';
+  clearCalSearch();
   refreshSearchClears();
 }
 
@@ -6293,7 +6515,7 @@ SEARCH_CLEAR_IDS.forEach(id => {
 // ---------- collapsible search bars (per-device setting) ----------
 // When enabled, an EMPTY, unfocused search bar collapses to a 🔍 icon;
 // tapping the icon expands and focuses it. Bars with text stay expanded.
-const COLLAPSIBLE_SEARCH_IDS = ['home-search-input', 'customer-search', 'customer-notes-search', 'note-search-input', 'price-search'];
+const COLLAPSIBLE_SEARCH_IDS = ['home-search-input', 'customer-search', 'customer-notes-search', 'note-search-input', 'price-search', 'cal-search'];
 
 function getCollapseSearch() { return localStorage.getItem('na-collapse-search') === '1'; }
 
@@ -6440,11 +6662,11 @@ function renderSyncStatus() {
   const pending = Storage.pendingWrites ? Storage.pendingWrites() : 0;
   if (offline) {
     syncStatusEl.textContent = 'Offline — saved on this device';
-    syncStatusEl.className = 'sync-status sync-offline';
+    syncStatusEl.className = 'sync-toast sync-offline';
     syncStatusEl.hidden = false;
   } else if (pending > 0) {
     syncStatusEl.textContent = 'Saving…';
-    syncStatusEl.className = 'sync-status sync-saving';
+    syncStatusEl.className = 'sync-toast sync-saving';
     syncStatusEl.hidden = false;
   } else {
     syncStatusEl.hidden = true;
@@ -6645,6 +6867,15 @@ function applyRoleUI(role) {
   document.querySelectorAll('[data-staff-only]').forEach(el => {
     el.style.display = isAdminRole ? '' : 'none';
   });
+  // Calendar search: admin and bookkeeper. An employee's calendar is their own
+  // schedule — a handful of jobs they can already see — and a customer's is
+  // narrower still, so neither gets a search over it.
+  const calSearchWrap = document.getElementById('cal-search-wrap');
+  if (calSearchWrap) {
+    const on = isAdminRole || role === 'bookkeeper';
+    calSearchWrap.hidden = !on;
+    if (!on) clearCalSearch();
+  }
   // Layout button only for roles that see the home sections at all
   const layoutBtnEl = document.getElementById('layout-btn');
   if (layoutBtnEl) layoutBtnEl.hidden = !(role === 'admin' || role === 'bookkeeper');
@@ -7837,6 +8068,9 @@ function jobEntriesInRange(range) {
   const from = range.from ? ymd(range.from) : '';
   const to = range.to ? ymd(range.to) : '';
   const jobs = Storage.listJobs()
+    // A no-work entry is a day off. It has no customer and no billable hours,
+    // so it must not produce a row here — the chart feeds the .iif directly.
+    .filter(j => !j.noWork)
     .filter(j => j.date && (!from || j.date >= from) && (!to || j.date <= to))
     .sort((a, b) => (a.date === b.date
       ? String(a.start || '').localeCompare(String(b.start || ''))
@@ -7846,16 +8080,22 @@ function jobEntriesInRange(range) {
     // The customer LABEL has to be the same one timelogs are keyed on
     // (customerCrumbLabel), or a job could never match its own saved record.
     const cust = j.customerId ? customerCrumbLabel(j.customerId) : (j.customerName || '');
-    // A job with nobody on it still gets one row, so it can't silently vanish.
-    const names = (j.employeeNames || []).length ? j.employeeNames : [''];
-    const hrs = j.employeeHours || {};
+    // ONE ROW PER CREW ENTRY, not per person: someone can be on a job twice,
+    // billable once and not the other, and those are two different rows both
+    // here and in QuickBooks. A job with nobody on it still gets one row, so it
+    // can't silently vanish.
+    const crew = jobCrew(j);
+    const entries = crew.length ? crew : [{ name: '', hours: null, billable: true }];
     const d = parseYmd(j.date);
-    for (const name of names) {
-      const h = Number(hrs[name]);
+    entries.forEach((c, ci) => {
+      const name = c.name;
+      const h = Number(c.hours);
       const hours = Number.isFinite(h) && h > 0 ? Math.round(h * 100) / 100 : 0;
       out.push({
         jobId: j.id,
-        employeeName: name,           // which key in employeeHours an edit writes to
+        employeeName: name,
+        crewIndex: crew.length ? ci : -1,   // which crew line an edit writes to
+        billable: c.billable !== false,
         date: d,
         dateFormatted: Number.isNaN(d.getTime()) ? '' : iifFormatDate(d),
         employees: name ? [name] : [],
@@ -7869,7 +8109,7 @@ function jobEntriesInRange(range) {
         confidence: null,
         raw: j.description || '',
       });
-    }
+    });
   }
   return out;
 }
@@ -8030,6 +8270,12 @@ function iifCellHtml(row, col) {
     }
     if (col === 'customer') return `<td>${escapeHtml(v.cust || '—')}</td>`;
     if (col === 'hours') return `<td class="iif-hours-col">${escapeHtml(v.hoursText || '—')}</td>`;
+    // The spare column now carries the billing flag. Only non-billable rows are
+    // marked: billable is the normal case, and a badge on every row would be
+    // noise rather than information.
+    if (col === 'flag') return row.e.billable === false
+      ? '<td class="iif-flag"><span class="iif-nb" title="Not billable to the customer">n/b</span></td>'
+      : '<td class="iif-flag"></td>';
     return '<td></td>';
   }
   const key = iifRowKey(idx, empIdx);
@@ -8084,7 +8330,7 @@ function renderIIFEntries(entries) {
     <th>Employee</th>
     <th>Customer</th>
     <th>Hours</th>
-    <th aria-label="Flag"></th>
+    <th aria-label="Billable">&nbsp;</th>
   </tr></thead>`;
 
   iifRenderedRows = iifGridRows();
@@ -8300,14 +8546,21 @@ function writeHoursToJob(e) {
   if (!e || !e.jobId || !e.employeeName) return;
   const job = Storage.getJob(e.jobId);
   if (!job) return;
-  const employeeHours = { ...(job.employeeHours || {}) };
-  // Clearing the hours removes the person's entry rather than storing a 0 —
-  // "no hours entered" and "worked zero hours" should not look the same.
-  if (e.hours > 0) employeeHours[e.employeeName] = e.hours;
-  else delete employeeHours[e.employeeName];
+  // The row knows WHICH crew line it came from. Writing by name would be wrong
+  // now that a person can hold two lines on one job — the edit would land on
+  // whichever came first and silently merge the two.
+  const crew = jobCrew(job);
+  const i = (e.crewIndex != null && e.crewIndex >= 0 && e.crewIndex < crew.length)
+    ? e.crewIndex
+    : crew.findIndex(c => c.name === e.employeeName);
+  if (i === -1) return;
+  // Clearing the hours blanks the line rather than storing a 0 — "no hours
+  // entered" and "worked zero hours" should not look the same. The line itself
+  // stays: the person is still on the job.
+  crew[i] = { ...crew[i], hours: e.hours > 0 ? e.hours : null };
   // saveJob REBUILDS the document from what it is handed, so the whole job has
   // to go back — passing only the changed field would blank everything else.
-  Promise.resolve(Storage.saveJob({ ...job, employeeHours }))
+  Promise.resolve(Storage.saveJob({ ...job, crew, ...crewLegacyFields(crew) }))
     .catch(err => console.warn('writeHoursToJob', err));
 }
 

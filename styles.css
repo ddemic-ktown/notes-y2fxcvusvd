@@ -8,6 +8,10 @@
   --accent: #2563eb;
   --accent-ink: #ffffff;
   --danger: #b91c1c;
+  /* Calendar job outlines: green = a job, red = a day off. Own tokens so dark
+     mode can lift them without touching --danger, which is a button colour. */
+  --job-ok: #16a34a;
+  --job-off: #dc2626;
   --radius: 10px;
   --shadow: 0 1px 3px rgba(0,0,0,0.07);
 }
@@ -19,6 +23,9 @@ body.dark-mode {
   --ink-soft: #9ca3af;
   --line: #374151;
   --shadow: 0 1px 3px rgba(0,0,0,0.4);
+  /* Both lifted for contrast against the dark surface. */
+  --job-ok: #34d399;
+  --job-off: #f87171;
 }
 
 body.dark-mode .note-card:active { background: #374151; }
@@ -83,6 +90,19 @@ html, body {
   overscroll-behavior-y: contain;
 }
 body { min-height: 100vh; }
+/* SAFETY NET against horizontal overflow. Nothing in the app is meant to be
+   wider than the screen — the price table and the hours chart scroll inside
+   their own `.price-scroll` containers, not the page. When something DID
+   overflow (see .sync-toast) the page grew wider than the viewport, and every
+   full-width background stopped at 100% while the content carried on, so
+   zooming out showed a bare strip down the right with controls stranded in it.
+   `clip` cuts that off without creating a scroll container, so `position:
+   sticky` headers keep working — `hidden` would break them. */
+html, body { overflow-x: clip; }
+/* Headers are flex rows of a title and some buttons. Without this the title
+   refuses to shrink below its content and pushes the buttons out instead. */
+.app-header, .home-header-top, .customers-header-top, .customers-header-bottom { min-width: 0; }
+.app-header h1, .home-header-top h1 { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Both of these screens are fixed to the visible viewport, so the page behind
    them must not scroll — otherwise the browser still moves it when the
    keyboard opens. */
@@ -723,6 +743,67 @@ select.iif-date-input { appearance: none; -webkit-appearance: none; padding-righ
 /* The line count is set inline per block (JS picks it from the size tier), so
    there is no fixed 1-line class any more. */
 
+/* ---- Calendar search results --------------------------------------------
+   These REPLACE the grid rather than floating over it: a phone has no room for
+   both, and the grid is not useful while you are reading a list of matches. */
+.cal-results { flex: 1; min-height: 0; overflow-y: auto; padding: 8px 12px 24px; }
+.cal-results-count { margin: 0 0 8px; font-size: 12px; color: var(--ink-soft); }
+.cal-result {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-left-width: 4px;
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin-bottom: 8px;
+  cursor: pointer;
+}
+.cal-result:active { background: var(--bg); }
+.cal-result.cal-working { border-left-color: var(--job-ok); }
+.cal-result.cal-nowork  { border-left-color: var(--job-off); }
+.cal-result.cal-nowork .cal-result-who { color: var(--job-off); }
+.cal-result p { margin: 0; }
+.cal-result-when { font-size: 11px; color: var(--ink-soft); }
+.cal-result-who { font-size: 15px; font-weight: 600; }
+.cal-result-addr { font-size: 12px; color: var(--ink-soft); }
+.cal-result-crew { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 4px; }
+.cal-result-note { font-size: 12px; color: var(--ink-soft); margin-top: 4px; }
+
+/* ---- Job crew editor ----------------------------------------------------
+   One row per LINE, not per employee: the same person can be added twice, so
+   nothing here can be keyed on the name. */
+.job-crew-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.job-crew-name { flex: 0 1 auto; min-width: 0; }
+.job-crew-row .job-emp-hours { width: 74px; flex: 0 0 auto; }
+.job-crew-bill { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--ink-soft); cursor: pointer; }
+.job-crew-del { background: none; border: none; color: var(--danger); cursor: pointer; font-size: 15px; padding: 4px 6px; margin-left: auto; }
+.job-crew-empty { color: var(--ink-soft); font-size: 13px; }
+.job-crew-add { display: flex; align-items: center; gap: 8px; margin: 6px 0 4px; }
+.job-crew-add button { min-width: 44px; font-size: 18px; line-height: 1; padding: 6px 10px; }
+.job-crew-add select { flex: 1; min-width: 0; }
+/* Hours chart: the spare column marks rows that aren't chargeable. */
+.iif-flag { text-align: center; }
+.iif-nb {
+  font-size: 10px; font-weight: 700; letter-spacing: 0.02em;
+  padding: 1px 5px; border-radius: 999px;
+  background: var(--ink-soft); color: var(--surface);
+}
+
+/* ---- No-work entries ----------------------------------------------------
+   Every calendar job now carries an outline: green for a job, red for a day
+   off. The day block's LEFT border is the crew colour bar's neighbour, so the
+   outline colour is set on all four sides and the bar keeps its own job. */
+.cal-block.cal-working { border-color: var(--job-ok); }
+.cal-block.cal-nowork  { border-color: var(--job-off); }
+.cal-untimed-job.cal-working { border: 1px solid var(--job-ok); border-radius: 6px; padding: 3px 6px; }
+.cal-untimed-job.cal-nowork  { border: 1px solid var(--job-off); border-radius: 6px; padding: 3px 6px; }
+/* Grid entries already have a left rule grouping their two lines — colour it
+   rather than adding a second box inside a cell that is only so wide. */
+.cal-job-stacked.cal-working { border-left-color: var(--job-ok); }
+.cal-job-stacked.cal-nowork  { border-left-color: var(--job-off); }
+.cal-job-stacked.cal-nowork .cal-job-who { color: var(--job-off); }
+/* Phone grid: no room for a rule, so the label itself carries the colour. */
+.cal-nowork-text .cal-job-who { color: var(--job-off); font-weight: 600; }
+
 /* ---- Day block size tiers ----------------------------------------------
    A block with room to spare gets bigger type AND looser line caps. The caps
    are the real win: at the base size the name and address are one ellipsised
@@ -1202,18 +1283,39 @@ body.show-app-back .app-back-btn[hidden] { display: none !important; }
 .editor-header .crumbs { flex: 1; }
 .editor-header .crumb-current { font-size: 15px; }
 .app-version { font-size: 12px; color: var(--ink-soft); }
-/* Sync indicator: quiet by default, only speaks when something is pending */
-.sync-status {
-  font-size: 11px;
+/* Sync toast: quiet by default, only speaks when something is pending. It was
+   a pill in the home header until v2026.09.18-1006, where its `nowrap` sentence
+   and `flex-shrink: 0` grew the header row past the screen — the settings
+   button ended up outside the header's own background, unreadable, and the
+   overflow showed as a pale strip when you zoomed out. Fixed to the bottom of
+   the VIEWPORT, it cannot affect any layout.
+   Left of centre-right of the FAB, and lifted by the same keyboard inset the
+   FAB uses so it is never buried under the keyboard. */
+.sync-toast {
+  position: fixed;
+  left: 16px;
+  right: 92px;                 /* clear of the 60px FAB and its 20px margin */
+  bottom: calc(24px + var(--kb-inset, 0px) + env(safe-area-inset-bottom, 0));
+  z-index: 19;                 /* under the FAB, over the page */
+  margin: 0 auto;
+  width: fit-content;
+  max-width: 100%;
+  font-size: 12px;
   font-weight: 600;
-  padding: 3px 8px;
+  padding: 8px 14px;
   border-radius: 999px;
-  white-space: nowrap;
-  flex-shrink: 0;
+  box-shadow: 0 6px 16px rgba(0,0,0,0.2);
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink);
+  pointer-events: none;        /* never swallow a tap meant for the page */
 }
-.sync-status.sync-saving { background: rgba(37, 99, 235, 0.12); color: var(--accent); }
-.sync-status.sync-offline { background: rgba(245, 158, 11, 0.18); color: #92400e; }
-body.dark-mode .sync-status.sync-offline { color: #fbbf24; }
+.sync-toast.sync-saving { background: rgba(37, 99, 235, 0.12); color: var(--accent); border-color: rgba(37, 99, 235, 0.3); }
+.sync-toast.sync-offline { background: #fde68a; color: #92400e; border-color: #f59e0b; }
+body.dark-mode .sync-toast.sync-offline { background: #78350f; color: #fde68a; border-color: #b45309; }
+/* Magnified along with the page like every other fixed control, so it hides
+   while pinch-zoomed for the same reason the FAB does. */
+body.vv-zoomed .sync-toast { display: none !important; }
 .update-btn { font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--accent); background: var(--accent); color: #fff; cursor: pointer; flex-shrink: 0; }
 .update-btn:active { opacity: 0.8; }
 .home-header { flex-direction: column; align-items: stretch; gap: 8px; }

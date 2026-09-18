@@ -408,13 +408,19 @@ export function generateIIF(entries, employeeTypeMap = {}, companyName = 'Compan
   const lines = [
     `!TIMERHDR\tVER\tREV\tCOMPANYNAME`,
     `TIMERHDR\t8\t0\t${companyName}`,
-    `!TIMEACT\tDATE\tJOB\tEMP\tITEM\tDURATION\tNOTE`,
+    // BILLINGSTATUS added v2026.09.18-0912: 0 = not billable, 1 = billable.
+    // Without the column QuickBooks treats every row as chargeable, so
+    // non-billable time would turn up when you invoice the customer. The ITEM
+    // is deliberately the SAME for both — the hours are paid either way, only
+    // the billing flag differs.
+    `!TIMEACT\tDATE\tJOB\tEMP\tITEM\tDURATION\tBILLINGSTATUS\tNOTE`,
   ];
   for (const e of entries) {
     if (!e.employees.length || !e.hours || !e.customerMatched) continue;
+    const billing = e.billable === false ? 0 : 1;
     for (const emp of e.employees) {
       const item = employeeTypeMap[emp.toLowerCase()] === 'apprentice' ? ITEM_APPRENTICE : ITEM_JOURNEYMAN;
-      lines.push(`TIMEACT\t${e.dateFormatted}\t${e.customerMatched}\t${emp}\t${item}\t${e.hoursFormatted}\t`);
+      lines.push(`TIMEACT\t${e.dateFormatted}\t${e.customerMatched}\t${emp}\t${item}\t${e.hoursFormatted}\t${billing}\t`);
     }
   }
   return lines.join('\n');

@@ -1032,11 +1032,27 @@ export const Storage = {
       // only when a number was entered. A plan, not a timelog: this is what you
       // jotted on the job, separate from the hours note records.
       employeeHours: (job.employeeHours && typeof job.employeeHours === 'object') ? job.employeeHours : {},
+      // crew is the SOURCE OF TRUTH from v2026.09.18-0912 on: one entry per
+      // line added in the job editor, so the same person can appear twice —
+      // once billable, once not. employeeNames/employeeHours above are DERIVED
+      // from it by the caller and kept because the calendar chips, the employee
+      // rename sweep, the read rules' employeeUids and the employee-role filter
+      // all still read them. A job written by an older build has no crew field;
+      // normaliseCrew() below builds one on read.
+      crew: Array.isArray(job.crew) ? job.crew.map(c => ({
+        name: String(c.name || ''),
+        hours: Number.isFinite(Number(c.hours)) && Number(c.hours) > 0 ? Number(c.hours) : null,
+        billable: c.billable !== false,
+      })).filter(c => c.name) : [],
       employeeUids: this.employeeUidsFor(job.employeeNames),
       customerUids: this.customerUidsFor(job.customerId),
       customerId: job.customerId || null,
       customerName: job.customerName || '',
       address: job.address || '',
+      // A day off rather than a job. It still occupies the calendar (and can
+      // have times, so it draws as a block), but it has no customer and never
+      // reaches the hours chart or the QuickBooks export.
+      noWork: !!job.noWork,
       created: existing ? existing.created : now,
       updated: now,
     };
@@ -1096,15 +1112,22 @@ export const Storage = {
         const j = d.data() || {};
         const names = Array.isArray(j.employeeNames) ? j.employeeNames : [];
         const hrs = (j.employeeHours && typeof j.employeeHours === 'object') ? j.employeeHours : {};
-        if (!names.includes(from) && !(from in hrs)) continue;
+        const jCrew = Array.isArray(j.crew) ? j.crew : [];
+        if (!names.includes(from) && !(from in hrs) && !jCrew.some(c => c && c.name === from)) continue;
         const nextNames = names.map(n => (n === from ? to : n));
         const nextHours = {};
         for (const [k, v] of Object.entries(hrs)) nextHours[k === from ? to : k] = v;
-        await tracked(setDoc(doc(jobsCol(), d.id),
-          { employeeNames: nextNames, employeeHours: nextHours }, { merge: true }))
+        // crew carries the name too, and it is the field everything reads
+        // first — missing it here would leave the old spelling on the job even
+        // though the derived fields looked renamed.
+        const crew = Array.isArray(j.crew) ? j.crew : [];
+        const nextCrew = crew.map(c => (c && c.name === from ? { ...c, name: to } : c));
+        const patch = { employeeNames: nextNames, employeeHours: nextHours };
+        if (crew.length) patch.crew = nextCrew;
+        await tracked(setDoc(doc(jobsCol(), d.id), patch, { merge: true }))
           .catch(err => console.warn('renameEmployee.job', err));
         const i = _cache.jobs.findIndex(x => x.id === d.id);
-        if (i !== -1) _cache.jobs[i] = { ..._cache.jobs[i], employeeNames: nextNames, employeeHours: nextHours };
+        if (i !== -1) _cache.jobs[i] = { ..._cache.jobs[i], ...patch };
         jobs++;
       }
     } catch (err) {
