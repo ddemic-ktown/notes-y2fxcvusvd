@@ -12,6 +12,8 @@
      mode can lift them without touching --danger, which is a button colour. */
   --job-ok: #16a34a;
   --job-off: #dc2626;
+  /* Every button that COMMITS — Save, Invite, Import, Sign in, Download. */
+  --go: #15803d;
   --radius: 10px;
   --shadow: 0 1px 3px rgba(0,0,0,0.07);
 }
@@ -26,6 +28,7 @@ body.dark-mode {
   /* Both lifted for contrast against the dark surface. */
   --job-ok: #34d399;
   --job-off: #f87171;
+  --go: #16a34a;
 }
 
 body.dark-mode .note-card:active { background: #374151; }
@@ -62,10 +65,15 @@ body.dark-mode .note-card.keyword-card { background: #0f2a1e; border-color: #065
   cursor: pointer;
 }
 .secondary:hover { border-color: var(--accent); color: var(--accent); }
+/* GREEN, not accent blue (v2026.09.18-2305). The editor's floating Save was
+   already green and everything else was blue, so "the button that commits what
+   I just did" had two colours depending on where you were. Green everywhere;
+   blue stays the app's accent for state and selection, which is a different
+   job. --go is its own token so dark mode can lift it. */
 .primary {
-  background: var(--accent);
-  color: var(--accent-ink);
-  border: 1px solid var(--accent);
+  background: var(--go);
+  color: #fff;
+  border: 1px solid var(--go);
   border-radius: var(--radius);
   padding: 10px 14px;
   font: inherit;
@@ -750,6 +758,27 @@ select.iif-date-input { appearance: none; -webkit-appearance: none; padding-righ
 .price-view-picking .price-vendor { cursor: pointer; }
 #price-filter-btn.active { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
 
+/* "Create …" at the end of a customer search. Deliberately NOT a result: a
+   dashed outline and the accent colour say this makes something new rather
+   than opening something that exists. */
+.customer-create-row {
+  display: flex; align-items: center; gap: 10px;
+  border: 1px dashed var(--accent);
+  border-radius: 8px;
+  color: var(--accent);
+  background: transparent;
+  cursor: pointer;
+  margin-top: 6px;
+}
+.customer-create-row .member-email { color: var(--accent); font-weight: 600; }
+.customer-create-plus {
+  flex: 0 0 auto; width: 22px; height: 22px; border-radius: 50%;
+  background: var(--accent); color: var(--accent-ink);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 16px; line-height: 1; font-weight: 700;
+}
+.customer-create-row:active { background: var(--bg); }
+
 /* Name prompt — deliberately narrow: it holds one field, and a full-width
    panel makes a one-line question look like a form. */
 .name-modal-panel { max-width: 420px; }
@@ -800,6 +829,9 @@ select.iif-date-input { appearance: none; -webkit-appearance: none; padding-righ
 .job-crew-empty { color: var(--ink-soft); font-size: 13px; }
 .job-crew-add { margin: 6px 0 4px; }
 /* Hours chart: the spare column marks rows that aren't chargeable. */
+/* Address beside the customer — softer and smaller, so the NAME still reads
+   first and the address is there when two rows look alike. */
+.iif-addr { color: var(--ink-soft); font-size: 0.85em; font-weight: 400; }
 .iif-flag { text-align: center; }
 .iif-nb {
   font-size: 10px; font-weight: 700; letter-spacing: 0.02em;
@@ -985,16 +1017,23 @@ select.iif-date-input { appearance: none; -webkit-appearance: none; padding-righ
 /* The NAME is clamped, not the cell. The cell also holds the filter/layout
    checkboxes and the reorder arrows, and -webkit-box on a <th> breaks table
    layout — so the name gets its own span and the clamp lives there. Two lines,
-   then an ellipsis; `anywhere` so a long unbroken part number breaks instead of
-   forcing the column wider. */
-.price-table .price-item { white-space: normal; }
+   then an ellipsis.
+   `break-word`, NOT `anywhere`: `anywhere` counts toward the column's
+   MIN-CONTENT width, so the table decided one character was a legal column
+   width and collapsed the names to two lines of three letters. `break-word`
+   still breaks a long unbroken part number but leaves the minimum alone. The
+   min-width is the floor either way. */
+.price-table .price-item {
+  white-space: normal;
+  min-width: calc(120px * var(--price-scale));
+}
 .price-item-name {
   display: -webkit-box;
   -webkit-line-clamp: 2;
   line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
 }
 /* The corner is sticky in BOTH directions, so it must sit above both */
 .price-table .price-corner { z-index: 4; }
@@ -2559,9 +2598,12 @@ input[type="search"]::-webkit-search-cancel-button {
 /* Pinch-zoomed: every floating control is hidden. The browser magnifies a
    `position: fixed` element along with the page, so a 60px + becomes a slab
    over whatever you zoomed in to read. Set from JS (visualViewport.scale). */
+/* Set from JS on a pinch zoom OR while the keyboard is up. `.editor-new-actions`
+   is the exception: Cancel/Save for a record you are creating RIGHT NOW, which
+   is exactly what you need while typing — so it hides on zoom only. */
 body.vv-zoomed .fab,
-body.vv-zoomed .fab-menu,
-body.vv-zoomed .editor-new-actions { display: none !important; }
+body.vv-zoomed .fab-menu { display: none !important; }
+body.vv-zoomed-pinch .editor-new-actions { display: none !important; }
 .fab {
   position: fixed;
   right: 20px;
@@ -2882,7 +2924,7 @@ body.vv-zoomed .editor-new-actions { display: none !important; }
   min-height: 44px;
 }
 .new-action-cancel { background: var(--surface); color: var(--ink); border: 1px solid var(--line); }
-.new-action-save { background: #15803d; color: #fff; }
+.new-action-save { background: var(--go); color: #fff; }
 
 /* Round icon button. Was the editor's ✕ discard until v2026.08.27, which is
    now a labelled Cancel at the bottom beside Save. */

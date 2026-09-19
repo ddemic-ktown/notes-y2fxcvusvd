@@ -20,6 +20,12 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 100, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.09.19-0004', 'Searching for a customer now offers “Create …” at the bottom of the results, so a new customer is one tap without leaving what you were doing'],
+  ['v2026.09.18-2338', 'Opening the app on a slow connection now says “Signing you in” with a spinner instead of showing the sign-in screen as if you had been logged out'],
+  ['v2026.09.18-2307', 'The hours chart shows each job’s address beside the customer, so two visits to the same customer are easy to tell apart'],
+  ['v2026.09.18-2305', 'Save and the other buttons that commit something are green everywhere now, and Save always sits before Cancel'],
+  ['v2026.09.18-2259', 'The floating + no longer swells into a blue slab over the bottom of the screen when you zoom in or the keyboard opens'],
+  ['v2026.09.18-2235', 'Fixed the price table item column collapsing to a few letters wide after names started wrapping'],
   ['v2026.09.18-2159', 'The calendar swipe animation is a touch quicker'],
   ['v2026.09.18-2157', 'Swiping between days, weeks and months now slides the new view in from the side instead of fading it'],
   ['v2026.09.18-2145', 'The tour is one continuous walkthrough now — start it from any screen’s ⋯ menu and you can go forward or back through the whole thing, skipping the parts your role doesn’t use'],
@@ -132,7 +138,10 @@ const bootView = document.getElementById('boot-view');
 // whether we are still waiting for it, so a not-resolved-yet auth state stops
 // being mistaken for a signed-out one. Used by onAuthStateChanged below.
 const SESSION_FLAG = 'jp-had-session';
-const RESTORE_GRACE_MS = 6000;
+// 12s, up from 6 (v2026.09.18-2338). A cold start on iOS with a slow network
+// was outrunning the old window, and the fall-through is the sign-in form —
+// which looks like the session was lost when it was only slow.
+const RESTORE_GRACE_MS = 12000;
 let firstAuthEmission = true;
 let restoreTimer = null;
 function hadSession() { try { return localStorage.getItem(SESSION_FLAG) === '1'; } catch (e) { return false; } }
@@ -2180,6 +2189,26 @@ function liftCustomerField() {
   }
 }
 
+// ---------- create a customer from a search box ----------
+// A customer's NAME is the title (first line) of its default note, so creating
+// one "called X" is create + write the title. Used by the Create rows at the
+// bottom of both customer search lists.
+function createCustomerNamed(name) {
+  const { customer, defaultNote } = Storage.createCustomer();
+  const clean = (name || '').trim();
+  if (clean) Storage.updateNote(defaultNote.id, clean);
+  return { customer, defaultNote };
+}
+// The row itself, so both lists offer the same thing in the same words.
+function createCustomerRowHtml(query) {
+  const q = (query || '').trim();
+  if (!q || !isAdminRole()) return '';
+  return `<li class="member-item customer-create-row" data-create-customer="${escapeHtml(q)}">
+    <span class="customer-create-plus">+</span>
+    <span class="member-email">Create “${escapeHtml(q)}”</span>
+  </li>`;
+}
+
 function renderJobCustomer(filter) {
   const ul = document.getElementById('job-customer-list');
   const chosen = document.getElementById('job-customer-chosen');
@@ -2221,7 +2250,10 @@ function renderJobCustomer(filter) {
           addr ? `<em class="setting-check-hint">${escapeHtml(addr)}</em>` : ''
         }</span>
       </li>`;
-    }).join('');
+    }).join('')
+    // Always LAST, and only while something is typed — not just when nothing
+    // matched. You often know the customer is new before the list agrees.
+    + createCustomerRowHtml(words.length ? (filter || '') : '');
   // The list always sits below the field; what makes it usable is that the
   // field gets lifted to the top of the panel on focus (see liftCustomerField),
   // so everything below it is free space. All that's left here is to stop the
@@ -2238,6 +2270,20 @@ function renderJobCustomer(filter) {
   } else {
     delete ul.dataset.lifted;
   }
+  ul.querySelectorAll('[data-create-customer]').forEach(li => {
+    li.addEventListener('click', () => {
+      const name = li.dataset.createCustomer;
+      const { customer } = createCustomerNamed(name);
+      // Select it on the job straight away — leaving the modal to go and make a
+      // customer is the interruption this row exists to avoid.
+      jobChosenCustomer = { id: customer.id, name };
+      const input = document.getElementById('job-customer-search');
+      if (input) input.value = '';
+      renderJobCustomer('');
+      const wrap = document.getElementById('job-address-wrap');
+      if (wrap) wrap.hidden = false;
+    });
+  });
   ul.querySelectorAll('.job-customer-item').forEach(li => {
     li.addEventListener('click', () => {
       jobChosenCustomer = { id: li.dataset.id, name: customerCrumbLabel(li.dataset.id) };
@@ -3261,8 +3307,40 @@ function updateAppVh() {
   // + grew into a blue slab across the bottom of the grid. Counter-scaling was
   // rejected — a fixed element also drifts as you pan, so it would end up the
   // right size in the wrong place. Zoomed in, you are reading, not adding.
-  document.body.classList.toggle('vv-zoomed', !!vv && vv.scale > 1.05);
+  // Threshold lowered from 1.05 to 1.01 (v2026.09.18-2259): a gentle pinch or a
+  // double-tap zoom lands just under 1.05 on some browsers, and at 1.04 the +
+  // is already a noticeably bigger blue disc.
+  //
+  // The KEYBOARD hides it too. It is bottom-anchored and lifted by --kb-inset,
+  // which puts it right where the keyboard's top edge is — and a keyboard that
+  // opens at the same moment as a zoom was the case the scale check alone kept
+  // missing. Nothing is lost: the + adds a new record, which is not what you
+  // are doing while typing in an existing one.
+  const zoomed = !!vv && vv.scale > 1.01;
+  document.body.classList.toggle('vv-zoomed', zoomed || keyboardIsUp());
+  // Two classes, because they hide different things: Cancel/Save on a new
+  // record must survive the keyboard (you are typing into that record), but
+  // not a zoom.
+  document.body.classList.toggle('vv-zoomed-pinch', zoomed);
 }
+// A pinch reports its scale through `scroll`/`resize` only as the gesture
+// settles, and some browsers coalesce those — so the class could lag a whole
+// gesture behind, which is exactly when the slab was visible. While a touch is
+// in progress, poll instead of waiting to be told.
+let vvPollTimer = null;
+function startViewportPoll() {
+  if (vvPollTimer) return;
+  vvPollTimer = setInterval(updateAppVh, 100);
+}
+function stopViewportPoll() {
+  if (!vvPollTimer) return;
+  clearInterval(vvPollTimer);
+  vvPollTimer = null;
+  updateAppVh();            // one last reading once the gesture has settled
+}
+document.addEventListener('touchstart', startViewportPoll, { passive: true });
+document.addEventListener('touchend', () => setTimeout(stopViewportPoll, 400), { passive: true });
+document.addEventListener('touchcancel', () => setTimeout(stopViewportPoll, 400), { passive: true });
 updateAppVh();
 window.addEventListener('resize', updateAppVh);
 window.addEventListener('orientationchange', updateAppVh);
@@ -5070,8 +5148,17 @@ function renderCustomersList() {
     customersList.innerHTML = '<p class="empty-state">No customers yet. Tap <strong>+</strong> to add one.</p>';
     return;
   }
+  // The Create row is a <ul> row elsewhere; here the list is <article> cards,
+  // so it gets the same look through the shared class on a plain element.
+  const createRow = (isAdminRole() && customerSearchTerm.trim())
+    ? `<div class="member-item customer-create-row" data-create-customer="${escapeHtml(customerSearchTerm.trim())}">
+        <span class="customer-create-plus">+</span>
+        <span class="member-email">Create “${escapeHtml(customerSearchTerm.trim())}”</span>
+      </div>`
+    : '';
   if (customers.length === 0) {
-    customersList.innerHTML = '<p class="empty-state">No customers match “' + escapeHtml(customerSearchTerm) + '”.</p>';
+    customersList.innerHTML = '<p class="empty-state">No customers match “' + escapeHtml(customerSearchTerm) + '”.</p>' + createRow;
+    wireCustomerCreateRows();
     return;
   }
   customersList.innerHTML = customers.map(c => {
@@ -5091,10 +5178,31 @@ function renderCustomersList() {
         ${safePreview ? `<p class="note-preview">${safePreview}</p>` : ''}
       </article>
     `;
-  }).join('');
+  }).join('') + createRow;
 
   customersList.querySelectorAll('.note-card').forEach(card => {
     card.addEventListener('click', () => showCustomerNotes(card.dataset.id));
+  });
+  wireCustomerCreateRows();
+}
+
+// Customers list only. Creates the customer and drops you into its first note
+// with the name already typed, which is the same place the + does.
+function wireCustomerCreateRows() {
+  if (!customersList) return;
+  customersList.querySelectorAll('[data-create-customer]').forEach(el => {
+    el.addEventListener('click', () => {
+      const name = el.dataset.createCustomer;
+      const { customer, defaultNote } = createCustomerNamed(name);
+      customerSearchTerm = '';
+      if (customerSearchInput) customerSearchInput.value = '';
+      refreshSearchClears();
+      activeCustomerId = customer.id;
+      returnScreen = 'customer-notes';
+      showEditor(Storage.getNote(defaultNote.id) || defaultNote, 'note');
+      pendingNewRecord = { kind: 'customer', id: customer.id, noteId: defaultNote.id, origin: 'customers' };
+      updateCancelBtn();
+    });
   });
 }
 
@@ -7788,11 +7896,18 @@ onAuthStateChanged(auth, async (user) => {
     const linkinUp = !!(linkinCard && !linkinCard.hidden);
     if (firstAuthEmission && hadSession() && !linkinUp) {
       firstAuthEmission = false;
+      // The LOADING CARD, not the bare boot splash: it says what is happening
+      // and spins while it does. showLoadingCard only paints when the sign-in
+      // screen is active, so activate it first — this is the one case where we
+      // WANT to be on that screen without the form.
       showBoot();
+      signinView.classList.add('active');
+      showLoadingCard(true);
       if (restoreTimer) clearTimeout(restoreTimer);
       restoreTimer = setTimeout(() => {
         restoreTimer = null;
         clearSessionFlag();   // the session really is gone — don't stall again
+        showLoadingCard(false);
         showSignin();
       }, RESTORE_GRACE_MS);
       return;
@@ -8402,7 +8517,11 @@ function jobEntriesInRange(range) {
         // you can see at a glance which jobs you still owe hours for.
         hoursFormatted: hours > 0 ? formatDuration(hours) : '',
         customer: cust,
+        // customerMatched is the QuickBooks JOB field and the key timelogs are
+        // matched on — it must stay exactly the customer label. The address is
+        // its own field, for DISPLAY only.
         customerMatched: cust,
+        address: (j.address || '').trim(),
         // No parser means nothing to be unsure about — no score, no orange rows.
         confidence: null,
         raw: j.description || '',
@@ -8566,7 +8685,12 @@ function iifCellHtml(row, col) {
         ? `<td><span class="cal-chip iif-emp-chip" style="${chipStyle(v.emp)}">${escapeHtml(v.emp)}</span></td>`
         : `<td><span class="cal-chip cal-chip-none iif-emp-chip">Nobody</span></td>`;
     }
-    if (col === 'customer') return `<td>${escapeHtml(v.cust || '—')}</td>`;
+    if (col === 'customer') {
+      // Two jobs for the same customer on one day are otherwise identical rows.
+      const addr = row.e.address;
+      return `<td>${escapeHtml(v.cust || '—')}${
+        addr ? ` <span class="iif-addr">(${escapeHtml(addr)})</span>` : ''}</td>`;
+    }
     if (col === 'hours') return `<td class="iif-hours-col">${escapeHtml(v.hoursText || '—')}</td>`;
     // The spare column now carries the billing flag. Only non-billable rows are
     // marked: billable is the normal case, and a badge on every row would be

@@ -56,7 +56,7 @@
       <h1>JobPilot</h1>
       <p class="signin-message" role="status">
         <span class="nav-spinner" style="width:18px;height:18px;border-width:3px;vertical-align:-3px;"></span>
-        Signing you in…
+        Signing you in — please wait…
       </p>
     </div>
     <div id="signin-card" class="signin-card">
@@ -335,7 +335,7 @@
         <div id="job-address-choices" class="job-address-choices" hidden></div>
       </div>
       <div class="setting-btn-col">
-        <button id="job-save" class="primary setting-wide-btn" type="button">Save job</button>
+        <button id="job-save" class="primary setting-wide-btn" type="button">Save</button>
         <button id="job-duplicate" class="secondary setting-wide-btn" type="button" hidden>Duplicate to next day</button>
         <button id="job-delete" class="secondary setting-wide-btn danger-item" type="button" hidden>Delete job</button>
       </div>
@@ -824,8 +824,11 @@
          the thumb is; Cancel used to be a ✕ up in the breadcrumb row, and a
          wide "Cancel" is what crowded that row before it became an icon. -->
     <div id="editor-new-actions" class="editor-new-actions" hidden>
-      <button id="editor-cancel-btn" class="new-action-btn new-action-cancel" type="button">Cancel</button>
+      <!-- Save FIRST, like every modal in the app. It used to sit on the right
+           of Cancel, which was the only place in JobPilot where the two ran in
+           that order. -->
       <button id="editor-done-btn" class="new-action-btn new-action-save" type="button">Save</button>
+      <button id="editor-cancel-btn" class="new-action-btn new-action-cancel" type="button">Cancel</button>
     </div>
   </section>
 
@@ -873,7 +876,7 @@
       </div>
       <p class="muted" style="font-size:13px; margin:0 0 12px;">Select who can see this note. Admins always have access.</p>
       <ul id="assign-members-list" class="members-list"></ul>
-      <button id="assign-save-btn" class="primary" style="margin-top:14px; width:100%; padding:10px; border:none; border-radius:var(--radius); font-weight:600; font-size:15px; cursor:pointer; background:var(--accent); color:var(--accent-ink);">Save</button>
+      <button id="assign-save-btn" class="primary setting-wide-btn" type="button" style="margin-top:14px;">Save</button>
     </div>
   </div>
 
