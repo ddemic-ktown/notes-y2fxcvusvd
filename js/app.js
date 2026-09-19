@@ -20,6 +20,12 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 100, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.09.18-2157', 'Swiping between days, weeks and months now slides the new view in from the side instead of fading it'],
+  ['v2026.09.18-2145', 'The tour is one continuous walkthrough now — start it from any screen’s ⋯ menu and you can go forward or back through the whole thing, skipping the parts your role doesn’t use'],
+  ['v2026.09.18-2129', 'The calendar tour is split in two — the calendar itself, then jobs — and runs straight from one into the other'],
+  ['v2026.09.18-2124', 'The tour now covers billable and non-billable hours, No work days, duplicating a job, week view, calendar search, the price table filter and the new Features settings'],
+  ['v2026.09.18-2050', 'A long item name in the price table wraps onto a second line instead of being cut off'],
+  ['v2026.09.18-2025', 'The calendar and share-customer search boxes now have their ✕ to clear them, like every other search box'],
   ['v2026.09.18-1709', 'Starting or applying the price table filter clears the search box, so what you ticked is what you see'],
   ['v2026.09.18-1626', 'Price table: tick the rows and columns you want and filter to just those — it stays that way until you turn it off; Sort and Layout moved into the ⋯ menu'],
   ['v2026.09.18-1554', 'Confirmations and messages now look like the rest of the app instead of a browser box with the website address printed above them'],
@@ -610,7 +616,9 @@ function applyFeatureVisibility() {
   // Employees and customer accounts are NOT part of either — the calendar
   // schedules against that list, so it has to survive.
   const hoursOn = isFeatureOn('hours');
-  ['hours-export-block', 'qb-items-block', 'tutorial-btn-7', 'editor-help-hours']
+  // tutorial-btn-8 is the HOURS tour — it was btn-7 until the tutorial parts
+  // were renumbered in v2026.09.18-2129 and 7 became Jobs.
+  ['hours-export-block', 'qb-items-block', 'tutorial-btn-8', 'editor-help-hours']
     .forEach(id => { const el = document.getElementById(id); if (el) el.hidden = !hoursOn; });
   // With the export gone, the card is no longer about QuickBooks at all.
   const tlTitle = document.getElementById('timelogger-card-title');
@@ -2728,7 +2736,7 @@ function renderPriceTable() {
         reorder ? `<input type="checkbox" class="price-pick" data-pick-item="${item.id}" ${priceSelItems.has(item.id) ? 'checked' : ''} aria-label="Select ${escapeHtml(item.name)}" />` : ''
       }${
         picking ? `<input type="checkbox" class="price-pick price-keep" data-keep-item="${item.id}" ${pricePickItems.has(item.id) ? 'checked' : ''} aria-label="Keep ${escapeHtml(item.name)}" />` : ''
-      }${escapeHtml(item.name)}${
+      }<span class="price-item-name">${escapeHtml(item.name)}</span>${
         reorder ? `<span class="reorder-arrows"><button type="button" class="i-up" data-item="${item.id}" ${i === 0 ? 'disabled' : ''}>↑</button><button type="button" class="i-down" data-item="${item.id}" ${i === items.length - 1 ? 'disabled' : ''}>↓</button></span>` : ''
       }</th>
       ${(() => { const best = cheapestVendorId(item, vendors); return vendors.map(v => priceCellHtml(item, v, canEdit, v.id === best)).join(''); })()}
@@ -6754,7 +6762,7 @@ if (installHintClose) {
   });
 }
 // ---------- always-visible ✕ clear buttons on search fields ----------
-const SEARCH_CLEAR_IDS = ['home-search-input', 'customer-search', 'customer-notes-search', 'note-search-input', 'assign-customer-search', 'price-search', 'job-customer-search'];
+const SEARCH_CLEAR_IDS = ['home-search-input', 'customer-search', 'customer-notes-search', 'note-search-input', 'assign-customer-search', 'price-search', 'job-customer-search', 'cal-search', 'share-customer-search'];
 
 // Empty every search field and its backing term (used by the tutorial: a
 // filtered list hides the cards its steps point at).
@@ -9291,14 +9299,34 @@ let tutorialPaused = false;
 let tutorialStepIndex = 0;
 let tutorialPart = 1;
 let tutorialStartPart = 1; // the part the user launched — back never goes before it
-// The LINEAR tour is 1→5, ending on "Install on your phone". Parts 6 (Calendar)
-// and 7 (Hours) sit outside it: one screen each, not daily reading for every
-// role, and reached from that screen's own ⋯ menu. They always end on
-// themselves, which is what tutorialSolo does.
-const TUTORIAL_PARTS = 5;
-// Parts outside the linear 1→5 chain: one subject each, not daily reading for
-// every role, so each ends on itself rather than rolling into the next.
-const SOLO_PARTS = [6, 7, 8];
+// ONE CHAIN, 1→9 (v2026.09.18-2145). Parts 4 and 6–9 used to be "solo": they
+// ended on themselves because they are role-specific and not everyone needs
+// them. That made the ⋯ entries and the Settings buttons the only way to reach
+// them, and left the tour feeling like nine leaflets rather than one manual.
+// Now a launch point only decides where you COME IN; Next and Back roam the
+// whole tour from there.
+const TUTORIAL_PARTS = 9;
+// Which parts a role can actually reach. A part whose screen this person never
+// sees is SKIPPED rather than shown as empty bubbles — the price table, the
+// calendar, hours and the admin screen are each gated, and walking an employee
+// through the QuickBooks export helps nobody.
+function tutorialPartApplies(part) {
+  const role = Storage.getRole();
+  if (part === 4) return Storage.canViewPriceTable();
+  if (part === 6 || part === 7) return role !== 'customer';
+  if (part === 8) return isAdminRole() || isBookkeeperRole();
+  if (part === 9) return isAdminRole();
+  return true;
+}
+// The next/previous part this person can actually use, or null at the ends.
+function tutorialStepPart(part, dir) {
+  for (let p = part + dir; p >= 1 && p <= TUTORIAL_PARTS; p += dir) {
+    if (tutorialPartApplies(p)) return p;
+  }
+  return null;
+}
+function tutorialHasNext(part) { return tutorialStepPart(part, 1) !== null; }
+function tutorialNextPart(part) { return tutorialStepPart(part, 1) || part; }
 let tutorialSolo = false;
 // The step the user launched from. Normally 0; a skip-home launch starts
 // later, and Back must not reverse into a step we just said doesn't apply.
@@ -9457,7 +9485,12 @@ function tutorialSteps(part) {
       screen: 'price',
       setup: () => { showPriceTable(); return true; },
       target: () => document.getElementById('price-more-btn'),
-      text: 'The ⋯ menu reorders rows and columns, exports the table to a spreadsheet, imports prices back in, and shares the table with an employee.',
+      text: 'The ⋯ menu holds the rest: sort by most recently priced, Layout to reorder rows and columns, Filter, export to a spreadsheet, import prices back in, and share the table with an employee.',
+    },
+    {
+      screen: 'price',
+      target: () => document.getElementById('price-more-btn'),
+      text: 'Filter is for when the table has grown past what you need today. Tick the rows and columns you want, press Filter, and only those stay — on this device, until you press Turn filter off. Your prices are untouched either way.',
     },
   ];
 
@@ -9541,10 +9574,15 @@ function tutorialSteps(part) {
       },
       {
         screen: 'calendar',
-        requires: canEditJobs,
-        setup: goMonth,
-        target: () => document.getElementById('cal-fab'),
-        text: 'Add a job with +. Only the date is required — customer, address, times and who’s going can all come later. Tapping an empty day starts one on that day.',
+        target: () => document.getElementById('cal-mode'),
+        text: 'Switch between a month and a single week. The button says where it GOES, not where you are. A week gives each day a full row, which is the readable one on a phone.',
+      },
+      {
+        // Admin/bookkeeper only — isTargetVisible skips it for anyone else,
+        // since the whole search row is hidden for them.
+        screen: 'calendar',
+        target: () => document.getElementById('cal-search'),
+        text: 'Search your jobs by customer, address, note, or who was on them. Tap a result to open that day. It looks through the months already loaded — browse back further and those come with it.',
       },
       {
         screen: 'calendar-day',
@@ -9574,10 +9612,33 @@ function tutorialSteps(part) {
         target: () => document.querySelector('#calendar-day-view .cal-block'),
         text: 'Press and hold a job to pick it up and drag it to a new time; drag the corner to change how long it runs. Both snap to quarter hours. A quick tap opens it for editing.',
       },
+    ];
+  }
+
+  // part 7 — JOBS. Split out of part 6 (v2026.09.18-2129): the calendar is
+  // where you look, a job is what you make, and one part covering both ran to
+  // fifteen bubbles. Part 6 rolls straight into this one (TUTORIAL_NEXT),
+  // because a job is the thing you opened the calendar to create.
+  if (part === 7) {
+    const canEditJobs = () => Storage.getRole() === 'admin';
+    // Same guard as part 6's: showCalendar pushes history, so only navigate
+    // when we are not already on the month view.
+    const goMonth = () => {
+      if (!calendarView.classList.contains('active')) showCalendar();
+      return true;
+    };
+    return [
+      {
+        screen: 'calendar',
+        requires: canEditJobs,
+        setup: goMonth,
+        target: () => document.getElementById('cal-fab'),
+        text: 'Add a job with +. Only the date is required — customer, address, times and who’s going can all come later. Tapping an empty day starts one on that day.',
+      },
       {
         // THE STEP THIS TOUR WAS MISSING. The Hours chart is built entirely
         // from these numbers, and until v2026.08.19-0033 the only mention of
-        // them was part 7's fallback — the step that DISAPPEARS as soon as you
+        // them was part 8's fallback — the step that DISAPPEARS as soon as you
         // have jobs, so anyone with a calendar never saw it.
         screen: 'calendar',
         group: 'jobhours',
@@ -9594,8 +9655,33 @@ function tutorialSteps(part) {
           await new Promise(r => setTimeout(r, 60));   // let the modal paint
           return true;
         },
+        target: () => document.getElementById('job-crew-add-btn'),
+        text: '“+ Add employee” puts someone on the job — one tap opens the list. Each person gets a line with their hours, and this is where the Hours chart gets its numbers: nothing reaches QuickBooks until they are filled in.',
+      },
+      {
+        // The crew is a LIST, so the same person can be on a job twice. This is
+        // the step that makes non-billable time discoverable — without it
+        // everything gets typed as billable and the Billable tick is never
+        // noticed. Same setup as the step above: the modal is already open.
+        screen: 'calendar',
+        group: 'jobhours',
+        requires: () => canEditJobs() && Storage.listJobs().length > 0,
         target: () => document.getElementById('job-employees'),
-        text: 'Tick who is going, and once the job is done type the hours each person worked beside their name. This box is where the Hours chart gets its numbers — nothing reaches QuickBooks until it is filled in.',
+        text: 'Untick Billable for hours you are paying but cannot charge — travel, a warranty callback, shop time. You can add the same person twice: six hours billable on one line, two not on the next. The note box says what the time was, and stays in JobPilot.',
+      },
+      {
+        screen: 'calendar',
+        group: 'jobhours',
+        requires: () => canEditJobs() && Storage.listJobs().length > 0,
+        target: () => document.getElementById('job-nowork'),
+        text: 'Tick No work to mark a day off instead of a job. It shows as No Work with a red outline — ordinary jobs get a green one — and it is left out of the hours chart and the QuickBooks file.',
+      },
+      {
+        screen: 'calendar',
+        group: 'jobhours',
+        requires: () => canEditJobs() && Storage.listJobs().length > 0,
+        target: () => document.getElementById('job-duplicate'),
+        text: 'Duplicate to next day copies everything on screen onto tomorrow. Nothing is written until you Save, so you can change the date or the crew first — handy for a job that runs several days.',
       },
       {
         screen: 'settings',
@@ -9607,9 +9693,9 @@ function tutorialSteps(part) {
     ];
   }
 
-  // part 7 — the hours chart. Also outside the chain, and admin/bookkeeper
-  // only in practice: the home card and Settings entry are already gated.
-  if (part === 7) {
+  // part 8 — the hours chart. Outside the chain, and admin/bookkeeper only in
+  // practice: the home card and Settings entry are already gated.
+  if (part === 8) {
     // Since v2026.08.18-2325 the chart reads CALENDAR JOBS, so the thing that
     // has to exist is a job in the range, not a note.
     const hasJobs = () => Storage.listJobs().length > 0;
@@ -9673,7 +9759,7 @@ function tutorialSteps(part) {
     ];
   }
 
-  // part 8 — administration. Solo, admin-only, and entirely on the Settings
+  // part 9 — administration. Solo, admin-only, and entirely on the Settings
   // screen. This was the whole missing category: the tour covered notes,
   // customers, prices, the calendar and hours, and said nothing about users,
   // roles, invites, trash, backup or sample data — which are most of what a new
@@ -9684,7 +9770,7 @@ function tutorialSteps(part) {
   // (the new-company block only exists for the founder). Letting that do the
   // work keeps the conditions in ONE place rather than duplicating each row's
   // visibility rule as a predicate that could drift out of step with it.
-  if (part === 8) {
+  if (part === 9) {
     // showSettings pushes history, so only call it when we aren't there —
     // otherwise the back button is buried under one entry per bubble.
     const goSettings = () => {
@@ -9708,7 +9794,9 @@ function tutorialSteps(part) {
       step(() => document.getElementById('org-name-input'),
         'Your company name, shown at the top of this Account section. Change it whenever you like.'),
       step(() => document.getElementById('employee-list'),
-        'Your crew. Apprentice or journeyman is not just a label — it picks which QuickBooks item their hours are billed against, so getting it wrong makes the import land in the wrong place.'),
+        'Your crew. Apprentice or journeyman is not just a label — it picks which QuickBooks item their hours are billed against, so getting it wrong makes the import land in the wrong place. Rename fixes a spelling everywhere at once, including on jobs from last year.'),
+      step(() => document.getElementById('feature-toggle-list'),
+        'Switch off what you do not use and it disappears from the app — nothing is deleted, and turning it back on puts everything where it was. This is your account only; it follows you to your other devices and changes nothing for anyone else. If part of the app has vanished, look here first.'),
       step(() => document.getElementById('customer-link-list'),
         'Link a customer to an app account and they can sign in to see the jobs you have booked for them — the date, the time and who is coming. Nothing else.'),
       step(row('seed-btn'),
@@ -9945,8 +10033,8 @@ function tutorialSkipStep(index) {
   // would land on the very step a skip-home launch left out.
   const floor = tutorialPart === tutorialStartPart ? tutorialFloorIndex : 0;
   if (next >= floor && next < steps.length) { runTutorialStep(next); return; }
-  if (tutorialDirection > 0 && !tutorialSolo && tutorialPart < TUTORIAL_PARTS) {
-    tutorialPart++;
+  if (tutorialDirection > 0 && !tutorialSolo && tutorialHasNext(tutorialPart)) {
+    tutorialPart = tutorialNextPart(tutorialPart);
     runTutorialStep(0);
     return;
   }
@@ -10015,21 +10103,23 @@ async function showTutorialBubble(target, text, index, stepCount) {
   // "1 of 5" rather than opening on "2 of 6" and looking like it lost one.
   if (tutorialProgress) {
     const floor = tutorialPart === tutorialStartPart ? tutorialFloorIndex : 0;
-    tutorialProgress.textContent = `Part ${tutorialPart} \u00b7 ${index + 1 - floor} of ${stepCount - floor}`;
+    tutorialProgress.textContent = `Part ${tutorialPart} of ${TUTORIAL_PARTS} \u00b7 ${index + 1 - floor} of ${stepCount - floor}`;
   }
   // Back is always visible, greyed when there's nothing before this step
   // (step 1 of the part the user launched).
   if (tutorialBack) {
     tutorialBack.hidden = false;
     tutorialBack.textContent = '\u2190';
-    tutorialBack.disabled = (index <= tutorialFloorIndex && tutorialPart === tutorialStartPart);
+    // Back roams the whole tour: it stops only at the very first step of the
+    // first part this person can see, not at the part they happened to enter on.
+    tutorialBack.disabled = (index <= 0 && tutorialStepPart(tutorialPart, -1) === null);
   }
   // Last bubble of parts 1 and 2 chains into the next part \u2014 unless this is a
   // solo run, which ends on its own part.
   if (tutorialNext) {
     const last = index === stepCount - 1;
     tutorialNext.textContent = !last ? 'Got it \u2192'
-      : ((!tutorialSolo && tutorialPart < TUTORIAL_PARTS) ? 'Next part \u2192' : 'Done \u2713');
+      : ((!tutorialSolo && tutorialHasNext(tutorialPart)) ? 'Next part \u2192' : 'Done \u2713');
     tutorialNext.disabled = false;
   }
   tutorialOverlay.hidden = false;
@@ -10151,9 +10241,9 @@ function startTutorial(part, opts = {}) {
   tutorialStartPart = tutorialPart;
   tutorialDirection = 1;
   tutorialGroupShown = {};
-  // Solo either because the caller said so, or because the part isn't in the
-  // linear chain at all.
-  tutorialSolo = !!opts.solo || SOLO_PARTS.includes(tutorialPart);
+  // Only if a caller explicitly asks. Nothing does any more — the ⋯ entries and
+  // Settings buttons are entry POINTS into one continuous tour.
+  tutorialSolo = !!opts.solo;
   // Launched from inside the feature: drop the opening step that points at the
   // home card, since you're looking at the thing it points to. Found by SCREEN
   // rather than by a fixed index, so reordering steps can't silently break it.
@@ -10173,8 +10263,8 @@ if (tutorialNext) tutorialNext.addEventListener('click', () => {
   tutorialDirection = 1;
   const steps = tutorialSteps(tutorialPart);
   if (tutorialStepIndex + 1 >= steps.length) {
-    if (!tutorialSolo && tutorialPart < TUTORIAL_PARTS) {
-      tutorialPart++;
+    if (!tutorialSolo && tutorialHasNext(tutorialPart)) {
+      tutorialPart = tutorialNextPart(tutorialPart);
       tutorialStepIndex = 0;
       runTutorialStep(0);
     } else {
@@ -10188,12 +10278,13 @@ if (tutorialNext) tutorialNext.addEventListener('click', () => {
 
 if (tutorialBack) tutorialBack.addEventListener('click', () => {
   tutorialDirection = -1;
-  if (tutorialStepIndex <= tutorialFloorIndex) {
-    // Step back into the previous part's last step (never before the part the
-    // user launched from Settings)
-    if (tutorialPart <= tutorialStartPart) return;
+  if (tutorialStepIndex <= 0) {
+    // Into the previous APPLICABLE part's last step. No longer floored at the
+    // part you launched from: a ⋯ entry is where you come in, not a wall.
+    const prev = tutorialStepPart(tutorialPart, -1);
+    if (prev === null) return;
     clearHighlights();
-    tutorialPart--;
+    tutorialPart = prev;
     tutorialStepIndex = Math.max(0, tutorialSteps(tutorialPart).length - 1);
     runTutorialStep(tutorialStepIndex);
     return;

@@ -982,6 +982,20 @@ select.iif-date-input { appearance: none; -webkit-appearance: none; padding-righ
   overflow: hidden; text-overflow: ellipsis;
   box-shadow: 1px 0 0 var(--line);
 }
+/* The NAME is clamped, not the cell. The cell also holds the filter/layout
+   checkboxes and the reorder arrows, and -webkit-box on a <th> breaks table
+   layout — so the name gets its own span and the clamp lives there. Two lines,
+   then an ellipsis; `anywhere` so a long unbroken part number breaks instead of
+   forcing the column wider. */
+.price-table .price-item { white-space: normal; }
+.price-item-name {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
 /* The corner is sticky in BOTH directions, so it must sit above both */
 .price-table .price-corner { z-index: 4; }
 .price-vendor, .price-item { cursor: pointer; }
@@ -2812,14 +2826,25 @@ body.vv-zoomed .editor-new-actions { display: none !important; }
 /* Calendar change-view animation: fade with a 5px nudge in the direction you
    moved. Opacity is composited; the tiny translate is cheap enough not to
    stutter on low-end phones the way a full slide can. */
-@keyframes cal-enter-up    { from { opacity: 0; transform: translateY(5px); }  to { opacity: 1; transform: none; } }
-@keyframes cal-enter-down  { from { opacity: 0; transform: translateY(-5px); } to { opacity: 1; transform: none; } }
-@keyframes cal-enter-left  { from { opacity: 0; transform: translateX(5px); }  to { opacity: 1; transform: none; } }
-@keyframes cal-enter-right { from { opacity: 0; transform: translateX(-5px); } to { opacity: 1; transform: none; } }
-.cal-enter-up    { animation: cal-enter-up    160ms ease-out; }
-.cal-enter-down  { animation: cal-enter-down  160ms ease-out; }
-.cal-enter-left  { animation: cal-enter-left  160ms ease-out; }
-.cal-enter-right { animation: cal-enter-right 160ms ease-out; }
+/* A real SLIDE, not a nudge. These were a 5px shift plus a fade, which read as
+   a fade — the movement was too small to register as the new month arriving
+   from the side. Now the incoming view travels its own full width, with no
+   fade: on a swipe the eye follows the motion, and opacity on top of it just
+   makes the first frames look broken. `cubic-bezier` decelerates hard so it
+   lands rather than drifting. The OUTGOING view is not animated — that would
+   need both on screen at once, which is a much bigger change for a gesture
+   this short. */
+@keyframes cal-enter-up    { from { transform: translateY(100%); }  to { transform: none; } }
+@keyframes cal-enter-down  { from { transform: translateY(-100%); } to { transform: none; } }
+@keyframes cal-enter-left  { from { transform: translateX(100%); }  to { transform: none; } }
+@keyframes cal-enter-right { from { transform: translateX(-100%); } to { transform: none; } }
+.cal-enter-up    { animation: cal-enter-up    220ms cubic-bezier(0.2, 0.8, 0.2, 1); }
+.cal-enter-down  { animation: cal-enter-down  220ms cubic-bezier(0.2, 0.8, 0.2, 1); }
+.cal-enter-left  { animation: cal-enter-left  220ms cubic-bezier(0.2, 0.8, 0.2, 1); }
+.cal-enter-right { animation: cal-enter-right 220ms cubic-bezier(0.2, 0.8, 0.2, 1); }
+/* The sliding element starts off-screen, so its parent must clip it or the
+   whole page gains a scrollbar for the length of the animation. */
+.cal-grid, .cal-main, .cal-day-main { overflow-x: clip; }
 @media (prefers-reduced-motion: reduce) {
   .cal-enter-up, .cal-enter-down, .cal-enter-left, .cal-enter-right { animation: none; }
 }

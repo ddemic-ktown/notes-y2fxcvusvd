@@ -238,7 +238,8 @@
         <div class="editor-more-wrap">
           <button id="cal-more-btn" class="icon-btn date-btn editor-more-btn" type="button" aria-label="More calendar options">⋯</button>
           <div id="cal-more-dropdown" class="editor-more-dropdown" hidden>
-            <button class="editor-more-item" type="button" data-tutorial-part="6" data-tutorial-solo data-tutorial-skip-home>How the calendar works</button>
+            <button class="editor-more-item" type="button" data-tutorial-part="6" data-tutorial-skip-home>How the calendar works</button>
+            <button class="editor-more-item" type="button" data-tutorial-part="7" data-tutorial-skip-home>How jobs work</button>
           </div>
         </div>
       </div>
@@ -369,11 +370,11 @@
             <button id="price-import" class="editor-more-item" type="button">Import CSV</button>
             <button id="price-share" class="editor-more-item" type="button">Share with employees</button>
             <!-- The tour for THIS screen, reachable from the screen itself.
-                 data-tutorial-solo ends it here instead of rolling into the
+                 ends it here instead of rolling into the
                  next part; data-tutorial-skip-home drops the opening step that
                  points at the home card, since you're already here. -->
             <button id="price-legend-btn" class="editor-more-item" type="button">What the colours mean</button>
-            <button class="editor-more-item" type="button" data-tutorial-part="4" data-tutorial-solo data-tutorial-skip-home>How the price table works</button>
+            <button class="editor-more-item" type="button" data-tutorial-part="4" data-tutorial-skip-home>How the price table works</button>
           </div>
         </div>
       </div>
@@ -467,7 +468,7 @@
         <div class="editor-more-wrap">
           <button id="hours-more-btn" class="icon-btn date-btn editor-more-btn" type="button" aria-label="More hours options">⋯</button>
           <div id="hours-more-dropdown" class="editor-more-dropdown" hidden>
-            <button class="editor-more-item" type="button" id="editor-help-hours" data-tutorial-part="7" data-tutorial-solo data-tutorial-skip-home>How the hours chart works</button>
+            <button class="editor-more-item" type="button" id="editor-help-hours" data-tutorial-part="8" data-tutorial-skip-home>How the hours chart works</button>
           </div>
         </div>
       </div>
@@ -748,9 +749,12 @@
           <!-- 6 and 7 are OUTSIDE the 1→5 chain: they cover one screen each and
                aren't daily-use for every role, so they always end on their own
                part rather than rolling into the next. -->
-          <button id="tutorial-btn-6" class="secondary" data-role-cal data-tutorial-part="6" data-tutorial-solo>Tutorial 6 — Calendar</button>
-          <button id="tutorial-btn-7" class="secondary" data-role-iif data-tutorial-part="7" data-tutorial-solo>Tutorial 7 — Hours</button>
-          <button id="tutorial-btn-8" class="secondary" data-staff-only data-tutorial-part="8" data-tutorial-solo>Tutorial 8 — Running your company</button>
+          <!-- 6 has NO: it rolls into 7, because a job is
+               what you opened the calendar to make. 7–9 end on themselves. -->
+          <button id="tutorial-btn-6" class="secondary" data-role-cal data-tutorial-part="6">Tutorial 6 — Calendar</button>
+          <button id="tutorial-btn-7" class="secondary" data-role-cal data-tutorial-part="7">Tutorial 7 — Jobs</button>
+          <button id="tutorial-btn-8" class="secondary" data-role-iif data-tutorial-part="8">Tutorial 8 — Hours</button>
+          <button id="tutorial-btn-9" class="secondary" data-staff-only data-tutorial-part="9">Tutorial 9 — Running your company</button>
         </div>
       </div>
 
@@ -781,7 +785,7 @@
             <button id="assign-customer-btn" class="editor-more-item" aria-label="Assign to customer" hidden>Assign to customer</button>
             <button id="duplicate-note-btn" class="editor-more-item" aria-label="Duplicate note" hidden>Duplicate note</button>
             <button id="editor-iif-btn" class="editor-more-item" aria-label="Hours" hidden>Hours</button>
-            <button class="editor-more-item" type="button" data-tutorial-part="3" data-tutorial-solo data-tutorial-skip-home>How notes work</button>
+            <button class="editor-more-item" type="button" data-tutorial-part="3" data-tutorial-skip-home>How notes work</button>
             <button id="delete-btn" class="editor-more-item danger-item" aria-label="Delete note">Delete note</button>
           </div>
         </div>
