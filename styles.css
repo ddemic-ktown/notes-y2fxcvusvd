@@ -2838,10 +2838,10 @@ body.vv-zoomed .editor-new-actions { display: none !important; }
 @keyframes cal-enter-down  { from { transform: translateY(-100%); } to { transform: none; } }
 @keyframes cal-enter-left  { from { transform: translateX(100%); }  to { transform: none; } }
 @keyframes cal-enter-right { from { transform: translateX(-100%); } to { transform: none; } }
-.cal-enter-up    { animation: cal-enter-up    220ms cubic-bezier(0.2, 0.8, 0.2, 1); }
-.cal-enter-down  { animation: cal-enter-down  220ms cubic-bezier(0.2, 0.8, 0.2, 1); }
-.cal-enter-left  { animation: cal-enter-left  220ms cubic-bezier(0.2, 0.8, 0.2, 1); }
-.cal-enter-right { animation: cal-enter-right 220ms cubic-bezier(0.2, 0.8, 0.2, 1); }
+.cal-enter-up    { animation: cal-enter-up    180ms cubic-bezier(0.2, 0.8, 0.2, 1); }
+.cal-enter-down  { animation: cal-enter-down  180ms cubic-bezier(0.2, 0.8, 0.2, 1); }
+.cal-enter-left  { animation: cal-enter-left  180ms cubic-bezier(0.2, 0.8, 0.2, 1); }
+.cal-enter-right { animation: cal-enter-right 180ms cubic-bezier(0.2, 0.8, 0.2, 1); }
 /* The sliding element starts off-screen, so its parent must clip it or the
    whole page gains a scrollbar for the length of the animation. */
 .cal-grid, .cal-main, .cal-day-main { overflow-x: clip; }

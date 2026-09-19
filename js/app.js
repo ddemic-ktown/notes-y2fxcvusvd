@@ -20,6 +20,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 100, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.09.18-2159', 'The calendar swipe animation is a touch quicker'],
   ['v2026.09.18-2157', 'Swiping between days, weeks and months now slides the new view in from the side instead of fading it'],
   ['v2026.09.18-2145', 'The tour is one continuous walkthrough now — start it from any screen’s ⋯ menu and you can go forward or back through the whole thing, skipping the parts your role doesn’t use'],
   ['v2026.09.18-2129', 'The calendar tour is split in two — the calendar itself, then jobs — and runs straight from one into the other'],
