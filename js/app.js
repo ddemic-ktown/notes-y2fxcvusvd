@@ -20,6 +20,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 100, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.09.18-1709', 'Starting or applying the price table filter clears the search box, so what you ticked is what you see'],
   ['v2026.09.18-1626', 'Price table: tick the rows and columns you want and filter to just those — it stays that way until you turn it off; Sort and Layout moved into the ⋯ menu'],
   ['v2026.09.18-1554', 'Confirmations and messages now look like the rest of the app instead of a browser box with the website address printed above them'],
   ['v2026.09.18-1552', 'Naming a new item, vendor or employee now opens a proper field with the keyboard already up, instead of a browser box you had to tap first'],
@@ -2599,6 +2600,15 @@ function savePriceFilter() {
     localStorage.setItem('na-price-filter-vendors', JSON.stringify([...pricePickVendors]));
   } catch {}
 }
+// The search box and the filter answer different questions, and leaving a
+// search term running while the filter changes makes the result look wrong —
+// you tick six rows, apply, and see two. Cleared at both transitions.
+function clearPriceSearchBox() {
+  priceFilter = '';
+  const input = document.getElementById('price-search');
+  if (input) input.value = '';
+  if (typeof refreshSearchClears === 'function') refreshSearchClears();
+}
 function clearPriceFilter() {
   priceFilterMode = 'off';
   pricePickItems.clear();
@@ -3429,6 +3439,8 @@ function exitPriceReorderMode() {
 const priceFilterStartBtn = document.getElementById('price-filter-start');
 if (priceFilterStartBtn) priceFilterStartBtn.addEventListener('click', () => {
   priceFilterMode = 'picking';
+  // You cannot tick a row a search has hidden, so the box goes on the way in.
+  clearPriceSearchBox();
   // Layout's checkboxes mean "move these to the top" and the filter's mean
   // "keep these" — two sets of identical boxes on one table is unreadable.
   if (priceReorderMode) exitPriceReorderMode();
@@ -3447,6 +3459,7 @@ if (priceFilterBtn) priceFilterBtn.addEventListener('click', () => {
   } else {
     clearPriceFilter();
   }
+  clearPriceSearchBox();
   savePriceFilter();
   openCellKey = null;
   renderPriceTable();
