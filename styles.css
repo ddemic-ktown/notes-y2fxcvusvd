@@ -778,6 +778,22 @@ select.iif-date-input { appearance: none; -webkit-appearance: none; padding-righ
   font-size: 16px; line-height: 1; font-weight: 700;
 }
 .customer-create-row:active { background: var(--bg); }
+/* Home search: one row, both creates. Wraps on a narrow phone so the label and
+   the buttons never squash each other. */
+.home-create-row { flex-wrap: wrap; gap: 8px 10px; padding: 10px 12px; }
+.home-create-label { color: var(--ink-soft); font-size: 13px; }
+.home-create-btns { display: flex; gap: 8px; margin-left: auto; }
+.home-create-btn {
+  display: flex; align-items: center; gap: 6px;
+  font: inherit; font-size: 14px; font-weight: 600;
+  color: var(--accent);
+  background: transparent;
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  padding: 5px 12px 5px 6px;
+  cursor: pointer;
+}
+.home-create-btn:active { background: var(--bg); }
 
 /* Name prompt — deliberately narrow: it holds one field, and a full-width
    panel makes a one-line question look like a form. */
@@ -2737,6 +2753,19 @@ body.vv-zoomed-pinch .editor-new-actions { display: none !important; }
   max-height: var(--app-vh, 100dvh);
   overflow: hidden;
 }
+/* ZOOMED: stop being fixed to the viewport. `position: fixed` pins the grid to
+   what you can see, so pinching in magnified it but left you unable to pan to
+   the rows now off-screen — the whole point of zooming into a month. Static,
+   it becomes part of the page and pans like everything else. */
+body.vv-zoomed-pinch #calendar-view.active {
+  position: static;
+  height: auto;
+  max-height: none;
+  min-height: 100%;
+  overflow: visible;
+}
+body.vv-zoomed-pinch #calendar-view.active .app-header { position: static; }
+body.vv-zoomed-pinch .cal-cells { overflow-y: visible; }
 #calendar-view .app-header { flex-shrink: 0; }
 .cal-day-main { overflow: hidden; }
 #editor-view .app-header,

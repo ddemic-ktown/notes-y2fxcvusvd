@@ -20,6 +20,8 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 100, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.09.19-2231', 'Zooming into the month grid no longer squashes the rows or leaves a blue slab over the bottom, and you can now pan around the zoomed calendar'],
+  ['v2026.09.19-2228', 'Searching the home screen now offers to create what you typed as a customer or a note, right under the results'],
   ['v2026.09.19-0004', 'Searching for a customer now offers “Create …” at the bottom of the results, so a new customer is one tap without leaving what you were doing'],
   ['v2026.09.18-2338', 'Opening the app on a slow connection now says “Signing you in” with a spinner instead of showing the sign-in screen as if you had been logged out'],
   ['v2026.09.18-2307', 'The hours chart shows each job’s address beside the customer, so two visits to the same customer are easy to tell apart'],
@@ -3283,13 +3285,31 @@ function keyboardIsUp() {
   if (keyboardInset(window.visualViewport) > 0) return true;
   return editableFocused() && (Date.now() - kbLastUpAt) < 600;
 }
+// How far the page is pinch-zoomed. `vv.scale` is the direct answer but Android
+// Chrome does not always update it, so the WIDTH RATIO is the fallback: the
+// visual viewport is the layout viewport divided by the zoom, so
+// innerWidth / vv.width recovers it. Take whichever is larger — a missed zoom
+// is the failure that shows, an over-reported one only hides the +.
+function viewportZoom() {
+  const vv = window.visualViewport;
+  if (!vv) return 1;
+  const byWidth = vv.width > 0 ? (window.innerWidth / vv.width) : 1;
+  return Math.max(vv.scale || 1, byWidth || 1);
+}
 function updateAppVh() {
   // visualViewport shrinks when the on-screen keyboard appears; innerHeight
   // does not. Modals sized in vh therefore ran under the keyboard, hiding
   // whatever sat at the bottom (e.g. customer search results).
+  //
+  // It ALSO shrinks when you pinch-zoom, and that is not the same thing at all.
+  // #calendar-view is sized from --app-vh, so zooming into the month grid
+  // shrank the whole box and squashed every row to the same height — the bug
+  // this multiply fixes. Dividing the visible height BACK by the zoom recovers
+  // the layout height, leaving --app-vh responding to the keyboard alone.
   const vv = window.visualViewport;
-  const h = (vv && vv.height) || window.innerHeight;
-  document.documentElement.style.setProperty('--app-vh', h + 'px');
+  const zoom = viewportZoom();
+  const h = vv ? vv.height * (zoom > 1.01 ? zoom : 1) : window.innerHeight;
+  document.documentElement.style.setProperty('--app-vh', Math.round(h) + 'px');
   // How much of the layout viewport the KEYBOARD covers. `position: fixed`
   // anchors to the layout viewport, so a bottom-anchored button would sit
   // behind the keyboard without this offset.
@@ -3316,7 +3336,7 @@ function updateAppVh() {
   // opens at the same moment as a zoom was the case the scale check alone kept
   // missing. Nothing is lost: the + adds a new record, which is not what you
   // are doing while typing in an existing one.
-  const zoomed = !!vv && vv.scale > 1.01;
+  const zoomed = zoom > 1.01;
   document.body.classList.toggle('vv-zoomed', zoomed || keyboardIsUp());
   // Two classes, because they hide different things: Cancel/Save on a new
   // record must survive the keyboard (you are typing into that record), but
@@ -4611,6 +4631,56 @@ function noteMatchesSearch(note, words) {
   return words.every(w => haystack.includes(w));
 }
 
+// One dashed row at the end of the home search results, holding BOTH creates.
+// Two separate rows was the first shape; one row reads as "or make one" rather
+// than two more results. Read-only roles get nothing; an employee can make a
+// note but not a customer, so the row can come back with a single button.
+function homeCreateRowHtml(query) {
+  const q = (query || '').trim();
+  if (!q || isReadOnlyRole()) return '';
+  const cust = isAdminRole()
+    ? `<button type="button" class="home-create-btn" data-create-customer-home="${escapeHtml(q)}"><span class="customer-create-plus">+</span> Customer</button>`
+    : '';
+  const note = `<button type="button" class="home-create-btn" data-create-note-home="${escapeHtml(q)}"><span class="customer-create-plus">+</span> Note</button>`;
+  return `<div class="customer-create-row home-create-row">
+    <span class="home-create-label">Create “${escapeHtml(q)}” as a</span>
+    <span class="home-create-btns">${cust}${note}</span>
+  </div>`;
+}
+function wireHomeCreateRow() {
+  if (!notesList) return;
+  const done = () => {
+    homeSearchTerm = '';
+    if (homeSearchInput) homeSearchInput.value = '';
+    refreshSearchClears();
+  };
+  notesList.querySelectorAll('[data-create-customer-home]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const name = btn.dataset.createCustomerHome;
+      const { customer, defaultNote } = createCustomerNamed(name);
+      done();
+      activeCustomerId = customer.id;
+      returnScreen = 'customer-notes';
+      showEditor(Storage.getNote(defaultNote.id) || defaultNote, 'note');
+      // origin 'home': Back lands where you actually were.
+      pendingNewRecord = { kind: 'customer', id: customer.id, noteId: defaultNote.id, origin: 'home' };
+      updateCancelBtn();
+    });
+  });
+  notesList.querySelectorAll('[data-create-note-home]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const title = btn.dataset.createNoteHome;
+      const note = Storage.createNote();
+      Storage.updateNote(note.id, title);
+      done();
+      returnScreen = 'notes';
+      showEditor(Storage.getNote(note.id) || note, 'note');
+      pendingNewRecord = { kind: 'note', id: note.id, noteId: note.id };
+      updateCancelBtn();
+    });
+  });
+}
+
 function renderHomeSearchResults(term) {
   const words = term.trim().toLowerCase().split(/\s+/).filter(w => w.length > 0);
   if (words.length === 0) { renderNotesList(); return; }
@@ -4636,7 +4706,9 @@ function renderHomeSearchResults(term) {
     noteMatchesSearch(n, words) && !(n.isDefault && customerIds.has(n.customerId)));
 
   if (results.length === 0 && customerHits.length === 0) {
-    notesList.innerHTML = `<p class="empty-state">Nothing matches "${escapeHtml(term)}".</p>`;
+    notesList.innerHTML = `<p class="empty-state">Nothing matches "${escapeHtml(term)}".</p>`
+      + homeCreateRowHtml(term);
+    wireHomeCreateRow();
     return;
   }
 
@@ -4684,7 +4756,8 @@ function renderHomeSearchResults(term) {
     `;
   }).join('') : '';
 
-  notesList.innerHTML = customerHtml + notesHtml;
+  notesList.innerHTML = customerHtml + notesHtml + homeCreateRowHtml(term);
+  wireHomeCreateRow();
 
   notesList.querySelectorAll('.note-card').forEach(card => {
     card.addEventListener('click', () => {
