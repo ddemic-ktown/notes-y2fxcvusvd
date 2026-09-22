@@ -167,7 +167,10 @@ body.hours-open {
   border: 1px solid var(--line);
   border-radius: var(--radius);
   padding: 11px 12px;
-  font-size: 15px;
+  /* 16px minimum prevents iOS Safari auto-zoom on focus — the job sheet's
+     date, start, end and hours fields are all .signin-input, and the zoom is
+     what made them look misaligned. (v2026.09.21-2226) */
+  font-size: 16px;
   margin-bottom: 10px;
 }
 .signin-card button.secondary {
@@ -437,7 +440,9 @@ body.hours-open {
   border: 1px solid var(--line);
   border-radius: var(--radius);
   padding: 4px 6px;
-  font-size: 13px;
+  /* 16px minimum — iOS auto-zoom; this is the per-person hours box on the job
+     sheet. (v2026.09.21-2226) */
+  font-size: 16px;
   text-align: right;
 }
 .employee-type-select, #employee-type-input {
@@ -841,7 +846,7 @@ select.iif-date-input { appearance: none; -webkit-appearance: none; padding-righ
 .job-crew-line .job-emp-hours { width: 74px; flex: 0 0 auto; }
 .job-crew-bill { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--ink-soft); cursor: pointer; }
 .job-crew-del { background: none; border: none; color: var(--danger); cursor: pointer; font-size: 15px; padding: 4px 6px; margin-left: auto; }
-.job-crew-note { font-size: 13px; }
+.job-crew-note { font-size: 16px; }   /* 16px minimum — iOS auto-zoom */
 .job-crew-empty { color: var(--ink-soft); font-size: 13px; }
 .job-crew-add { margin: 6px 0 4px; }
 /* Hours chart: the spare column marks rows that aren't chargeable. */
@@ -1103,7 +1108,12 @@ body.dark-mode .price-best-badge { color: #4ade80; }
   width: 100%;
   margin-bottom: 4px;
   padding: 6px 8px;
-  font-size: 14px;
+  /* 16px MINIMUM — below it iOS Safari zooms the page on focus, and both the
+     price table and the hours grid are position:fixed panes sized from
+     --app-vh, so the zoom panned onto empty space and read as a blank screen.
+     It also latched body.vv-zoomed, which hides the + FAB. Same rule as
+     .search-input. (v2026.09.21-2226) */
+  font-size: 16px;
   border: 1px solid var(--line);
   border-radius: 6px;
   background: var(--bg);
@@ -1256,6 +1266,21 @@ body.show-app-back .app-back-btn[hidden] { display: none !important; }
   max-width: 90vw;
   text-align: center;
 }
+/* "+1" after the finish time on a job that runs past midnight. The block
+   itself stops at midnight, so without this the label would read as a job
+   ending at 12:00 AM. (v2026.09.21-2226) */
+.cal-block-time .cal-overnight { opacity: 0.75; font-weight: 700; }
+/* "Already have: …" under a Create row, and the same warning in the name
+   dialog's hint line. Muted and on its own line: it is information beside the
+   button, never a blocker. (v2026.09.21-2312) */
+.create-similar {
+  display: block;
+  margin-top: 2px;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--ink-soft);
+}
+.modal-hint.modal-hint-warn { color: #d97706; }
 .icon-btn:disabled { opacity: 0.35; cursor: default; }
 
 /* Tap a Shared pill → bubble listing who the note is shared with */
@@ -1458,6 +1483,12 @@ body.vv-zoomed .sync-toast { display: none !important; }
   z-index: 200;
   overflow: hidden;
 }
+/* A destructive row in a ⋯ menu. Colour alone, no icon — the confirmation is
+   what actually protects the action. (v2026.09.21-2300) */
+.editor-more-danger { color: var(--danger); }
+/* The ticked row in a menu that picks between options. The ✓ is written into
+   the label by updateSortButtons, so this only carries the weight. */
+.editor-more-item[aria-pressed="true"] { font-weight: 700; }
 .editor-more-item {
   display: block;
   width: 100%;
@@ -2056,28 +2087,9 @@ input[type="search"]::-webkit-search-cancel-button {
   padding: 6px 8px;
 }
 
-/* Segmented sort buttons */
-.sort-group {
-  display: inline-flex;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  overflow: hidden;
-  background: var(--bg);
-  flex-shrink: 0;
-}
-.sort-btn {
-  background: transparent;
-  border: 0;
-  padding: 6px 12px;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--ink-soft);
-  cursor: pointer;
-}
-.sort-btn[aria-pressed="true"] {
-  background: var(--accent);
-  color: var(--accent-ink);
-}
+/* .sort-group / .sort-btn removed v2026.09.21-2331 — the customers list and
+   the orphaned notes list were the only users and both sort from a ⋯ menu
+   now. In git if a segmented control is ever wanted again. */
 
 /* Notes list */
 .notes-list {
@@ -2353,6 +2365,28 @@ input[type="search"]::-webkit-search-cancel-button {
   letter-spacing: 0.05em;
 }
 
+/* A settings heading that opens and closes the list under it. Inherits
+   .setting-list-title so it reads as the same heading it replaced.
+   (v2026.09.21-2317) */
+.setting-list-toggle {
+  display: block;
+  width: 100%;
+  background: none;
+  border: none;
+  padding: 0;
+  text-align: left;
+  font-family: inherit;
+  cursor: pointer;
+}
+.setting-list-toggle:active { opacity: 0.6; }
+.setting-list-caret { margin-left: 4px; }
+/* Why a row is locked, under the row it refers to. */
+.member-note {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+
 /* Settings: shared building blocks + narrow-phone friendliness */
 .setting-hint { font-size: 13px; margin: 0 0 8px; }
 .setting-inline-label { font-size: 13px; color: var(--ink-soft); margin: 0 0 6px; }
@@ -2385,7 +2419,9 @@ input[type="search"]::-webkit-search-cancel-button {
   border: 1px solid var(--line);
   border-radius: var(--radius);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 13px;
+  /* 16px minimum — iOS auto-zoom again; this is the job sheet's Description
+     box as well as the CSV panes. (v2026.09.21-2226) */
+  font-size: 16px;
   background: var(--bg);
   color: var(--ink);
   resize: vertical;

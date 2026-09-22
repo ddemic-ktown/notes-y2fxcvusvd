@@ -129,9 +129,16 @@
       <div class="customers-header-top">
         <button class="icon-btn date-btn app-back-btn" aria-label="Back">‹ Back</button>
         <nav class="crumbs" id="crumbs-customers" aria-label="Breadcrumb"></nav>
-        <div class="sort-group" role="group" aria-label="Sort customers">
-          <button id="sort-alpha" class="sort-btn" aria-pressed="true">A–Z</button>
-          <button id="sort-recent" class="sort-btn" aria-pressed="false">Recent</button>
+        <!-- The sort pair lives in the ⋯ menu (v2026.09.21-2300). Two buttons
+             plus a breadcrumb plus Back is more than a phone header holds, and
+             a menu row with a ✓ says WHICH sort is on more plainly than a
+             pressed-looking button did. Same ids, so the wiring is unchanged. -->
+        <div class="editor-more-wrap">
+          <button id="customers-more-btn" class="icon-btn date-btn editor-more-btn" type="button" aria-label="More customer list options">⋯</button>
+          <div id="customers-more-dropdown" class="editor-more-dropdown" hidden>
+            <button id="sort-alpha" class="editor-more-item" type="button" aria-pressed="true">A–Z</button>
+            <button id="sort-recent" class="editor-more-item" type="button" aria-pressed="false">Recent</button>
+          </div>
         </div>
       </div>
       <div class="customers-header-bottom">
@@ -154,6 +161,15 @@
       <div class="customers-header-top">
         <button class="icon-btn date-btn app-back-btn" aria-label="Back">‹ Back</button>
         <nav class="crumbs" id="crumbs-customer-notes" aria-label="Breadcrumb"></nav>
+        <!-- Admin only, hidden wholesale by applyRoleUI. Delete is its only
+             item; a second item that a non-admin should see would mean gating
+             per ITEM instead of hiding the button. (v2026.09.21-2300) -->
+        <div class="editor-more-wrap">
+          <button id="customer-more-btn" class="icon-btn date-btn editor-more-btn" type="button" aria-label="More options for this customer">⋯</button>
+          <div id="customer-more-dropdown" class="editor-more-dropdown" hidden>
+            <button id="customer-delete-btn" class="editor-more-item editor-more-danger" type="button">Delete customer</button>
+          </div>
+        </div>
       </div>
       <div class="customers-header-bottom">
         <div class="search-wrap" style="flex:1;">
@@ -238,8 +254,8 @@
         <div class="editor-more-wrap">
           <button id="cal-more-btn" class="icon-btn date-btn editor-more-btn" type="button" aria-label="More calendar options">⋯</button>
           <div id="cal-more-dropdown" class="editor-more-dropdown" hidden>
-            <button class="editor-more-item" type="button" data-tutorial-part="6" data-tutorial-skip-home>How the calendar works</button>
-            <button class="editor-more-item" type="button" data-tutorial-part="7" data-tutorial-skip-home>How jobs work</button>
+            <button class="editor-more-item" type="button" data-tutorial-part="6" data-tutorial-skip-home data-tutorial-solo>How the calendar works</button>
+            <button class="editor-more-item" type="button" data-tutorial-part="7" data-tutorial-skip-home data-tutorial-solo>How jobs work</button>
           </div>
         </div>
       </div>
@@ -374,7 +390,7 @@
                  next part; data-tutorial-skip-home drops the opening step that
                  points at the home card, since you're already here. -->
             <button id="price-legend-btn" class="editor-more-item" type="button">What the colours mean</button>
-            <button class="editor-more-item" type="button" data-tutorial-part="4" data-tutorial-skip-home>How the price table works</button>
+            <button class="editor-more-item" type="button" data-tutorial-part="4" data-tutorial-skip-home data-tutorial-solo>How the price table works</button>
           </div>
         </div>
       </div>
@@ -468,7 +484,7 @@
         <div class="editor-more-wrap">
           <button id="hours-more-btn" class="icon-btn date-btn editor-more-btn" type="button" aria-label="More hours options">⋯</button>
           <div id="hours-more-dropdown" class="editor-more-dropdown" hidden>
-            <button class="editor-more-item" type="button" id="editor-help-hours" data-tutorial-part="8" data-tutorial-skip-home>How the hours chart works</button>
+            <button class="editor-more-item" type="button" id="editor-help-hours" data-tutorial-part="8" data-tutorial-skip-home data-tutorial-solo>How the hours chart works</button>
           </div>
         </div>
       </div>
@@ -520,9 +536,15 @@
       <div class="customers-header-top">
         <button class="icon-btn date-btn app-back-btn" aria-label="Back">‹ Back</button>
         <nav class="crumbs" id="crumbs-orphans" aria-label="Breadcrumb"></nav>
-        <div class="sort-group" role="group" aria-label="Sort orphaned notes">
-          <button id="orphan-sort-alpha" class="sort-btn" aria-pressed="false">A–Z</button>
-          <button id="orphan-sort-recent" class="sort-btn" aria-pressed="true">Recent</button>
+        <!-- Matches the customers list (v2026.09.21-2331). Select All and
+             Delete Selected stay on their own row: they are actions, not a
+             setting, and a destructive one does not belong behind a menu. -->
+        <div class="editor-more-wrap">
+          <button id="orphan-more-btn" class="icon-btn date-btn editor-more-btn" type="button" aria-label="More orphaned notes options">⋯</button>
+          <div id="orphan-more-dropdown" class="editor-more-dropdown" hidden>
+            <button id="orphan-sort-alpha" class="editor-more-item" type="button" aria-pressed="false">A–Z</button>
+            <button id="orphan-sort-recent" class="editor-more-item" type="button" aria-pressed="true">Recent</button>
+          </div>
         </div>
       </div>
       <div class="customers-header-bottom" style="display:flex;align-items:center;gap:8px;">
@@ -759,8 +781,11 @@
       </div>
 
       <div class="setting-row setting-list-row">
-        <h3 class="setting-list-title">What's new</h3>
-        <ul id="changelog-list" class="changelog-list"></ul>
+        <!-- COLLAPSED by default (v2026.09.21-2317). A hundred entries at the
+             bottom of Settings is a long scroll past everything else, and it is
+             read once in a while rather than daily. -->
+        <button id="changelog-toggle" class="setting-list-title setting-list-toggle" type="button" aria-expanded="false" aria-controls="changelog-list">What's new <span class="setting-list-caret" aria-hidden="true">▸</span></button>
+        <ul id="changelog-list" class="changelog-list" hidden></ul>
       </div>
     </main>
   </section>
@@ -785,7 +810,7 @@
             <button id="assign-customer-btn" class="editor-more-item" aria-label="Assign to customer" hidden>Assign to customer</button>
             <button id="duplicate-note-btn" class="editor-more-item" aria-label="Duplicate note" hidden>Duplicate note</button>
             <button id="editor-iif-btn" class="editor-more-item" aria-label="Hours" hidden>Hours</button>
-            <button class="editor-more-item" type="button" data-tutorial-part="3" data-tutorial-skip-home>How notes work</button>
+            <button class="editor-more-item" type="button" data-tutorial-part="3" data-tutorial-skip-home data-tutorial-solo>How notes work</button>
             <button id="delete-btn" class="editor-more-item danger-item" aria-label="Delete note">Delete note</button>
           </div>
         </div>

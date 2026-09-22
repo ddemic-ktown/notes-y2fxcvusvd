@@ -654,15 +654,10 @@ export const Storage = {
     return { customer, defaultNote };
   },
 
-  updateCustomer(id, patch) {
-    const i = _cache.customers.findIndex(c => c.id === id);
-    if (i === -1) return null;
-    const next = { ..._cache.customers[i], ...patch, updated: nowIso() };
-    _cache.customers[i] = next;
-    emit();
-    tracked(setDoc(doc(customersCol(), id), stripId(next))).catch(err => console.warn("updateCustomer", err));
-    return next;
-  },
+  // updateCustomer(id, patch) removed v2026.09.21-2336. Its only caller was a
+  // dead branch in commitSave, and the {name, address} it wrote has not been
+  // read since a customer's name and address became its default note's title
+  // and body. In git if a direct customer-document patch is ever needed.
 
   // Marks the customer AND their notes, stamping the same trashedWith id so
   // restoring the customer brings the whole set back together.
@@ -1028,6 +1023,11 @@ export const Storage = {
       date: job.date,
       start: job.start || '',
       end: job.end || '',
+      // Hours AS TYPED in the job editor. Kept from v2026.09.21-2226 because
+      // deriving it from start/end on every open overwrote a hand-entered
+      // number. null means "derive it".
+      duration: Number.isFinite(Number(job.duration)) && Number(job.duration) > 0
+        ? Number(job.duration) : null,
       description: job.description || '',
       employeeNames: Array.isArray(job.employeeNames) ? job.employeeNames : [],
       // { [employeeName]: hours } — only for people actually on the job, and

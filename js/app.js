@@ -20,6 +20,16 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 100, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.09.21-2336', 'Housekeeping: removed three unreachable branches left over from when customers were edited as their own record type'],
+  ['v2026.09.21-2331', 'The orphaned notes list sorts from a ⋯ menu like the customer list does'],
+  ['v2026.09.21-2327', 'Clearing a customer’s name no longer deletes them if they have notes or files — only a genuinely empty one is discarded, and it says so when it happens'],
+  ['v2026.09.21-2317', 'What’s new in Settings is collapsed until you tap it; you can now change your own role as long as another admin exists; the two Hours switches say what each one actually does'],
+  ['v2026.09.21-2312', 'Creating a customer, price item or vendor now points out names you already have that look the same — it never stops you, it just says so'],
+  ['v2026.09.21-2308', 'Assigning a note to a customer now keeps you in the note and updates the trail at the top, instead of jumping to the customer’s screen'],
+  ['v2026.09.21-2300', 'A customer can now be deleted from the ⋯ menu on their own screen, with a confirmation and 30 days in Trash; the customer list’s A–Z / Recent sort moved into a ⋯ menu too'],
+  ['v2026.09.21-2242', 'Attempted fix for the blank screen after backing out of a note — returning to a screen can no longer scroll the page past the end of its content'],
+  ['v2026.09.21-2235', '“How this works” in a screen’s ⋯ menu now ends on that screen instead of carrying on through the whole tour'],
+  ['v2026.09.21-2226', 'iPhone fixes: the price table and job sheet no longer zoom and go blank when you tap a field, price cells open with what is already in them, jobs can run past midnight, and clearing an hours box now saves as empty'],
   ['v2026.09.19-2231', 'Zooming into the month grid no longer squashes the rows or leaves a blue slab over the bottom, and you can now pan around the zoomed calendar'],
   ['v2026.09.19-2228', 'Searching the home screen now offers to create what you typed as a customer or a note, right under the results'],
   ['v2026.09.19-0004', 'Searching for a customer now offers “Create …” at the bottom of the results, so a new customer is one tap without leaving what you were doing'],
@@ -574,8 +584,14 @@ const FEATURE_TOGGLES = [
     hint: 'The keyword sections on the home screen and the Aggregator Keywords list in Settings.' },
   { key: 'hours', label: 'Hours & QuickBooks export',
     hint: 'The hours chart and the QuickBooks .iif export, including the service item names in Settings. Employees and customer accounts stay — the calendar needs them.' },
+  // The two Hours switches were reported as "both give the same result"
+  // (v2026.09.21-2317). They do not — but everything the BIG one additionally
+  // hides lives in Settings and is role-gated, so to someone who cannot see
+  // those rows anyway the only visible effect of either is the home button
+  // going. Say what the difference actually is rather than describing this one
+  // in isolation.
   { key: 'hoursCard', label: 'Hours button on the home screen',
-    hint: 'Just the home screen shortcut. With this off and Hours on, the chart is still there under Settings.' },
+    hint: 'Hides ONLY the home screen shortcut — the chart and the QuickBooks export stay, reachable from Settings. Turn off the switch above instead to remove the feature itself.' },
 ];
 
 function getHiddenFeatures() {
@@ -765,6 +781,82 @@ function stripKeywordToList(paragraph, keyword) {
   const all = [head, ...lines.slice(1)].map(l => l.trim()).filter(l => l !== '');
   return all.join(', ');
 }
+// ---------- near-match names (v2026.09.21-2312) ----------
+// Duplicate customers, items and vendors were reported by a tester: "allows
+// duplicates to exist. Is there a way to suggest a close match?"
+//
+// NOTHING here blocks anything. Two customers can genuinely share a name, an
+// item can genuinely read like another, and a hard stop on that would be worse
+// than the duplicate it prevents. This only ever SAYS what already exists,
+// beside the control that is about to create one.
+//
+// Deliberately conservative: three cheap rules that catch the duplicates people
+// actually make (a rename, a retype, a stray plural) and stay quiet otherwise.
+// A noisy hint is one people stop reading, which is the failure mode that
+// matters here.
+function normaliseName(s) {
+  return String(s || '').toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')   // punctuation and & / - all read as a space
+    .trim()
+    .replace(/\s+/g, ' ');
+}
+// Levenshtein, capped: anything past `max` is "not similar" and stops early.
+function editDistanceWithin(a, b, max) {
+  if (Math.abs(a.length - b.length) > max) return false;
+  let prev = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i++) {
+    const cur = [i];
+    let best = i;
+    for (let j = 1; j <= b.length; j++) {
+      cur[j] = a[i - 1] === b[j - 1]
+        ? prev[j - 1]
+        : 1 + Math.min(prev[j - 1], prev[j], cur[j - 1]);
+      if (cur[j] < best) best = cur[j];
+    }
+    if (best > max) return false;   // whole row already too far
+    prev = cur;
+  }
+  return prev[b.length] <= max;
+}
+// `existing` is a list of names; returns up to `limit` that look like `name`.
+// An exact ORIGINAL-string match to `self` is excluded, so renaming something
+// to what it is already called says nothing.
+function similarNames(name, existing, { limit = 2, self = null } = {}) {
+  const n = normaliseName(name);
+  if (n.length < 3) return [];      // too short to judge
+  const out = [];
+  for (const raw of existing) {
+    if (raw === self) continue;
+    const e = normaliseName(raw);
+    if (!e || e.length < 3) continue;
+    const same = e === n;
+    const contains = (e.includes(n) || n.includes(e)) && Math.min(e.length, n.length) >= 4;
+    // A DIGIT difference is a series, not a typo: "screwless 1g" and
+    // "screwless 2g" are two real items, as are "Eaton 100A" and "Eaton 200A".
+    // Without this the price table warns on every item you add to a range,
+    // which is exactly where it would be added most often.
+    const series = !same && n.replace(/\d+/g, '') === e.replace(/\d+/g, '');
+    // One typo for short names, two once there is enough text to be sure.
+    const typo = !series && editDistanceWithin(n, e, n.length >= 8 ? 2 : 1);
+    if (same || (contains && !series) || typo) {
+      out.push(raw);
+      if (out.length >= limit) break;
+    }
+  }
+  return out;
+}
+// The customer names as they are displayed — the first line of each default note.
+function allCustomerNames() {
+  return Storage.listCustomers().map(c => Storage.getCustomerNameSnapshot(c.id)).filter(Boolean);
+}
+// The muted second line under a "Create …" row. Empty string when nothing is
+// close, so the row is unchanged in the ordinary case.
+function similarCustomersHtml(query) {
+  const hits = similarNames(query, allCustomerNames());
+  if (!hits.length) return '';
+  return `<span class="create-similar">Already have: ${escapeHtml(hits.join(', '))}</span>`;
+}
+
 function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, c => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
@@ -1121,7 +1213,26 @@ function showCalendar() {
 // Resolves to the trimmed string, '' when Delete was pressed (only offered when
 // onDelete is set), or null when cancelled.
 let nameModalResolve = null;
-function askForName({ title, hint = '', value = '', saveLabel = 'Save', deletable = false }) {
+// `similar`: a list of existing names. When given, the hint line becomes LIVE —
+// it names close matches as you type, and goes back to the static `hint` when
+// there are none. Save is never disabled: this reports, it does not police.
+// (v2026.09.21-2312)
+let nameModalSimilar = null;
+let nameModalBaseHint = '';
+function refreshNameModalHint() {
+  const input = document.getElementById('name-modal-input');
+  const hintEl = document.getElementById('name-modal-hint');
+  if (!hintEl || !input) return;
+  const hits = nameModalSimilar
+    ? similarNames(input.value, nameModalSimilar, { limit: 2, self: nameModalSelf })
+    : [];
+  const text = hits.length ? `Already have: ${hits.join(', ')}` : nameModalBaseHint;
+  hintEl.textContent = text;
+  hintEl.hidden = !text;
+  hintEl.classList.toggle('modal-hint-warn', hits.length > 0);
+}
+let nameModalSelf = null;
+function askForName({ title, hint = '', value = '', saveLabel = 'Save', deletable = false, similar = null }) {
   const modal = document.getElementById('name-modal');
   const input = document.getElementById('name-modal-input');
   const hintEl = document.getElementById('name-modal-hint');
@@ -1131,11 +1242,17 @@ function askForName({ title, hint = '', value = '', saveLabel = 'Save', deletabl
   // A second call while one is open cancels the first rather than stranding it.
   if (nameModalResolve) { const r = nameModalResolve; nameModalResolve = null; r(null); }
   document.getElementById('name-modal-title').textContent = title;
+  nameModalSimilar = similar;
+  nameModalBaseHint = hint;
+  // Renaming something to what it is already called is not a duplicate.
+  nameModalSelf = value || null;
   hintEl.textContent = hint;
   hintEl.hidden = !hint;
+  hintEl.classList.remove('modal-hint-warn');
   saveBtn.textContent = saveLabel;
   delBtn.hidden = !deletable;
   input.value = value;
+  refreshNameModalHint();
   modal.hidden = false;
   input.focus();
   input.select();
@@ -1159,6 +1276,7 @@ function closeNameModal(answer) {
   document.getElementById('name-modal-close').addEventListener('click',
     () => closeNameModal(null));
   modal.addEventListener('click', e => { if (e.target === modal) closeNameModal(null); });
+  input.addEventListener('input', refreshNameModalHint);
   // Enter is the fast path on a phone: the keyboard's own Go key.
   input.addEventListener('keydown', e => {
     if (e.key === 'Enter') { e.preventDefault(); closeNameModal(input.value.trim()); }
@@ -1512,17 +1630,30 @@ function minutesFromHHMM(t) {
   if (h > 23 || mi > 59) return null;
   return h * 60 + mi;
 }
+// WRAPS rather than clamps (v2026.09.21-2226). Clamping to 23:59 is what made
+// a night shift impossible: "8:04 PM plus 8 hours" landed on 11:59 PM, and
+// reopening the job then recounted the hours from that wrong end. A time past
+// midnight belongs to the next day, which jobSpan now understands.
 function hhmmFromMinutes(min) {
-  const clamped = Math.max(0, Math.min(24 * 60 - 1, Math.round(min)));
-  return `${String(Math.floor(clamped / 60)).padStart(2, '0')}:${String(clamped % 60).padStart(2, '0')}`;
+  const DAY = 24 * 60;
+  const wrapped = ((Math.round(min) % DAY) + DAY) % DAY;
+  return `${String(Math.floor(wrapped / 60)).padStart(2, '0')}:${String(wrapped % 60).padStart(2, '0')}`;
 }
 function snapMinutes(min) { return Math.round(min / SNAP_MIN) * SNAP_MIN; }
+// An end EARLIER than the start means the job runs past midnight — a night
+// shift, not a mistake (v2026.09.21-2226). `end` is what the day timeline
+// draws, so it stops at midnight; `trueEnd` is the real finish and is what
+// durations are measured against. An end EQUAL to the start is still a job
+// with no length, and gets the default.
 function jobSpan(job) {
+  const DAY = 24 * 60;
   const start = minutesFromHHMM(job.start);
   if (start == null) return null;                       // untimed
   let end = minutesFromHHMM(job.end);
-  if (end == null || end <= start) end = start + DEFAULT_LEN;
-  return { start, end };
+  let overnight = false;
+  if (end == null || end === start) end = start + DEFAULT_LEN;
+  else if (end < start) { end += DAY; overnight = true; }
+  return { start, end: Math.min(end, DAY), trueEnd: end, overnight };
 }
 // Side-by-side lanes so overlapping jobs don't hide each other: walk them in
 // start order and reuse the first lane whose last job has finished.
@@ -1643,7 +1774,7 @@ function renderCalendarDay() {
       <span class="cal-hour-label">${fmtHourLabel(h)}</span>
     </div>`).join('');
   const blocks = timed.map((j, i) => {
-    const { start, end } = spans[i];
+    const { start, end, trueEnd, overnight } = spans[i];
     const { lane, lanes: n, depth, visible } = lanes[i];
     const top = (start / 60) * HOUR_PX;
     const height = Math.max(22, ((end - start) / 60) * HOUR_PX - 2);
@@ -1658,7 +1789,11 @@ function renderCalendarDay() {
     const who = jobTitle(j) || 'No customer';
     const bcrew = jobCrew(j);
     const names = crewNames(bcrew);
-    const timeTxt = `${fmtClock(start)}–${fmtClock(end)}`;
+    // An overnight job is drawn down to midnight only, so the label carries the
+    // real finish with a +1 rather than reading as a job that ends at 12:00 AM.
+    const timeTxt = overnight
+      ? `${fmtClock(start)}–${fmtClock(trueEnd % (24 * 60))} +1`
+      : `${fmtClock(start)}–${fmtClock(end)}`;
     // Who's on the job is shown on the block itself now (the legend that used
     // to carry it is gone). The note follows only when the block is tall
     // enough to hold a line without slicing it.
@@ -1810,14 +1945,21 @@ function wireDayInteractions(canEdit) {
       const job = Storage.getJob(jobId);
       if (!job) return;
       const span = jobSpan(job);
-      const duration = span ? span.end - span.start : DEFAULT_LEN;
+      const duration = span ? span.trueEnd - span.start : DEFAULT_LEN;
       if (wasDragging) {
         const newStart = snapMinutes((parseFloat(block.style.top) / HOUR_PX) * 60);
         await Storage.saveJob({ ...job, start: hhmmFromMinutes(newStart), end: hhmmFromMinutes(newStart + duration) });
       } else if (wasResizing) {
         const startMin = span ? span.start : 0;
         const newLen = Math.max(SNAP_MIN, snapMinutes((parseFloat(block.style.height) / HOUR_PX) * 60));
-        await Storage.saveJob({ ...job, start: hhmmFromMinutes(startMin), end: hhmmFromMinutes(startMin + newLen) });
+        // The drag changed how long the job runs, so the stored Hours has to
+        // follow it — otherwise the block and the number disagree.
+        await Storage.saveJob({
+          ...job,
+          start: hhmmFromMinutes(startMin),
+          end: hhmmFromMinutes(startMin + newLen),
+          duration: Math.round((newLen / 60) * 100) / 100,
+        });
       }
       renderCalendarDay();
     };
@@ -1993,7 +2135,13 @@ function openJobModal(jobId, dateStr) {
   document.getElementById('job-date').value = (job && job.date) || dateStr || ymd(new Date());
   document.getElementById('job-start').value = (job && job.start) || '';
   document.getElementById('job-end').value = (job && job.end) || '';
-  syncDurationFromTimes();
+  // The Hours field used to be recomputed from start/end on EVERY open, which
+  // silently replaced a number that had been typed by hand — the second half
+  // of the night-shift bug. A saved duration now wins; a job without one is
+  // still derived. (v2026.09.21-2226)
+  const savedDur = job ? Number(job.duration) : NaN;
+  if (Number.isFinite(savedDur) && savedDur > 0) jobDurEl.value = String(savedDur);
+  else syncDurationFromTimes();
   document.getElementById('job-desc').value = (job && job.description) || '';
   document.getElementById('job-address').value = (job && job.address) || '';
   jobChosenCustomer = job && job.customerId
@@ -2207,7 +2355,7 @@ function createCustomerRowHtml(query) {
   if (!q || !isAdminRole()) return '';
   return `<li class="member-item customer-create-row" data-create-customer="${escapeHtml(q)}">
     <span class="customer-create-plus">+</span>
-    <span class="member-email">Create “${escapeHtml(q)}”</span>
+    <span class="member-email">Create “${escapeHtml(q)}”${similarCustomersHtml(q)}</span>
   </li>`;
 }
 
@@ -2318,10 +2466,15 @@ const jobStartEl = document.getElementById('job-start');
 const jobEndEl = document.getElementById('job-end');
 const jobDurEl = document.getElementById('job-duration');
 
+// An end before the start is read as finishing after midnight rather than as
+// an error, so 8:04 PM to 8:53 AM is 12.8 hours instead of nothing at all
+// (v2026.09.21-2226). Equal times are still no length.
 function durationFromTimes() {
+  const DAY = 24 * 60;
   const s = minutesFromHHMM(jobStartEl.value);
-  const e = minutesFromHHMM(jobEndEl.value);
-  if (s == null || e == null || e <= s) return null;
+  let e = minutesFromHHMM(jobEndEl.value);
+  if (s == null || e == null || e === s) return null;
+  if (e < s) e += DAY;
   return (e - s) / 60;
 }
 function syncDurationFromTimes() {
@@ -2396,6 +2549,7 @@ if (jobSave) jobSave.addEventListener('click', async () => {
     date,
     start: document.getElementById('job-start').value,
     end: document.getElementById('job-end').value,
+    duration: parseFloat(jobDurEl.value) || null,
     description: document.getElementById('job-desc').value,
     employeeNames: names,
     crew,
@@ -2496,15 +2650,23 @@ function priceCellHtml(item, vendor, canEdit, isCheapest) {
   const key = `${item.id}|${vendor.id}`;
   const latest = Storage.latestPriceEntry(item, vendor.id);
   if (openCellKey === key && canEdit) {
+    // PREFILLED with what is already recorded (v2026.09.21-2226). It opened
+    // blank before, which read as "tapping a cell wipes it" and made a small
+    // correction — a date, an availability — impossible without retyping the
+    // price. Saving still APPENDS an entry; the history is untouched.
     const today = new Date().toISOString().slice(0, 10);
+    const curPrice = (latest && latest.price != null && latest.price !== '') ? String(latest.price) : '';
+    const curDate = (latest && latest.date) || today;
+    const curAvail = (latest && latest.avail) || 'yes';
+    const sel = (v) => curAvail === v ? ' selected' : '';
     return `<td class="price-cell price-cell-editing" data-key="${key}">
-      <input class="price-input" type="number" inputmode="decimal" step="0.01" placeholder="Price" value="" />
-      <input class="price-date" type="date" value="${today}" />
+      <input class="price-input" type="number" inputmode="decimal" step="0.01" placeholder="Price" value="${escapeHtml(curPrice)}" />
+      <input class="price-date" type="date" value="${escapeHtml(curDate)}" />
       <select class="price-avail">
-        <option value="yes">Available</option>
-        <option value="soon">2–3 days</option>
-        <option value="later">Longer</option>
-        <option value="no">Not available</option>
+        <option value="yes"${sel('yes')}>Available</option>
+        <option value="soon"${sel('soon')}>2–3 days</option>
+        <option value="later"${sel('later')}>Longer</option>
+        <option value="no"${sel('no')}>Not available</option>
       </select>
       <div class="price-cell-actions">
         <button class="price-save" type="button">Save</button>
@@ -3030,6 +3192,14 @@ function wirePriceTable(canEdit) {
       openCellKey = null;
       await Storage.addPriceEntry(itemId, vendorId, { price, date, avail });
       renderPriceTable();
+      // A BACK-DATED entry is saved, but the cell goes on showing the newest
+      // one by date — which reads as "it didn't save". Say so rather than
+      // leaving the table looking untouched. (v2026.09.21-2226)
+      const savedItem = Storage.listPriceItems().find(i => i.id === itemId);
+      const shown = savedItem ? Storage.latestPriceEntry(savedItem, vendorId) : null;
+      if (shown && date && shown.date && shown.date > date) {
+        showEditorToast(`Saved. A newer price from ${shortDate(shown.date)} is still showing.`);
+      }
     };
     editing.querySelector('.price-save').addEventListener('click', save);
     editing.querySelector('.price-cancel').addEventListener('click', cancelPriceEdit);
@@ -3093,7 +3263,10 @@ function wirePriceTable(canEdit) {
       th.addEventListener('click', () => {
         const item = Storage.listPriceItems().find(i => i.id === th.dataset.item);
         if (!item) return;
-        askForName({ title: 'Item name', value: item.name, deletable: true }).then(async name => {
+        askForName({
+          title: 'Item name', value: item.name, deletable: true,
+          similar: Storage.listPriceItems().map(i => i.name),
+        }).then(async name => {
           if (name === null) return;
           if (!name) {
             if (!await askConfirm(`Delete “${item.name}” and every price recorded against it?`, { title: 'Delete item' })) return;
@@ -3109,7 +3282,10 @@ function wirePriceTable(canEdit) {
       th.addEventListener('click', () => {
         const v = Storage.getPriceConfig().vendors.find(x => x.id === th.dataset.vendor);
         if (!v) return;
-        askForName({ title: 'Vendor name', value: v.name, deletable: true }).then(async name => {
+        askForName({
+          title: 'Vendor name', value: v.name, deletable: true,
+          similar: Storage.getPriceConfig().vendors.map(x => x.name),
+        }).then(async name => {
           if (name === null) return;
           if (!name) {
             if (!await askConfirm(`Delete “${v.name}” and every price recorded against it?`, { title: 'Delete vendor' })) return;
@@ -3194,14 +3370,20 @@ const priceZoomOut = document.getElementById('price-zoom-out');
 if (priceAddItemBtn) priceAddItemBtn.addEventListener('click', () => {
   // askForName FIRST, with nothing awaited before it — that is what keeps the
   // focus inside the tap and the keyboard up.
-  askForName({ title: 'New item', saveLabel: 'Add item' }).then(async name => {
+  askForName({
+    title: 'New item', saveLabel: 'Add item',
+    similar: Storage.listPriceItems().map(i => i.name),
+  }).then(async name => {
     if (!name) return;
     await Storage.addPriceItem(name);
     renderPriceTable();
   });
 });
 if (priceAddVendorBtn) priceAddVendorBtn.addEventListener('click', () => {
-  askForName({ title: 'New vendor', saveLabel: 'Add vendor' }).then(async name => {
+  askForName({
+    title: 'New vendor', saveLabel: 'Add vendor',
+    similar: Storage.getPriceConfig().vendors.map(v => v.name),
+  }).then(async name => {
     if (!name) return;
     await Storage.addPriceVendor(name);
     renderPriceTable();
@@ -3490,6 +3672,10 @@ document.addEventListener('click', (e) => {
 const moreMenus = [
   ['cal-more-btn', 'cal-more-dropdown'],
   ['hours-more-btn', 'hours-more-dropdown'],
+  // v2026.09.21-2300: the customers list (sort) and one customer (delete).
+  ['customers-more-btn', 'customers-more-dropdown'],
+  ['customer-more-btn', 'customer-more-dropdown'],
+  ['orphan-more-btn', 'orphan-more-dropdown'],   // v2026.09.21-2331 (sort)
 ].map(([btnId, dropId]) => ({
   btn: document.getElementById(btnId),
   drop: document.getElementById(dropId),
@@ -3883,11 +4069,29 @@ function rememberScroll() {
   if (key) screenScroll[key] = window.scrollY || 0;
 }
 function resetScrollMemory() { Object.keys(screenScroll).forEach(k => delete screenScroll[k]); }
-// Restore after the list has rendered, so the page is tall enough to scroll to
+// Restore after the list has rendered, so the page is tall enough to scroll to.
+//
+// CLAMPED, and re-clamped a frame later (v2026.09.21-2242). `window.scrollTo`
+// is not bounded the way a user scroll is, and the screen being restored can
+// be SHORTER than the one the offset was taken from: a list that renders in
+// two passes, a body that was `position: fixed` a moment ago and has not been
+// re-measured, a filtered list. Overshooting leaves the DOCUMENT scrolled past
+// its content, and because the header is `position: sticky` and the FAB is
+// `position: fixed`, both stay put while everything between them is empty.
+// That is what a "blank screen" report looks like from the outside.
+//
+// SPECULATIVE: this is the leading explanation for the blank home screen after
+// backing out of a note, not a confirmed one. See FEATURES.md §8.
 function restoreScroll(key) {
   const y = screenScroll[key] || 0;
   if (!y) { window.scrollTo(0, 0); return; }
-  requestAnimationFrame(() => window.scrollTo(0, y));
+  const apply = () => {
+    const max = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+    window.scrollTo(0, Math.min(y, max));
+  };
+  // Twice: once now that the list is in the DOM, once after the browser has
+  // measured it, since the first reading can still be the old page's height.
+  requestAnimationFrame(() => { apply(); requestAnimationFrame(apply); });
 }
 
 function hideAllScreens() {
@@ -3906,7 +4110,9 @@ function hideAllScreens() {
   if (pfm) pfm.hidden = true;
   // The calendar and hours ⋯ menus, same reason — a dropdown left open would
   // reappear over whatever screen you came back to.
-  ['cal-more-dropdown', 'hours-more-dropdown'].forEach(id => {
+  ['cal-more-dropdown', 'hours-more-dropdown',
+   'customers-more-dropdown', 'customer-more-dropdown',
+   'orphan-more-dropdown'].forEach(id => {
     const d = document.getElementById(id);
     if (d) d.hidden = true;
   });
@@ -4466,6 +4672,21 @@ function showCustomerNotes(customerId, returnTo) {
   if (!handlingPopstate) history.pushState({ screen: 'customer-notes', customerId, returnTo: customerNotesReturnTo }, '');
 }
 
+// Breadcrumb: Home › Customers › <name> › Note. Only roles that can READ the
+// customers collection get the customer crumbs (employees/customers can't).
+//
+// Its own function since v2026.09.21-2308: assigning a note to a customer now
+// stays in the editor, so the trail has to be rebuilt WITHOUT reopening it.
+function renderEditorCrumbs(type, customerId) {
+  const crumbs = [{ label: 'Home', go: 'home' }];
+  if (type === 'note' && customerId && canViewAllRole()) {
+    crumbs.push({ label: 'Customers', go: 'customers' });
+    crumbs.push({ label: customerCrumbLabel(customerId), go: 'customer', id: customerId });
+  }
+  crumbs.push({ label: type === 'note' ? (currentIsDefault ? 'Customer details' : 'Note') : 'Customer' });
+  renderCrumbs('crumbs-editor', crumbs);
+}
+
 function showEditor(record, type, cursorHint) {
   clearCompiledState();
   // Any editor open other than the one right after a + button clears Cancel;
@@ -4527,15 +4748,7 @@ function showEditor(record, type, cursorHint) {
     editorSharedBadge.hidden = !(isAdminRole() && isShared);
   }
 
-  // Breadcrumb: Home › Customers › <name> › Note. Only roles that can READ the
-  // customers collection get the customer crumbs (employees/customers can't).
-  const editorCrumbs = [{ label: 'Home', go: 'home' }];
-  if (type === 'note' && record.customerId && canViewAllRole()) {
-    editorCrumbs.push({ label: 'Customers', go: 'customers' });
-    editorCrumbs.push({ label: customerCrumbLabel(record.customerId), go: 'customer', id: record.customerId });
-  }
-  editorCrumbs.push({ label: type === 'note' ? (currentIsDefault ? 'Customer details' : 'Note') : 'Customer' });
-  renderCrumbs('crumbs-editor', editorCrumbs);
+  renderEditorCrumbs(type, record.customerId);
 
   // Delete is admin-only (and never on default notes)
   deleteBtn.style.display = (isAdminRole() && !(type === 'note' && currentIsDefault)) ? '' : 'none';
@@ -4642,8 +4855,10 @@ function homeCreateRowHtml(query) {
     ? `<button type="button" class="home-create-btn" data-create-customer-home="${escapeHtml(q)}"><span class="customer-create-plus">+</span> Customer</button>`
     : '';
   const note = `<button type="button" class="home-create-btn" data-create-note-home="${escapeHtml(q)}"><span class="customer-create-plus">+</span> Note</button>`;
+  // Only admins see the Customer button, so only they get the customer hint.
+  const similar = isAdminRole() ? similarCustomersHtml(q) : '';
   return `<div class="customer-create-row home-create-row">
-    <span class="home-create-label">Create “${escapeHtml(q)}” as a</span>
+    <span class="home-create-label">Create “${escapeHtml(q)}” as a${similar}</span>
     <span class="home-create-btns">${cust}${note}</span>
   </div>`;
 }
@@ -5192,10 +5407,15 @@ function applyCustomerSort(customers) {
   return sorted;
 }
 
+// In the ⋯ menu these are ROWS, not a pressed/unpressed pair, so the active
+// one is marked with a ✓ as well as aria-pressed — a menu row has no visual
+// "pressed" state to read. (v2026.09.21-2300)
 function updateSortButtons() {
   const v = getCustomerSort();
   sortAlphaBtn.setAttribute('aria-pressed', v === 'alpha');
   sortRecentBtn.setAttribute('aria-pressed', v === 'recent');
+  sortAlphaBtn.textContent = v === 'alpha' ? 'A–Z ✓' : 'A–Z';
+  sortRecentBtn.textContent = v === 'recent' ? 'Recent ✓' : 'Recent';
 }
 
 function customerMatchesSearch(c, term) {
@@ -5226,7 +5446,7 @@ function renderCustomersList() {
   const createRow = (isAdminRole() && customerSearchTerm.trim())
     ? `<div class="member-item customer-create-row" data-create-customer="${escapeHtml(customerSearchTerm.trim())}">
         <span class="customer-create-plus">+</span>
-        <span class="member-email">Create “${escapeHtml(customerSearchTerm.trim())}”</span>
+        <span class="member-email">Create “${escapeHtml(customerSearchTerm.trim())}”${similarCustomersHtml(customerSearchTerm.trim())}</span>
       </div>`
     : '';
   if (customers.length === 0) {
@@ -5361,15 +5581,15 @@ function commitSave() {
     saveCompiledEdits();
     return;
   }
+  // Only 'note' — see the note in commitAndCleanupEditor. A customer's name and
+  // address ARE its default note's title and body, so they save through this
+  // same branch; the separate 'customer' branch that wrote {name, address} was
+  // unreachable and wrote a shape nothing reads. Removed v2026.09.21-2336.
   if (currentType === 'note') {
     const composed = composeBody(titleInput.value, bodyInput.value);
     // Track our own save so the remote-change detector doesn't fire on it
     lastKnownRemoteBody = composed;
     Storage.updateNote(currentId, composed);
-  } else if (currentType === 'customer') {
-    Storage.updateCustomer(currentId, {
-      name: titleInput.value, address: bodyInput.value,
-    });
   }
 }
 
@@ -5589,7 +5809,50 @@ sortRecentBtn.addEventListener('click', async () => {
   renderCustomersList();
 });
 
+// DELETE CUSTOMER (v2026.09.21-2300). Until now the only way to remove a
+// customer was to open their record and blank the name AND the body, which
+// commitAndCleanupEditor reads as "this was never really created" — an
+// undiscoverable side effect that a tester reported as "can't delete a
+// customer". Storage.deleteCustomer is a SOFT delete: the customer and every
+// note filed under them get a deletedAt and appear in Trash as one entry for
+// 30 days, so the confirmation promises a way back rather than finality.
+const customerDeleteBtn = document.getElementById('customer-delete-btn');
+if (customerDeleteBtn) customerDeleteBtn.addEventListener('click', async () => {
+  const id = activeCustomerId;
+  if (!id || !isAdminRole()) return;
+  const name = (customerCrumbLabel(id) || '').trim() || 'this customer';
+  // The default note always exists, so "and 1 note" would be noise on an empty
+  // customer; only mention notes when there are extra ones to lose.
+  const extra = Storage.listNotesByCustomer(id).filter(n => !n.isDefault && !n.deletedAt).length;
+  const alsoNotes = extra === 1 ? ' and their 1 other note' : (extra ? ` and their ${extra} other notes` : '');
+  const ok = await askConfirm(
+    `“${name}”${alsoNotes} will move to Trash, where you can put them back for 30 days.`,
+    { title: 'Delete this customer?', okLabel: 'Delete' });
+  if (!ok) return;
+  Storage.deleteCustomer(id);
+  activeCustomerId = null;
+  refreshTrashUi();
+  showCustomers();
+});
+
 titleInput.addEventListener('input', scheduleSave);
+// A customer's name IS its default note's title, so this is where a duplicate
+// customer is usually born — the + FAB opens a blank record and you type a
+// name that already exists. Said ONCE, on leaving the field rather than while
+// typing, and only when the name has settled: a hint that fires on every
+// keystroke is one people learn to ignore. (v2026.09.21-2312)
+let lastDupeTitleWarned = '';
+titleInput.addEventListener('blur', () => {
+  if (currentType !== 'note' || !currentIsDefault || !currentId) return;
+  const name = titleInput.value.trim();
+  if (!name || normaliseName(name) === normaliseName(lastDupeTitleWarned)) return;
+  const mine = Storage.getNote(currentId);
+  const selfName = mine && mine.customerId ? Storage.getCustomerNameSnapshot(mine.customerId) : null;
+  const hits = similarNames(name, allCustomerNames(), { limit: 2, self: selfName });
+  if (!hits.length) return;
+  lastDupeTitleWarned = name;
+  showEditorToast(`You already have: ${hits.join(', ')}`);
+});
 bodyInput.addEventListener('input', scheduleSave);
 
 checkboxBtn.addEventListener('click', () => {
@@ -6136,6 +6399,33 @@ bodyInput.addEventListener('keydown', (e) => {
 // Where the record open in the editor was created from, so every exit path
 // (back, popstate, Cancel, or discarding an empty new customer) returns there.
 let newRecordOrigin = null;
+// The last check before an empty customer is discarded: files live in
+// IndexedDB, which is ASYNC, and commitAndCleanupEditor is not — its return
+// value drives navigation on the spot. So the screen has already moved on by
+// the time this decides, which is why both outcomes announce themselves.
+//
+// Files are per DEVICE, so the same empty customer can be discarded on a phone
+// and kept on a desktop that holds a photo of the panel. That is how files work
+// here, not something this check can reconcile.
+//
+// A failing IndexedDB is treated as "no files" — the same thing that happened
+// before the check existed, rather than stranding empty records forever.
+// (v2026.09.21-2327)
+function discardEmptyCustomer(customerId) {
+  const finish = () => {
+    Storage.deleteCustomer(customerId);
+    refreshTrashUi();
+    showEditorToast('Empty customer discarded — it is in Trash.');
+  };
+  LocalFiles.list(customerId).then(recs => {
+    if (recs && recs.length) {
+      showEditorToast('Kept — this customer has files on this device.');
+      return;
+    }
+    finish();
+  }).catch(finish);
+}
+
 function commitAndCleanupEditor() {
   let cancelledCustomer = false;
   newRecordOrigin = pendingNewRecord ? pendingNewRecord.origin : null;
@@ -6157,19 +6447,28 @@ function commitAndCleanupEditor() {
       if (currentIsDefault) {
         if (composed.trim() === '') {
           const note = Storage.getNote(currentId);
-          if (note && note.customerId) {
-            Storage.deleteCustomer(note.customerId);
+          // EMPTY means empty all through: no name, no details, no other notes
+          // and no files (v2026.09.21-2327). It used to mean only "the name and
+          // body are blank", which quietly deleted a real customer if you
+          // cleared their name meaning to retype it and got distracted.
+          const cid = note && note.customerId;
+          const others = cid
+            ? Storage.listNotesByCustomer(cid).filter(n => !n.isDefault).length
+            : 0;
+          if (cid && others === 0) {
+            discardEmptyCustomer(cid);
             cancelledCustomer = true;
           }
         }
       } else if (composed.trim() === '') {
         Storage.deleteNote(currentId);
       }
-    } else if (currentType === 'customer') {
-      if (!titleInput.value.trim() && !bodyInput.value.trim()) {
-        Storage.deleteCustomer(currentId);
-      }
     }
+    // There is no `currentType === 'customer'` case. A customer is edited
+    // THROUGH its default note (`isDefault`), handled above; nothing has called
+    // showEditor with type 'customer' for a long time, and the branch that
+    // deleted one here was unreachable. Removed v2026.09.21-2331.
+    // `currentType` only ever holds 'note' or 'compiled'.
   }
   stashUndoForNote();     // park it before currentId/currentType are cleared
   currentId = null;
@@ -6427,21 +6726,19 @@ if (editorCancelBtn) {
 deleteBtn.addEventListener('click', async () => {
   if (!currentId) return;
   if (currentType === 'note' && currentIsDefault) return;
-  // Say where it goes and that it comes back. The cascade is intentional (a
-  // customer's notes travel with them and restore together), but that isn't
-  // guessable — people looked for the notes in Orphaned notes and concluded
-  // they'd been lost.
-  const label = currentType === 'customer'
-    ? 'Their notes go too. Everything lands in Settings → Trash, where you can restore it for 30 days.'
-    : 'It goes to Settings → Trash, where you can restore it for 30 days.';
-  if (await askConfirm(label, { title: currentType === 'customer' ? 'Delete this customer?' : 'Delete this note?' })) {
-    if (currentType === 'customer') {
-      Storage.deleteCustomer(currentId);
-      currentId = null; currentType = null; currentIsDefault = false;
-      activeCustomerId = null;
-      showCustomers();
-      return;
-    }
+  // Say where it goes and that it comes back — people looked in Orphaned notes
+  // and concluded a deleted note had been lost. (The cascade note that used to
+  // sit here belonged to the customer branch and moved with it to the ⋯ menu's
+  // Delete customer, which is where a cascade can actually happen.)
+  //
+  // This only ever deletes a NOTE. A customer is deleted from the ⋯ menu on
+  // their own screen (v2026.09.21-2300), and a customer's DEFAULT note cannot
+  // reach this button at all — showEditor hides it when `currentIsDefault`, and
+  // the guard above returns on the same condition. The customer wording and
+  // deleteCustomer call that used to sit here were unreachable both ways.
+  // Removed v2026.09.21-2336.
+  const label = 'It goes to Settings → Trash, where you can restore it for 30 days.';
+  if (await askConfirm(label, { title: 'Delete this note?' })) {
     Storage.deleteNote(currentId);
     currentId = null; currentType = null; currentIsDefault = false;
     returnFromEditor();
@@ -6625,6 +6922,17 @@ function renderAssignCustomerList(filter) {
   wireAssignCustomerRows();
 }
 
+// Assigning a note STAYS IN THE NOTE (v2026.09.21-2308). It used to close the
+// editor and open the customer's screen, which a tester flagged twice over: the
+// jump itself ("not sure if this was intentional"), and Back from there not
+// coming back to the note — the customer screen was pushed on top of the
+// editor's history entry, and the popstate handler's customer-notes branch
+// always falls through to the Customers list.
+//
+// Filing a note somewhere is not a request to GO there. Nothing about the note
+// changes except where it is filed, so the note is still what you are working
+// on. The breadcrumb is what reports the move: it gains (or loses) the customer
+// step, which is itself tappable if you do want to go there.
 function wireAssignCustomerRows() {
   assignCustomerList.querySelectorAll('.assign-customer-item').forEach(item => {
     item.addEventListener('click', () => {
@@ -6633,15 +6941,22 @@ function wireAssignCustomerRows() {
       const targetId = item.dataset.id || null; // '' = None (general note)
       Storage.assignNoteToCustomer(currentId, targetId);
       assignCustomerModal.hidden = true;
-      currentId = null; currentType = null; currentIsDefault = false;
-      if (!targetId) {
-        activeCustomerId = null;
-        showNotes();
-        return;
-      }
       activeCustomerId = targetId;
-      returnScreen = 'customer-notes';
-      showCustomerNotes(targetId);
+      // Where Back goes from here, which is the normal rule for a note: to the
+      // customer it belongs to, or home for a general note.
+      returnScreen = targetId ? 'customer-notes' : 'notes';
+      // A brand-new note draws a DIFFERENT trail (newRecordCrumbs), so its
+      // in-progress record has to learn about the move too.
+      if (pendingNewRecord && pendingNewRecord.noteId === currentId) {
+        pendingNewRecord.customerId = targetId;
+        updateCancelBtn();
+      } else {
+        renderEditorCrumbs(currentType, targetId);
+      }
+      // Nothing else on screen moves, so say what happened.
+      showEditorToast(targetId
+        ? `Filed under ${customerCrumbLabel(targetId)}`
+        : 'Moved to general notes');
     });
   });
 }
@@ -7334,6 +7649,8 @@ function applyRoleUI(role) {
     document.getElementById('customers-fab'),
     document.getElementById('customer-notes-fab'),
     document.getElementById('delete-btn'),
+    // The ⋯ on a customer holds only Delete, so the whole button goes.
+    document.getElementById('customer-more-btn'),
   ];
   adminControls.forEach(el => { if (el) el.style.display = isAdminRole ? '' : 'none'; });
   // Home + FAB: admins and employees can create general notes; read-only roles cannot
@@ -7542,6 +7859,14 @@ function renderMembersList() {
 
   const members = Storage.listMembers();
   const currentUid = Storage.getUid();
+  // You may demote yourself, but not if you are the last admin — that would
+  // leave the company with nobody who can invite, set roles or run the
+  // QuickBooks side, and no way back in. Pending admin INVITES do not count:
+  // an unaccepted invite is not a person who can let you back in.
+  // (v2026.09.21-2317. Before this, your own row was simply disabled with no
+  // explanation, which read as a bug.)
+  const otherAdmins = members.filter(m => m.uid !== currentUid && m.role === 'admin').length;
+  const lastAdmin = otherAdmins === 0;
   // .member-card, NOT .member-item — that class is shared with eight other
   // lists (customer pickers, share list, trash), so it can't be restructured
   // here. An email is the only thing identifying a user, and squeezing it
@@ -7555,18 +7880,32 @@ function renderMembersList() {
       </div>
       <label class="member-field">
         <span class="member-field-label">Role</span>
-        <select class="member-role-select" data-uid="${m.uid}" ${m.uid === currentUid ? 'disabled' : ''}>
+        <select class="member-role-select" data-uid="${m.uid}" ${m.uid === currentUid && lastAdmin ? 'disabled' : ''}>
           <option value="admin" ${m.role === 'admin' ? 'selected' : ''}>Admin</option>
           <option value="employee" ${m.role === 'employee' ? 'selected' : ''}>Employee</option>
           <option value="bookkeeper" ${m.role === 'bookkeeper' ? 'selected' : ''}>Bookkeeper</option>
           <option value="customer" ${m.role === 'customer' ? 'selected' : ''}>Customer</option>
         </select>
       </label>
+      ${m.uid === currentUid && lastAdmin
+        ? '<p class="member-note">You are the only admin, so you cannot change your own role. Make someone else an admin first.</p>'
+        : ''}
     </li>
   `).join('');
 
   membersList.querySelectorAll('.member-role-select').forEach(sel => {
+    // Remembered so the select can be put back if the confirmation is declined
+    // — a <select> has already changed by the time `change` fires.
+    const was = sel.value;
     sel.addEventListener('change', async () => {
+      if (sel.dataset.uid === currentUid && sel.value !== 'admin') {
+        // Demoting yourself takes effect at once and hides this whole section,
+        // so this confirmation is the only warning there is.
+        const ok = await askConfirm(
+          'You will lose admin access straight away — no more users, roles, invites or company settings. Another admin would have to put you back.',
+          { title: 'Change your own role?', okLabel: 'Change it' });
+        if (!ok) { sel.value = was; return; }
+      }
       await Storage.updateMemberRole(sel.dataset.uid, sel.value);
     });
   });
@@ -8500,6 +8839,26 @@ if (changelogList) {
     <li class="changelog-item"><span class="changelog-ver">${ver}</span> ${desc}</li>
   `).join('');
 }
+// Collapsed unless this device has opened it before. Per device, not synced:
+// whether you want the changelog open is about the screen you are on, and it
+// is not worth a Firestore write. (v2026.09.21-2317)
+const changelogToggle = document.getElementById('changelog-toggle');
+if (changelogToggle && changelogList) {
+  const caret = changelogToggle.querySelector('.setting-list-caret');
+  const applyChangelogOpen = (open) => {
+    changelogList.hidden = !open;
+    changelogToggle.setAttribute('aria-expanded', String(open));
+    if (caret) caret.textContent = open ? '\u25be' : '\u25b8';
+  };
+  let changelogOpen = false;
+  try { changelogOpen = localStorage.getItem('na-changelog-open') === '1'; } catch (e) {}
+  applyChangelogOpen(changelogOpen);
+  changelogToggle.addEventListener('click', () => {
+    changelogOpen = !changelogOpen;
+    applyChangelogOpen(changelogOpen);
+    try { localStorage.setItem('na-changelog-open', changelogOpen ? '1' : '0'); } catch (e) {}
+  });
+}
 
 // ---------- Hours (calendar jobs → records → QuickBooks) ----------
 // The hours entered on calendar jobs, rendered as a GRID that borrows the price
@@ -8730,6 +9089,14 @@ function iifShortDate(e) {
   return e.date.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
 }
 // Accepts what trades actually write: "3.5" or "3:30".
+// iOS's decimal keypad has no colon key, so "3.5 or 3:30" asks the phone for
+// something it cannot type. iPhones and iPads get the shortened hint; every
+// other device keeps the full one, and a typed colon is still accepted
+// everywhere. (v2026.09.21-2226)
+const IS_IOS_DEVICE = /iPad|iPhone|iPod/.test(navigator.userAgent)
+  || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const HOURS_PLACEHOLDER = IS_IOS_DEVICE ? '3.5' : '3.5 or 3:30';
+
 function parseHoursInput(text) {
   const val = String(text || '').trim();
   if (!val) return null;
@@ -8785,7 +9152,7 @@ function iifCellHtml(row, col) {
     // what killed two earlier attempts at in-cell buttons.
     return `<td class="price-cell price-cell-editing iif-hours-col" ${cellAttrs}>
       <div class="iif-edit-wrap">
-        <input class="iif-edit-hours" type="text" inputmode="decimal" placeholder="3.5 or 3:30"
+        <input class="iif-edit-hours" type="text" inputmode="decimal" placeholder="${HOURS_PLACEHOLDER}"
                value="${escapeHtml(v.hoursText)}" />
         <button type="button" class="iif-edit-done" aria-label="Save hours and close">✓</button>
       </div></td>`;
@@ -9022,7 +9389,12 @@ const iifOutsideTap = makeOutsideTapWatcher({
 function commitIifHours(idx, text) {
   const e = iifParsedEntries[idx];
   if (!e) return;
-  const hours = parseHoursInput(text);
+  // An EMPTY box means "no hours on this line" and has to save as such.
+  // Bailing out on a null parse treated a cleared cell as a typo, so the only
+  // way to undo an entry was to type 0 over it. A cell holding something
+  // unparseable is still left alone. (v2026.09.21-2226)
+  const blank = String(text || '').trim() === '';
+  const hours = blank ? 0 : parseHoursInput(text);
   if (hours === null) return;
   e.hours = Math.round(hours * 100) / 100;
   e.hoursFormatted = e.hours > 0 ? formatDuration(e.hours) : '';
@@ -9368,9 +9740,18 @@ if (iifDownloadBtn) iifDownloadBtn.addEventListener('click', () => {
 // ---------- orphaned notes view ----------
 let _orphanSort = 'recent'; // 'alpha' | 'recent'
 
+// Menu ROWS since v2026.09.21-2331, so the active one carries a ✓ as well as
+// aria-pressed — same reasoning as updateSortButtons: a row has no visual
+// pressed state to read.
 function updateOrphanSortButtons() {
-  if (orphanSortAlphaBtn) orphanSortAlphaBtn.setAttribute('aria-pressed', _orphanSort === 'alpha');
-  if (orphanSortRecentBtn) orphanSortRecentBtn.setAttribute('aria-pressed', _orphanSort === 'recent');
+  if (orphanSortAlphaBtn) {
+    orphanSortAlphaBtn.setAttribute('aria-pressed', _orphanSort === 'alpha');
+    orphanSortAlphaBtn.textContent = _orphanSort === 'alpha' ? 'A–Z ✓' : 'A–Z';
+  }
+  if (orphanSortRecentBtn) {
+    orphanSortRecentBtn.setAttribute('aria-pressed', _orphanSort === 'recent');
+    orphanSortRecentBtn.textContent = _orphanSort === 'recent' ? 'Recent ✓' : 'Recent';
+  }
 }
 
 function sortOrphans(orphans) {
@@ -9581,6 +9962,15 @@ function tutorialSteps(part) {
       target: () => document.querySelector('#crumbs-customer-notes'),
       text: 'The trail at the top always shows where you are. Tap an earlier step — Home, Customers — to go back there.',
     },
+    {
+      // No `requires` for the admin check: the ⋯ is hidden for everyone else,
+      // and isTargetVisible() already skips a step whose target is hidden.
+      screen: 'customer-notes',
+      group: 'customer',
+      requires: () => Storage.listCustomers().length > 0,
+      target: () => document.getElementById('customer-more-btn'),
+      text: 'The ⋯ menu deletes a customer. They and all their notes go to Trash, in Settings, where you can put them back for 30 days — so it is safe to tidy up.',
+    },
   ];
 
   if (part === 2) {
@@ -9661,7 +10051,7 @@ function tutorialSteps(part) {
       },
       setup: () => { showPriceTable(); return true; },
       target: () => document.querySelector('#price-table .price-cell'),
-      text: 'Tap any cell to record a price: the amount, the date you got it, and whether it’s in stock. Each cell keeps every price you’ve entered.',
+      text: 'Tap any cell to record a price: the amount, the date you got it, and whether it’s in stock. It opens with what is already there, so you can fix one thing without retyping the rest. Leaving the price empty is fine — a date and “not available” on its own records that you asked and they had none. Each cell keeps every price you’ve entered.',
     },
     {
       screen: 'price',
@@ -9944,7 +10334,7 @@ function tutorialSteps(part) {
         requires: hasJobs,
         setup: goHours,
         target: () => document.querySelector('#iif-grid .price-cell'),
-        text: 'Hours is the only thing you change here. Tap a cell, type the number, and it is saved onto the job the moment you leave the cell — tap the ✓ to finish and put the keyboard away. Date, employee and customer belong to the job, so fix those on the calendar.',
+        text: 'Hours is the only thing you change here. Tap a cell, type the number, and it is saved onto the job the moment you leave the cell — tap the ✓ to finish and put the keyboard away. Clear the box and leave it empty to take the hours back off a line. Date, employee and customer belong to the job, so fix those on the calendar.',
       },
       {
         screen: 'hours',
@@ -9982,7 +10372,7 @@ function tutorialSteps(part) {
     const step = (target, text) => ({ screen: 'settings', setup: goSettings, target, text });
     return [
       step(() => document.getElementById('members-list'),
-        'Everyone with access to this company, and what each can do. Admin does everything. Bookkeeper sees everything but changes nothing. Employee sees only the notes and jobs given to them. Customer sees only their own.'),
+        'Everyone with access to this company, and what each can do. Admin does everything. Bookkeeper sees everything but changes nothing. Employee sees only the notes and jobs given to them. Customer sees only their own. You can change your own role too, as long as somebody else is an admin — the last admin is locked so the company can never be left without one.'),
       step(() => document.getElementById('invite-email'),
         'Invite someone by email and pick what they are. They get a link that signs them straight in — no password to set up first. Get the role wrong and you can change it here afterwards; it takes effect on their phone immediately.'),
       step(() => document.getElementById('invites-list'),
@@ -10301,7 +10691,11 @@ async function showTutorialBubble(target, text, index, stepCount) {
   // "1 of 5" rather than opening on "2 of 6" and looking like it lost one.
   if (tutorialProgress) {
     const floor = tutorialPart === tutorialStartPart ? tutorialFloorIndex : 0;
-    tutorialProgress.textContent = `Part ${tutorialPart} of ${TUTORIAL_PARTS} \u00b7 ${index + 1 - floor} of ${stepCount - floor}`;
+    // A solo run never leaves its part, so "Part 3 of 9" only advertises eight
+    // others it will not visit. (v2026.09.21-2235)
+    tutorialProgress.textContent = tutorialSolo
+      ? `${index + 1 - floor} of ${stepCount - floor}`
+      : `Part ${tutorialPart} of ${TUTORIAL_PARTS} \u00b7 ${index + 1 - floor} of ${stepCount - floor}`;
   }
   // Back is always visible, greyed when there's nothing before this step
   // (step 1 of the part the user launched).
@@ -10310,7 +10704,10 @@ async function showTutorialBubble(target, text, index, stepCount) {
     tutorialBack.textContent = '\u2190';
     // Back roams the whole tour: it stops only at the very first step of the
     // first part this person can see, not at the part they happened to enter on.
-    tutorialBack.disabled = (index <= 0 && tutorialStepPart(tutorialPart, -1) === null);
+    // ...except in a SOLO run, which has no previous part to roam into, so the
+    // button must LOOK stopped as well as behave that way. (v2026.09.21-2235)
+    tutorialBack.disabled = index <= 0
+      && (tutorialSolo || tutorialStepPart(tutorialPart, -1) === null);
   }
   // Last bubble of parts 1 and 2 chains into the next part \u2014 unless this is a
   // solo run, which ends on its own part.
@@ -10477,6 +10874,11 @@ if (tutorialNext) tutorialNext.addEventListener('click', () => {
 if (tutorialBack) tutorialBack.addEventListener('click', () => {
   tutorialDirection = -1;
   if (tutorialStepIndex <= 0) {
+    // A SOLO run is one part by definition, so Back stops at its first step.
+    // Roaming into the previous part is right for the Settings list, where the
+    // tour is continuous, and wrong from a ⋯ menu, where you asked about one
+    // screen. (v2026.09.21-2235)
+    if (tutorialSolo) return;
     // Into the previous APPLICABLE part's last step. No longer floored at the
     // part you launched from: a ⋯ entry is where you come in, not a wall.
     const prev = tutorialStepPart(tutorialPart, -1);
