@@ -846,7 +846,17 @@ select.iif-date-input { appearance: none; -webkit-appearance: none; padding-righ
 .job-crew-line .job-emp-hours { width: 74px; flex: 0 0 auto; }
 .job-crew-bill { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--ink-soft); cursor: pointer; }
 .job-crew-del { background: none; border: none; color: var(--danger); cursor: pointer; font-size: 15px; padding: 4px 6px; margin-left: auto; }
-.job-crew-note { font-size: 16px; }   /* 16px minimum — iOS auto-zoom */
+/* A textarea, not an input (v2026.09.24-2219): the height is set from
+   scrollHeight by autoGrowNote, so no drag handle and no inner scrollbar until
+   the cap. 16px minimum — iOS auto-zoom (§13 #14). */
+.job-crew-note {
+  font-size: 16px;
+  resize: none;
+  overflow-y: auto;
+  max-height: 8.5em;          /* ~6 lines, then it scrolls */
+  line-height: 1.35;
+  display: block;
+}
 .job-crew-empty { color: var(--ink-soft); font-size: 13px; }
 .job-crew-add { margin: 6px 0 4px; }
 /* Hours chart: the spare column marks rows that aren't chargeable. */
@@ -917,9 +927,40 @@ select.iif-date-input { appearance: none; -webkit-appearance: none; padding-righ
 }
 /* Job editor */
 /* Start / End / Hours — wraps rather than squeezing on a narrow phone */
+/* Two selects reading as one field. (v2026.09.24-2121) */
+/* Wide enough that two selects and a colon are not squeezed into the 92px the
+   other two fields get; the row wraps Hours onto its own line on a narrow
+   phone instead. */
+.job-dur-picker { display: flex; align-items: center; gap: 4px; min-width: 124px; }
+.job-dur-picker select {
+  flex: 1 1 0; min-width: 0;
+  background: var(--bg); color: var(--ink);
+  border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 11px 4px;
+  font-family: inherit;
+  font-size: 16px;       /* 16px minimum — iOS auto-zoom (§13 #14) */
+  margin-bottom: 10px;
+}
+.job-dur-sep { font-weight: 700; margin-bottom: 10px; }
 .job-time-row { display: flex; gap: 8px; flex-wrap: wrap; }
 .job-time-row label { flex: 1 1 30%; min-width: 92px; display: flex; flex-direction: column; gap: 2px; }
 .job-time-row input { width: 100%; }
+/* Three pulses on a prompt that is easy to miss, then it settles. Reduced
+   motion gets the end state and no movement. (v2026.09.24-2005) */
+@keyframes pulse-attn {
+  0%, 100% { background: transparent; }
+  50% { background: var(--accent); color: var(--accent-ink); }
+}
+.pulse-attn {
+  animation: pulse-attn 600ms ease-in-out 3;
+  border-radius: 6px;
+  padding: 2px 6px;
+  margin-left: -6px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .pulse-attn { animation: none; }
+}
+.job-address-other { font-style: italic; color: var(--ink-soft); }
 .job-address-choices { margin: 6px 0; display: flex; flex-direction: column; gap: 4px; }
 .job-address-pick {
   text-align: left; padding: 8px 10px; font-size: 14px; font-family: inherit;
@@ -1166,7 +1207,18 @@ body.dark-mode .price-best-badge { color: #4ade80; }
 .price-history-price { font-weight: 600; min-width: 62px; }
 .price-history-date { color: var(--ink-soft); font-size: 13px; }
 .price-history-avail { color: var(--ink-soft); font-size: 12px; flex: 1; }
-.price-history-del { background: none; border: none; color: var(--danger); cursor: pointer; font-size: 15px; padding: 4px 6px; }
+/* 44px is the iOS minimum, and this was about 20 — reported as "can't seem to
+   be able to erase a historical price", which is what a target you keep missing
+   feels like. The glyph is unchanged; the BOX around it grew, pulled back into
+   line with negative margins so the row does not get taller. (v2026.09.24-2044) */
+.price-history-del {
+  background: none; border: none; color: var(--danger); cursor: pointer;
+  font-size: 15px;
+  min-width: 44px; min-height: 44px;
+  margin: -10px -6px -10px 0;
+  display: flex; align-items: center; justify-content: center;
+  flex: 0 0 auto;
+}
 
 /* Home + menu: new general note / new customer */
 .fab-menu {
@@ -1672,6 +1724,10 @@ body.dark-mode .customer-link-btn { background: #2d2a1e; border-color: #78600a; 
   box-shadow: 0 6px 18px rgba(0,0,0,0.28);
 }
 .tutorial-resume[hidden] { display: none; }
+/* Sits above the resume pill's spot; both are bottom-left, and they are never
+   plausibly up at the same time. (v2026.09.24-2031) */
+.update-pill { background: var(--go, #16a34a); }
+#update-pill-btn { padding: 10px 16px; }
 .tutorial-resume button {
   background: transparent; border: 0; color: #fff; cursor: pointer;
   font-family: inherit; font-size: 13px; font-weight: 600;
@@ -1896,9 +1952,19 @@ body.dark-mode .iif-grid tbody tr.iif-differs td { background: #3f1212; }
    not a cell is open. Without it, opening a cell widened the column, every
    other column re-measured, and the whole chart shifted under the click. */
 .iif-grid .iif-hours-col {
-  width: calc(124px * var(--price-scale));
-  min-width: calc(124px * var(--price-scale));
+  /* 124 → 158: the editor gained a ":" button beside the ✓. (v2026.09.24-2121) */
+  width: calc(158px * var(--price-scale));
+  min-width: calc(158px * var(--price-scale));
 }
+.iif-edit-colon {
+  flex: 0 0 auto;
+  min-width: 30px; min-height: 34px;
+  border: 1px solid var(--line); border-radius: 6px;
+  background: var(--bg); color: var(--ink);
+  font-size: 17px; font-weight: 700; line-height: 1;
+  cursor: pointer; padding: 0;
+}
+.iif-edit-colon:active { opacity: 0.8; }
 .iif-edit-done {
   flex: 0 0 auto;
   min-width: 34px; min-height: 34px;      /* a thumb target, not a glyph */

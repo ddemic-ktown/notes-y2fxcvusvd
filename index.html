@@ -322,7 +322,22 @@
       <div class="job-time-row">
         <label class="setting-inline-label">Start <input id="job-start" class="signin-input" type="time" /></label>
         <label class="setting-inline-label">End <input id="job-end" class="signin-input" type="time" /></label>
-        <label class="setting-inline-label">Hours <input id="job-duration" class="signin-input" type="number" min="0" step="0.25" inputmode="decimal" placeholder="2.5" /></label>
+        <!-- A DURATION, not a clock time — so two dropdowns rather than a
+             time picker, which would show AM/PM and read "3:30" as half past
+             three in the morning. Quarter hours only: start, end and every drag
+             on the timeline already snap to them. (v2026.09.24-2121) -->
+        <label class="setting-inline-label">Hours
+          <span class="job-dur-picker">
+            <select id="job-dur-h" aria-label="Hours"></select>
+            <span class="job-dur-sep">:</span>
+            <select id="job-dur-m" aria-label="Minutes">
+              <option value="0">00</option>
+              <option value="15">15</option>
+              <option value="30">30</option>
+              <option value="45">45</option>
+            </select>
+          </span>
+        </label>
       </div>
       <label class="setting-inline-label" for="job-desc">Description</label>
       <textarea id="job-desc" class="csv-textarea" rows="2" placeholder="Optional"></textarea>
@@ -936,6 +951,12 @@
   </div>
   <!-- Shown while the tour is paused, which happens the moment you tap
        anything outside the bubble. Bottom-LEFT: the + FAB owns bottom-right. -->
+  <!-- Only ever seen when the automatic update did NOT take. See
+       checkDeployedVersion in app.js. (v2026.09.24-2031) -->
+  <div id="update-pill" class="tutorial-resume update-pill" hidden>
+    <button id="update-pill-btn" type="button">Update ready — tap</button>
+  </div>
+
   <div id="tutorial-resume" class="tutorial-resume" hidden>
     <button id="tutorial-resume-btn" type="button">Resume tutorial</button>
     <button id="tutorial-resume-close" type="button" aria-label="End tutorial">✕</button>

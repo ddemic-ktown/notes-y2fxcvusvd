@@ -1,7 +1,13 @@
 // Service worker — offline cache for JobPilot
 // Version format: na-YYYY.MM.DD-HHMM (Pacific time) — must match APP_VERSION in app.js.
-const VERSION = 'na-2026.09.21-2336';
-const CORE = [
+const VERSION = 'na-2026.09.24-2219';
+// SHELL is what the app cannot run without; EXTRAS are nice to have offline.
+// They are cached separately because `cache.addAll()` is ALL-OR-NOTHING: one
+// failed request out of fifteen rejects the whole promise, `install` fails, and
+// the update silently never lands — it just gets retried on some later check.
+// On a phone on patchy mobile data that is a very reachable state, and it is
+// the most likely explanation for "the iPhone won't update". (v2026.09.24-2031)
+const SHELL = [
   './',
   './index.html',
   './styles.css',
@@ -11,6 +17,8 @@ const CORE = [
   './js/firebase-init.js',
   './js/iif.js',
   './js/files.js',
+];
+const EXTRAS = [
   './icons/icon-192.png',
   './icons/icon-512.png',
   './icons/icon-512-maskable.png',
@@ -18,10 +26,31 @@ const CORE = [
   './icons/favicon.png',
 ];
 
+// One request at a time, each allowed to fail on its own.
+async function cacheEach(cache, urls, required) {
+  const failed = [];
+  for (const url of urls) {
+    try {
+      const resp = await fetch(url, { cache: 'reload' });
+      if (!resp || !resp.ok) throw new Error('bad status');
+      await cache.put(url, resp);
+    } catch (e) {
+      failed.push(url);
+    }
+  }
+  // A missing icon is not worth refusing an update over. A missing script is:
+  // activating then would leave a half-cached version that boots broken
+  // offline, which is worse than staying on the old one.
+  if (required && failed.length) throw new Error('shell incomplete: ' + failed.join(', '));
+}
+
 self.addEventListener('install', (event) => {
-  event.waitUntil(
-    caches.open(VERSION).then((cache) => cache.addAll(CORE)).then(() => self.skipWaiting())
-  );
+  event.waitUntil((async () => {
+    const cache = await caches.open(VERSION);
+    await cacheEach(cache, SHELL, true);
+    await cacheEach(cache, EXTRAS, false);   // best effort
+    await self.skipWaiting();
+  })());
 });
 
 self.addEventListener('activate', (event) => {
@@ -74,8 +103,16 @@ self.addEventListener('fetch', (event) => {
   }
   if (event.request.method !== 'GET') return;
 
+  // The app's own deploy check fetches `sw.js?ts=<now>`, a URL that has never
+  // been cached — so it used to fall through and get STORED, one dead entry per
+  // check, forever. On iOS that is storage pressure, and eviction there takes
+  // the whole cache with it. Never cache the worker or a cache-buster.
+  // (v2026.09.24-2031)
+  const isVersionProbe = url.pathname.endsWith('/sw.js') || url.searchParams.has('ts');
+
   // Same-origin: cache-first with network fallback
   if (url.origin === location.origin) {
+    if (isVersionProbe) return;              // straight to the network, uncached
     event.respondWith(
       caches.match(event.request).then((cached) => {
         if (cached) return cached;

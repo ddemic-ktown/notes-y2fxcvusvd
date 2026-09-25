@@ -20,6 +20,12 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 100, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.09.24-2219', 'The note box under an employee’s hours grows to fit what you type instead of hiding it on one line'],
+  ['v2026.09.24-2121', 'Hours on a job are now picked from hours and minutes dropdowns, and the hours chart has a “:” key so you can type 3:30 on a phone'],
+  ['v2026.09.24-2044', 'The ✕ that deletes a recorded price is now big enough to hit on a phone, and the history sheet no longer closes itself the moment it opens'],
+  ['v2026.09.24-2031', 'Updates should reach phones more reliably: a patchy connection no longer silently abandons the download, and if an update still does not take you get an “Update ready — tap” button instead of nothing'],
+  ['v2026.09.24-2005', 'Job addresses: street names with no number are offered too, “Which address?” catches your eye, and there is a plain “type a different address” option'],
+  ['v2026.09.24-2001', 'Dragging or resizing a job on the day view now steps in 15-minute jumps as you move it, instead of following your finger and snapping only when you let go'],
   ['v2026.09.21-2336', 'Housekeeping: removed three unreachable branches left over from when customers were edited as their own record type'],
   ['v2026.09.21-2331', 'The orphaned notes list sorts from a ⋯ menu like the customer list does'],
   ['v2026.09.21-2327', 'Clearing a customer’s name no longer deletes them if they have notes or files — only a genuinely empty one is discarded, and it says so when it happens'],
@@ -1640,6 +1646,11 @@ function hhmmFromMinutes(min) {
   return `${String(Math.floor(wrapped / 60)).padStart(2, '0')}:${String(wrapped % 60).padStart(2, '0')}`;
 }
 function snapMinutes(min) { return Math.round(min / SNAP_MIN) * SNAP_MIN; }
+// The same snap in PIXELS, for the live drag preview. Both ends already snapped
+// on DROP, but the block followed the finger smoothly and then jumped, which
+// reads as "it doesn't snap". (v2026.09.24-2001)
+const SNAP_PX = HOUR_PX * SNAP_MIN / 60;          // 14px at 56px/hour
+function snapPx(px) { return Math.round(px / SNAP_PX) * SNAP_PX; }
 // An end EARLIER than the start means the job runs past midnight — a night
 // shift, not a mistake (v2026.09.21-2226). `end` is what the day timeline
 // draws, so it stops at midnight; `trueEnd` is the real finish and is what
@@ -1915,7 +1926,10 @@ function wireDayInteractions(canEdit) {
     block.addEventListener('pointermove', (e) => {
       if (resizing) {
         moved = true;
-        const h = Math.max(HOUR_PX * SNAP_MIN / 60, origH + (e.clientY - startY));
+        // A block is drawn 2px shorter than it really is (the gap between
+        // stacked blocks), so snap the TRUE height and take the gap off again —
+        // otherwise the preview sits 2px out of step and shifts on release.
+        const h = Math.max(SNAP_PX - 2, snapPx(origH + 2 + (e.clientY - startY)) - 2);
         block.style.height = `${h}px`;
         return;
       }
@@ -1931,7 +1945,10 @@ function wireDayInteractions(canEdit) {
         return;
       }
       moved = true;
-      const next = Math.max(0, Math.min(24 * HOUR_PX - origH, origTop + (e.clientY - startY)));
+      // `top` is exactly (start / 60) * HOUR_PX with no offset, so this snaps
+      // cleanly. Clamped after snapping: at the very bottom of the day that can
+      // leave a non-multiple, which is better than letting the block overhang.
+      const next = Math.max(0, Math.min(24 * HOUR_PX - origH, snapPx(origTop + (e.clientY - startY))));
       block.style.top = `${next}px`;
     });
     const finish = async (e) => {
@@ -2114,6 +2131,13 @@ let jobChosenCustomer = null; // { id, name, addresses: [] }
 // Address candidates from the customer's default note: skip the name line and
 // anything that looks like a phone or email; keep lines with both digits and
 // letters (street lines). None → leave blank, one → auto-fill, several → ask.
+// A street word is enough on its own (v2026.09.24-2005). The digit rule alone
+// missed every address with no street number — "Okaview Road", a rural road, a
+// named property — and those simply never appeared as options. Requiring a
+// street WORD instead of a number keeps the list tight: an ordinary note line
+// ("call before 9am", "gate code on the left") still doesn't qualify.
+// BC-centric; extend it as needed.
+const STREET_WORD_RE = /\b(st|street|rd|road|ave|avenue|dr|drive|way|ln|lane|ct|court|crt|pl|place|cres|crescent|blvd|boulevard|hwy|highway|tr|trail|terr|terrace|close|bay|row|park|gate|green|ridge|heights|hts|loop|mews|vista|point|pt)\b\.?$/i;
 function addressCandidates(customerId) {
   const def = customerId ? Storage.getDefaultNoteForCustomer(customerId) : null;
   if (!def) return [];
@@ -2123,7 +2147,8 @@ function addressCandidates(customerId) {
     if (EMAIL_RE.test(l)) { EMAIL_RE.lastIndex = 0; return false; }
     const digits = l.replace(/\D/g, '');
     if (digits.length >= 10 && !/[a-z]{3}/i.test(l.replace(/[^a-z]/gi, ''))) return false; // bare phone
-    return /\d/.test(l) && /[a-z]{3}/i.test(l);
+    if (!/[a-z]{3}/i.test(l)) return false;
+    return /\d/.test(l) || STREET_WORD_RE.test(l);
   });
 }
 
@@ -2140,7 +2165,7 @@ function openJobModal(jobId, dateStr) {
   // of the night-shift bug. A saved duration now wins; a job without one is
   // still derived. (v2026.09.21-2226)
   const savedDur = job ? Number(job.duration) : NaN;
-  if (Number.isFinite(savedDur) && savedDur > 0) jobDurEl.value = String(savedDur);
+  if (Number.isFinite(savedDur) && savedDur > 0) setJobDuration(savedDur);
   else syncDurationFromTimes();
   document.getElementById('job-desc').value = (job && job.description) || '';
   document.getElementById('job-address').value = (job && job.address) || '';
@@ -2188,6 +2213,15 @@ if (jobNoWorkBox) jobNoWorkBox.addEventListener('change', applyNoWorkState);
 // adding the same person twice can't collide on an id or a name key.
 let jobCrewDraft = [];
 
+// Height follows content: reset first, because scrollHeight can only GROW while
+// an explicit height is set — without the reset a note never shrinks back after
+// text is deleted. Capped by .job-crew-note's max-height, past which it scrolls.
+function autoGrowNote(el) {
+  if (!el) return;
+  el.style.height = 'auto';
+  el.style.height = el.scrollHeight + 'px';
+}
+
 function renderJobEmployees(crew) {
   jobCrewDraft = crew.map(c => ({ ...c }));
   const ul = document.getElementById('job-employees');
@@ -2222,9 +2256,9 @@ function renderJobEmployees(crew) {
             </label>
             <button type="button" class="job-crew-del" data-crew-del="${i}" aria-label="Remove this line">✕</button>
           </div>
-          <input type="text" class="signin-input job-crew-note" data-crew-note="${i}"
+          <textarea class="signin-input job-crew-note" data-crew-note="${i}" rows="1"
                  placeholder="Note — travel, warranty, shop…" autocomplete="off"
-                 value="${escapeHtml(c.note || '')}" aria-label="Note for this line" />
+                 aria-label="Note for this line">${escapeHtml(c.note || '')}</textarea>
         </li>`;
       }).join('')
       : `<li class="member-item job-crew-empty">${names.length
@@ -2255,9 +2289,14 @@ function renderJobEmployees(crew) {
         jobCrewDraft[+box.dataset.crewBill].billable = box.checked;
       });
     });
+    // A textarea since v2026.09.24-2219 — "travel, warranty, shop" is often a
+    // sentence, and a one-line box hid everything past the first few words.
+    // It starts at one row and grows with the text, capped by CSS max-height.
     ul.querySelectorAll('[data-crew-note]').forEach(inp => {
+      autoGrowNote(inp);            // an existing note opens at full height
       inp.addEventListener('input', () => {
         jobCrewDraft[+inp.dataset.crewNote].note = inp.value;
+        autoGrowNote(inp);
       });
     });
     ul.querySelectorAll('[data-crew-del]').forEach(btn => {
@@ -2443,16 +2482,37 @@ function renderJobCustomer(filter) {
       const choices = document.getElementById('job-address-choices');
       const input = document.getElementById('job-address');
       wrap.hidden = false;
+      // One candidate is filled in and done. Several need a choice, and none
+      // needs saying so — the field is typeable either way, which was true
+      // before and simply never announced. (v2026.09.24-2005)
       if (cands.length === 1) { input.value = cands[0]; choices.hidden = true; }
       else if (cands.length > 1) {
         input.value = '';
-        choices.innerHTML = '<p class="muted setting-hint">Which address?</p>' +
-          cands.map(a => `<button type="button" class="job-address-pick">${escapeHtml(a)}</button>`).join('');
+        choices.innerHTML = '<p class="muted setting-hint job-address-ask">Which address?</p>'
+          + cands.map(a => `<button type="button" class="job-address-pick">${escapeHtml(a)}</button>`).join('')
+          + '<button type="button" class="job-address-pick job-address-other">Type a different address…</button>';
         choices.hidden = false;
         choices.querySelectorAll('.job-address-pick').forEach(b => {
-          b.addEventListener('click', () => { input.value = b.textContent; choices.hidden = true; });
+          b.addEventListener('click', () => {
+            if (b.classList.contains('job-address-other')) {
+              choices.hidden = true;
+              input.value = '';
+              input.focus();
+              return;
+            }
+            input.value = b.textContent;
+            choices.hidden = true;
+          });
         });
-      } else { input.value = ''; choices.hidden = true; }
+        // Three pulses, then it settles. The question is easy to miss under a
+        // list of buttons that look like the results you were just tapping.
+        const ask = choices.querySelector('.job-address-ask');
+        if (ask) { ask.classList.remove('pulse-attn'); void ask.offsetWidth; ask.classList.add('pulse-attn'); }
+      } else {
+        input.value = '';
+        choices.innerHTML = '<p class="muted setting-hint">No address in this customer\u2019s notes \u2014 type one in.</p>';
+        choices.hidden = false;
+      }
       renderJobCustomer('');
     });
   });
@@ -2464,7 +2524,36 @@ function renderJobCustomer(filter) {
 // match the timeline's drag behaviour.
 const jobStartEl = document.getElementById('job-start');
 const jobEndEl = document.getElementById('job-end');
-const jobDurEl = document.getElementById('job-duration');
+// The Hours field is a PAIR of selects since v2026.09.24-2121. These two
+// functions are the whole interface to it, so everything else still talks in
+// plain hours-as-a-number and nothing had to learn about the widget.
+//
+// Quarter hours only, which costs nothing: syncDurationFromTimes already
+// rounded to `Math.round(h * 4) / 4` before this existed, and drag, resize and
+// the timeline all snap the same way. A duration saved by an older build that
+// is not a quarter is shown at the nearest one.
+const jobDurH = document.getElementById('job-dur-h');
+const jobDurM = document.getElementById('job-dur-m');
+if (jobDurH) {
+  // '' is the EMPTY state — "no duration set" — which 0h 00m cannot mean,
+  // because 0:30 is a real half-hour job.
+  jobDurH.innerHTML = '<option value="">\u2014</option>'
+    + Array.from({ length: 24 }, (_, h) => `<option value="${h}">${h}</option>`).join('');
+}
+function getJobDuration() {
+  if (!jobDurH || jobDurH.value === '') return null;
+  const h = Number(jobDurH.value) || 0;
+  const m = Number(jobDurM && jobDurM.value) || 0;
+  const total = h + m / 60;
+  return total > 0 ? Math.round(total * 100) / 100 : null;
+}
+function setJobDuration(hours) {
+  if (!jobDurH || !jobDurM) return;
+  if (!Number.isFinite(hours) || hours <= 0) { jobDurH.value = ''; jobDurM.value = '0'; return; }
+  const quarters = Math.round(hours * 4);
+  jobDurH.value = String(Math.min(23, Math.floor(quarters / 4)));
+  jobDurM.value = String((quarters % 4) * 15);
+}
 
 // An end before the start is read as finishing after midnight rather than as
 // an error, so 8:04 PM to 8:53 AM is 12.8 hours instead of nothing at all
@@ -2478,24 +2567,24 @@ function durationFromTimes() {
   return (e - s) / 60;
 }
 function syncDurationFromTimes() {
-  const h = durationFromTimes();
-  jobDurEl.value = h == null ? '' : String(Math.round(h * 4) / 4);
+  setJobDuration(durationFromTimes());
 }
 function syncEndFromDuration() {
   const s = minutesFromHHMM(jobStartEl.value);
-  const h = parseFloat(jobDurEl.value);
+  const h = getJobDuration();
   if (s == null || !Number.isFinite(h) || h <= 0) return;
   jobEndEl.value = hhmmFromMinutes(s + snapMinutes(h * 60));
 }
 if (jobStartEl) jobStartEl.addEventListener('change', () => {
   // Moving the start keeps the length and shifts the end — same as dragging a
   // block on the timeline. With no duration set, just refresh it.
-  if (jobDurEl.value) syncEndFromDuration();
+  if (getJobDuration() != null) syncEndFromDuration();
   else syncDurationFromTimes();
 });
 if (jobEndEl) jobEndEl.addEventListener('change', syncDurationFromTimes);
-if (jobDurEl) jobDurEl.addEventListener('change', syncEndFromDuration);
-if (jobDurEl) jobDurEl.addEventListener('input', () => { if (jobDurEl.value) syncEndFromDuration(); });
+[jobDurH, jobDurM].forEach(sel => {
+  if (sel) sel.addEventListener('change', syncEndFromDuration);
+});
 
 const jobCustomerSearch = document.getElementById('job-customer-search');
 if (jobCustomerSearch) jobCustomerSearch.addEventListener('input', () => renderJobCustomer(jobCustomerSearch.value));
@@ -2549,7 +2638,7 @@ if (jobSave) jobSave.addEventListener('click', async () => {
     date,
     start: document.getElementById('job-start').value,
     end: document.getElementById('job-end').value,
-    duration: parseFloat(jobDurEl.value) || null,
+    duration: getJobDuration(),
     description: document.getElementById('job-desc').value,
     employeeNames: names,
     crew,
@@ -2625,6 +2714,7 @@ function showPriceTable() {
   // stale and nothing else on this screen would ever notice. The fetch emits,
   // which redraws through rerenderCurrent.
   Storage.refreshPriceTable();
+  checkDeployedVersion();   // not only the home screen (v2026.09.24-2031)
   if (!handlingPopstate) history.pushState({ screen: 'price' }, '');
 }
 
@@ -3327,6 +3417,7 @@ function openPriceHistory(key) {
     : '<li class="price-history-item">No prices recorded yet.</li>';
   priceHistoryList.querySelectorAll('.price-history-del').forEach(btn => {
     btn.addEventListener('click', async () => {
+      if (priceHistoryJustOpened()) return;   // the long-press release
       await Storage.removePriceEntry(itemId, vendorId, btn.dataset.added);
       openPriceHistory(key);
       renderPriceTable();
@@ -3339,10 +3430,28 @@ function openPriceHistory(key) {
   // (and the CSS on the sheet) leaves it nothing to select.
   try { window.getSelection()?.removeAllRanges(); } catch {}
   priceHistoryModal.hidden = false;
+  // The sheet opens UNDER a finger that is still down — the long-press timer
+  // fires at 500ms, mid-gesture. Lifting then dispatches a click wherever the
+  // finger happens to be, which is usually the backdrop, and the sheet closed
+  // again the instant it appeared. Same family of bug as the price cell's
+  // priceTapSuppressed, and the reason a historical price could not be erased
+  // on a phone: the sheet was gone before the ✕ could be aimed at.
+  // (v2026.09.24-2044)
+  priceHistoryOpenedAt = Date.now();
 }
+// Clicks landing within this window of the sheet opening are the long-press
+// release, not a decision.
+let priceHistoryOpenedAt = 0;
+function priceHistoryJustOpened() { return Date.now() - priceHistoryOpenedAt < 500; }
 const priceHistoryClose = document.getElementById('price-history-close');
-if (priceHistoryClose) priceHistoryClose.addEventListener('click', () => { priceHistoryModal.hidden = true; });
-if (priceHistoryModal) priceHistoryModal.addEventListener('click', (e) => { if (e.target === priceHistoryModal) priceHistoryModal.hidden = true; });
+if (priceHistoryClose) priceHistoryClose.addEventListener('click', () => {
+  if (priceHistoryJustOpened()) return;
+  priceHistoryModal.hidden = true;
+});
+if (priceHistoryModal) priceHistoryModal.addEventListener('click', (e) => {
+  if (priceHistoryJustOpened()) return;
+  if (e.target === priceHistoryModal) priceHistoryModal.hidden = true;
+});
 
 // ---------- price table header actions ----------
 // The + and its two-item menu, same shape as the home screen's.
@@ -9089,13 +9198,11 @@ function iifShortDate(e) {
   return e.date.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
 }
 // Accepts what trades actually write: "3.5" or "3:30".
-// iOS's decimal keypad has no colon key, so "3.5 or 3:30" asks the phone for
-// something it cannot type. iPhones and iPads get the shortened hint; every
-// other device keeps the full one, and a typed colon is still accepted
-// everywhere. (v2026.09.21-2226)
-const IS_IOS_DEVICE = /iPad|iPhone|iPod/.test(navigator.userAgent)
-  || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-const HOURS_PLACEHOLDER = IS_IOS_DEVICE ? '3.5' : '3.5 or 3:30';
+// Was iOS-only shorthand in v2026.09.21-2312, because the decimal keypad has no
+// colon and the hint promised a format the phone could not type. Android turned
+// out to be no better, and the right answer was a colon BUTTON (v2026.09.24-2121)
+// rather than a smaller promise — so the full hint is back everywhere.
+const HOURS_PLACEHOLDER = '3.5 or 3:30';
 
 function parseHoursInput(text) {
   const val = String(text || '').trim();
@@ -9154,6 +9261,7 @@ function iifCellHtml(row, col) {
       <div class="iif-edit-wrap">
         <input class="iif-edit-hours" type="text" inputmode="decimal" placeholder="${HOURS_PLACEHOLDER}"
                value="${escapeHtml(v.hoursText)}" />
+        <button type="button" class="iif-edit-colon" aria-label="Insert a colon">:</button>
         <button type="button" class="iif-edit-done" aria-label="Save hours and close">✓</button>
       </div></td>`;
   }
@@ -9509,6 +9617,28 @@ function wireIifGrid() {
   // out from under the finger and no click is ever dispatched. (The same trap
   // the old header Save button was written around — see its history in git.)
   // preventDefault keeps focus put until we've read the value.
+  // `inputmode="decimal"` gives a keypad with digits and a decimal point and
+  // NO COLON, on iOS and Android both — so "3:30" was a format the field
+  // accepted and the phone could not type. This puts the key within reach
+  // rather than giving up the format. Pointerdown + preventDefault for the same
+  // reason the ✓ uses it: blurring the input closes the keyboard, which
+  // changes --app-vh, which reflows this screen between pointerdown and
+  // pointerup so no click is ever dispatched. (v2026.09.24-2121)
+  const colonBtn = editing.querySelector('.iif-edit-colon');
+  if (colonBtn) {
+    const insertColon = (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      const pos = input.selectionStart == null ? input.value.length : input.selectionStart;
+      const end = input.selectionEnd == null ? pos : input.selectionEnd;
+      input.value = input.value.slice(0, pos) + ':' + input.value.slice(end);
+      const next = pos + 1;
+      try { input.setSelectionRange(next, next); } catch (e) {}
+      input.focus();
+    };
+    colonBtn.addEventListener('pointerdown', insertColon);
+    colonBtn.addEventListener('click', insertColon);
+  }
   const doneBtn = editing.querySelector('.iif-edit-done');
   if (doneBtn) {
     const finish = (ev) => {
@@ -10920,6 +11050,38 @@ function applyWaitingUpdate() {
   }
 }
 
+// The update is normally invisible: a newer worker installs, takes over, and
+// the controllerchange listener reloads. When that does NOT happen the app just
+// sits on the old version with nothing to show for it, which is exactly the
+// state reported on iPhone and is indistinguishable from being up to date.
+//
+// So: if a newer version is known to be deployed and has still not taken over a
+// few seconds later, say so and offer the manual route. On a healthy phone the
+// automatic path wins the race and this never appears. (v2026.09.24-2031)
+const UPDATE_PILL_DELAY = 5000;
+let updatePillTimer = null;
+function showUpdatePill(on) {
+  const pill = document.getElementById('update-pill');
+  if (pill) pill.hidden = !on;
+}
+function armUpdatePill() {
+  if (updatePillTimer) return;
+  updatePillTimer = setTimeout(() => {
+    updatePillTimer = null;
+    showUpdatePill(true);
+  }, UPDATE_PILL_DELAY);
+}
+const updatePillBtn = document.getElementById('update-pill-btn');
+if (updatePillBtn) updatePillBtn.addEventListener('click', async () => {
+  updatePillBtn.textContent = 'Updating\u2026';
+  try { if (swReg) await swReg.update(); } catch (e) {}
+  applyWaitingUpdate();
+  // If a worker was waiting it takes over and controllerchange reloads us.
+  // If not, reload anyway: a plain reload re-requests the shell, which is the
+  // last thing left to try.
+  setTimeout(() => window.location.reload(), 800);
+});
+
 // ---------- deploy check ----------
 // Browsers throttle their own service-worker update checks, and a phone that
 // resumes from background rather than launching fresh can sit on an old
@@ -10943,7 +11105,13 @@ async function checkDeployedVersion() {
     const resp = await fetch('sw.js?ts=' + Date.now(), { cache: 'no-store' });
     if (!resp.ok) return;
     const deployed = parseSwVersion(await resp.text());
-    if (!deployed || deployed === APP_VERSION) return;
+    if (!deployed || deployed === APP_VERSION) {
+      showUpdatePill(false);
+      return;
+    }
+    // A newer version IS deployed. Everything below is the attempt to take it;
+    // the pill is what happens if none of it works.
+    armUpdatePill();
     if (swReg) {
       await swReg.update().catch(() => {});
       // If the new worker is already parked, take it now; otherwise the
