@@ -1286,6 +1286,88 @@ export const Storage = {
   // can't carry a flag, so what the seed added is recorded in
   // settings.demoSeed and removed by matching that record — and only ever
   // seeded when you have none of your own, so a real setup can't be replaced.
+  // ---------- backup: full export + restore-missing (v2026.09.30-2250) ----------
+  // Jobs and hours are only partly in the cache (a live window plus months
+  // visited), so a backup reads the whole collections once.
+  async exportJobsAndLogs() {
+    if (!_orgId || (_role !== 'admin' && _role !== 'bookkeeper')) return { jobs: [], timelogs: [] };
+    const [j, t] = await Promise.all([getDocs(jobsCol()), getDocs(timelogsCol())]);
+    return {
+      jobs: j.docs.map(d => ({ id: d.id, ...d.data() })),
+      timelogs: t.docs.map(d => ({ id: d.id, ...d.data() })),
+    };
+  },
+  // What a backup would ADD: everything whose id is not on the server at all.
+  // Ids come from the server, not the cache, for the same reason as above —
+  // and a trashed note or customer still counts as present (Trash brings it
+  // back). Nothing that exists is ever overwritten.
+  async planRestore(data) {
+    const ids = async (col) => new Set((await getDocs(col)).docs.map(d => d.id));
+    const [haveCust, haveNotes, haveItems, haveJobs, haveLogs] = await Promise.all([
+      ids(customersCol()), ids(notesCol()), ids(priceItemsCol()), ids(jobsCol()), ids(timelogsCol())]);
+    const now = nowIso();
+    const arr = (x) => Array.isArray(x) ? x : [];
+    const customers = [], notes = [];
+    arr(data.customers).forEach(c => {
+      if (!c || !c.id) return;
+      const custNotes = arr(c.notes).filter(n => n && n.id);
+      if (!haveCust.has(c.id)) {
+        const def = custNotes.find(n => n.isDefault) || {};
+        const created = def.created || def.updated || now;
+        customers.push({ id: c.id, created, updated: created });
+      }
+      custNotes.forEach(n => {
+        if (haveNotes.has(n.id)) return;
+        notes.push({ id: n.id, body: String(n.body || ''), customerId: c.id, isDefault: !!n.isDefault,
+          assignedTo: arr(n.assignedTo), customerName: String(c.name || ''),
+          created: n.created || n.updated || now, updated: n.updated || now });
+      });
+    });
+    arr(data.generalNotes).forEach(n => {
+      if (!n || !n.id || haveNotes.has(n.id)) return;
+      notes.push({ id: n.id, body: String(n.body || ''), customerId: null, isDefault: false,
+        assignedTo: arr(n.assignedTo), customerName: '',
+        created: n.created || n.updated || now, updated: n.updated || now });
+    });
+    const pt = data.priceTable || {};
+    const haveVendors = new Set(this.getPriceConfig().vendors.map(v => v.id));
+    const vendors = arr(pt.vendors).filter(v => v && v.id && !haveVendors.has(v.id));
+    const priceItems = arr(pt.items).filter(i => i && i.id && !haveItems.has(i.id))
+      .map(i => ({ id: i.id, name: String(i.name || ''), order: Number.isFinite(i.order) ? i.order : 0,
+        cells: i.cells || {}, created: i.created || now, updated: now }));
+    const jobs = arr(data.jobs).filter(j => j && j.id && !haveJobs.has(j.id));
+    const timelogs = arr(data.timelogs).filter(t => t && t.id && !haveLogs.has(t.id));
+    return { customers, notes, vendors, priceItems, jobs, timelogs };
+  },
+  async applyRestore(plan) {
+    if (_role !== 'admin') throw new Error('Only an admin can restore a backup');
+    const writes = [];
+    plan.customers.forEach(c => writes.push([doc(customersCol(), c.id), stripId(c)]));
+    plan.notes.forEach(n => writes.push([doc(notesCol(), n.id), stripId(n)]));
+    plan.priceItems.forEach(i => writes.push([doc(priceItemsCol(), i.id), stripId(i)]));
+    plan.jobs.forEach(j => writes.push([doc(jobsCol(), j.id), stripId(j)]));
+    plan.timelogs.forEach(t => writes.push([doc(timelogsCol(), t.id), stripId(t)]));
+    for (let i = 0; i < writes.length; i += 400) {            // batch limit is 500
+      const b = writeBatch(db);
+      writes.slice(i, i + 400).forEach(([ref, d]) => b.set(ref, d));
+      await tracked(b.commit());
+    }
+    if (plan.vendors.length) {
+      const cfg = this.getPriceConfig();
+      await this.savePriceConfig({ vendors: [...cfg.vendors, ...plan.vendors] });
+    }
+    // Into the cache as well, so it shows without a reload. The listeners may
+    // deliver the same docs; dedupe by id.
+    const add = (key, list) => {
+      const have = new Set(_cache[key].map(x => x.id));
+      const fresh = list.filter(x => !have.has(x.id));
+      if (fresh.length) _cache[key] = _cache[key].concat(fresh);
+    };
+    add('customers', plan.customers); add('notes', plan.notes); add('priceItems', plan.priceItems);
+    add('jobs', plan.jobs); add('timelogs', plan.timelogs);
+    emit();
+  },
+
   async seedSampleData() {
     if (_role !== 'admin') return null;
     const now = nowIso();

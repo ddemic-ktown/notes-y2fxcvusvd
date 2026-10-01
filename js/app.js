@@ -20,6 +20,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 100, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.09.30-2250', 'Restore from backup (adds back only what is missing), backups now include jobs and hours, a Cancel filter button on the calendar and Clear filter in the filter box, pinch-zoom no longer flips the month, a dark keyboard gap in dark mode, crew note boxes sized right, and pasting a checkbox line onto a checkbox gives one box'],
   ['v2026.09.30-2205', 'Fixes the app sticking on the loading screen after the last update'],
   ['v2026.09.30-2137', 'Android: the keyboard no longer pushes the note editor’s toolbar off the top of the screen'],
   ['v2026.09.30-2127', 'Settings › Calendar swipe: change month or week by swiping sideways or up and down'],
@@ -1600,6 +1601,13 @@ function openCalFilter() {
     close();
     rerenderCalendarScreens();
   });
+  const reset = document.getElementById('cal-filter-reset');   // v2026.09.30-2250
+  if (reset) reset.addEventListener('click', () => {
+    calFilter = { emp: '', cust: '' };
+    saveCalFilter();
+    close();
+    rerenderCalendarScreens();
+  });
   document.querySelectorAll('.cal-filter-clear').forEach(b => b.addEventListener('click', () => {
     calFilter = { emp: '', cust: '' };
     saveCalFilter();
@@ -2253,9 +2261,12 @@ if (calGrid) {
 
 if (calGrid) {
   let sx = 0, sy = 0, tracking = false, atTop = true, atBottom = true;
+  let startZoom = 1;
   calGrid.addEventListener('touchstart', (e) => {
-    if (e.touches.length !== 1) return;
+    // A second finger makes it a pinch, never a swipe (v2026.09.30-2250).
+    if (e.touches.length !== 1) { tracking = false; return; }
     sx = e.touches[0].clientX; sy = e.touches[0].clientY; tracking = true;
+    startZoom = viewportZoom();
     // Up-and-down mode: a grid that scrolls its own overflow only changes
     // month once it was ALREADY at that edge when the finger landed —
     // otherwise the swipe is just a scroll. (v2026.09.30-2127)
@@ -2267,6 +2278,7 @@ if (calGrid) {
   calGrid.addEventListener('touchend', (e) => {
     if (!tracking) return;
     tracking = false;
+    if (e.touches.length || Math.abs(viewportZoom() - startZoom) > 0.01) return;   // pinch
     const t = e.changedTouches[0];
     const dx = t.clientX - sx, dy = t.clientY - sy;
     if (calSwipeVertical()) {
@@ -2304,8 +2316,9 @@ if (calDayMain) {
     btn.addEventListener('click', () => calShiftDay(parseInt(btn.dataset.shift, 10)));
   });
   let sx = 0, sy = 0, tracking = false;
+  let dayStartZoom = 1;
   calDayMain.addEventListener('touchstart', (e) => {
-    if (e.touches.length !== 1) return;
+    if (e.touches.length !== 1) { tracking = false; return; }   // pinch (v2026.09.30-2250)
     // Swipes starting ON a job block used to be discarded here, on the theory
     // that such a finger "belongs to the drag gesture". It doesn't: a drag
     // needs a 450ms long-press, and the block's own pointermove cancels that
@@ -2315,11 +2328,13 @@ if (calDayMain) {
     // actually took over.
     calDragClaimed = false;
     sx = e.touches[0].clientX; sy = e.touches[0].clientY; tracking = true;
+    dayStartZoom = viewportZoom();
   }, { passive: true });
   calDayMain.addEventListener('touchend', (e) => {
     if (!tracking) return;
     tracking = false;
     if (calDragClaimed) return;     // that was a drag or a resize, not a swipe
+    if (e.touches.length || Math.abs(viewportZoom() - dayStartZoom) > 0.01) return;   // pinch
     const t = e.changedTouches[0];
     const dx = t.clientX - sx, dy = t.clientY - sy;
     // Clearly horizontal only — the timeline scrolls vertically.
@@ -2390,6 +2405,10 @@ function openJobModal(jobId, dateStr) {
   if (noWorkBox) noWorkBox.checked = !!(job && job.noWork);
   applyNoWorkState();
   jobModal.hidden = false;
+  // Size the crew notes now that they can be measured (v2026.09.30-2250).
+  requestAnimationFrame(() => {
+    document.querySelectorAll('#job-employees [data-crew-note]').forEach(autoGrowNote);
+  });
 }
 
 // A no-work entry has no customer and no address, so those fields are disabled
@@ -6649,6 +6668,25 @@ function repairReplacementNewlines(prev, next, caret) {
 // spans lines starts with a selection containing '\n', and then no snapshot is
 // taken at all.
 const REPAIR_TYPES = new Set(['insertReplacementText', 'insertText', 'insertCompositionText']);
+// Pasting "☐ item" onto a line that already starts with a box gave "☐ ☐ item"
+// (v2026.09.30-2250). Drop the pasted box; the line's own one stays.
+bodyInput.addEventListener('paste', (e) => {
+  const text = e.clipboardData && e.clipboardData.getData('text/plain');
+  if (!text || !/^[☐☑] /.test(text)) return;
+  const pos = bodyInput.selectionStart;
+  const lineStart = bodyInput.value.lastIndexOf('\n', pos - 1) + 1;
+  if (!/^[☐☑] /.test(bodyInput.value.slice(lineStart))) return;
+  e.preventDefault();
+  const clean = text.replace(/^[☐☑] /, '');
+  // execCommand keeps the browser's own undo and fires the usual input events;
+  // setRangeText is the fallback where it is unsupported.
+  let done = false;
+  try { done = document.execCommand('insertText', false, clean); } catch (err) {}
+  if (!done) {
+    bodyInput.setRangeText(clean, bodyInput.selectionStart, bodyInput.selectionEnd, 'end');
+    bodyInput.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+});
 let replacementPrev = null;   // text as it stood just before a suggestion landed
 let compositionPrev = null;   // text as it stood when the current composition began
 function selectionHasBreak() {
@@ -7793,24 +7831,37 @@ if (signoutBtn) {
 // you can read, print or hand to someone, not a sync mechanism.
 const backupBtn = document.getElementById('backup-btn');
 const backupStatus = document.getElementById('backup-status');
-if (backupBtn) backupBtn.addEventListener('click', () => {
+if (backupBtn) backupBtn.addEventListener('click', async () => {
   const customers = Storage.listCustomers().map(c => ({
     id: c.id,
     name: customerCrumbLabel(c.id),
-    notes: Storage.listNotesByCustomer(c.id).map(n => ({ id: n.id, isDefault: !!n.isDefault, body: n.body, updated: n.updated })),
+    notes: Storage.listNotesByCustomer(c.id).map(n => ({ id: n.id, isDefault: !!n.isDefault, body: n.body, assignedTo: n.assignedTo || [], created: n.created, updated: n.updated })),
   }));
   const data = {
     app: 'JobPilot',
     version: APP_VERSION,
     exported: new Date().toISOString(),
     customers,
-    generalNotes: Storage.listNotes().map(n => ({ id: n.id, body: n.body, updated: n.updated })),
+    generalNotes: Storage.listNotes().map(n => ({ id: n.id, body: n.body, assignedTo: n.assignedTo || [], created: n.created, updated: n.updated })),
     settings: Storage.getSettings(),
     priceTable: {
       vendors: Storage.getPriceConfig().vendors,
-      items: Storage.listPriceItems().map(i => ({ id: i.id, name: i.name, cells: i.cells || {} })),
+      items: Storage.listPriceItems().map(i => ({ id: i.id, name: i.name, order: i.order, cells: i.cells || {} })),
     },
   };
+  // Jobs and hours (v2026.09.30-2250) — read in full from the server, since the app only
+  // keeps a window of them loaded. Without these a restore can't bring the
+  // calendar back.
+  if (backupStatus) backupStatus.textContent = 'Collecting jobs and hours…';
+  try {
+    const extra = await Storage.exportJobsAndLogs();
+    data.jobs = extra.jobs;
+    data.timelogs = extra.timelogs;
+  } catch (e) {
+    console.warn('backup jobs', e);
+    if (backupStatus) backupStatus.textContent = 'Could not read jobs and hours — are you online? Try again.';
+    return;
+  }
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -7821,8 +7872,57 @@ if (backupBtn) backupBtn.addEventListener('click', () => {
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
   const noteCount = data.generalNotes.length + customers.reduce((s, c) => s + c.notes.length, 0);
-  if (backupStatus) backupStatus.textContent = `Saved ${customers.length} customers and ${noteCount} notes.`;
+  if (backupStatus) backupStatus.textContent = `Saved ${customers.length} customers, ${noteCount} notes, ${data.jobs.length} jobs and ${data.timelogs.length} hours records.`;
 });
+
+// ---------- backup restore (v2026.09.30-2250) ----------
+// ADDS BACK WHAT IS MISSING, matched by id. Never overwrites or deletes: the
+// failure this guards against is a stale backup quietly undoing newer work.
+// Admin only — the only role the rules let write everything it touches.
+const restoreBtn = document.getElementById('restore-btn');
+const restoreFile = document.getElementById('restore-file');
+if (restoreBtn && restoreFile) {
+  restoreBtn.addEventListener('click', () => { restoreFile.value = ''; restoreFile.click(); });
+  restoreFile.addEventListener('change', async () => {
+    const f = restoreFile.files && restoreFile.files[0];
+    if (!f) return;
+    const say = (t) => { if (backupStatus) backupStatus.textContent = t; };
+    let data = null;
+    try { data = JSON.parse(await f.text()); } catch (e) {}
+    if (!data || data.app !== 'JobPilot') {
+      showAlert('That file isn’t a JobPilot backup.', 'Restore from backup');
+      return;
+    }
+    say('Checking the backup against what you have…');
+    let plan;
+    try { plan = await Storage.planRestore(data); }
+    catch (e) { console.warn('planRestore', e); say('Couldn’t check the backup — are you online? Try again.'); return; }
+    const parts = [
+      [plan.customers.length, 'customer'], [plan.notes.length, 'note'],
+      [plan.priceItems.length, 'price row'], [plan.vendors.length, 'price column'],
+      [plan.jobs.length, 'job'], [plan.timelogs.length, 'hours record'],
+    ].filter(([n]) => n).map(([n, w]) => `${n} ${w}${n === 1 ? '' : 's'}`);
+    const old = Array.isArray(data.jobs) ? ''
+      : ' This backup is from before jobs and hours were included, so those can’t come back from it.';
+    if (!parts.length) {
+      say('');
+      showAlert('Everything in this backup is already here — there is nothing to restore.' + old, 'Restore from backup');
+      return;
+    }
+    const ok = await askConfirm(
+      `This adds back ${parts.join(', ')} missing from the app. Nothing you already have is changed or deleted.${old}`,
+      { title: 'Restore from backup', okLabel: 'Restore', danger: false });
+    if (!ok) { say(''); return; }
+    say('Restoring…');
+    try {
+      await Storage.applyRestore(plan);
+      say(`Restored ${parts.join(', ')}.`);
+    } catch (e) {
+      console.warn('applyRestore', e);
+      say('The restore stopped part-way. Run it again — it only adds what is still missing.');
+    }
+  });
+}
 
 // ---------- customer contact strip ----------
 // Phone numbers and emails written in a customer's default note become Call /
@@ -8078,6 +8178,8 @@ function applyRoleUI(role) {
   // Delete item is admin-only. (v2026.09.30-2044)
   const custMore = document.getElementById('customer-more-btn');
   if (custMore) custMore.style.display = (isAdminRole || role === 'bookkeeper') ? '' : 'none';
+  const restoreBtnEl = document.getElementById('restore-btn');   // v2026.09.30-2250
+  if (restoreBtnEl) restoreBtnEl.style.display = isAdminRole ? '' : 'none';
   const custDel = document.getElementById('customer-delete-btn');
   if (custDel) custDel.hidden = !isAdminRole;
   // Home + FAB: admins and employees can create general notes; read-only roles cannot
@@ -8600,6 +8702,7 @@ function resolvedTheme() {
 function applyTheme() {
   const theme = resolvedTheme();
   document.body.classList.toggle('dark-mode', theme === 'dark');
+  document.documentElement.classList.toggle('dark-mode', theme === 'dark');   // v2026.09.30-2250
   const meta = document.querySelector('meta[name="theme-color"]');
   if (meta) meta.setAttribute('content', theme === 'dark' ? '#1f2937' : '#ffffff');
   const btn = document.getElementById('theme-cycle-btn');
@@ -10868,7 +10971,7 @@ function tutorialSteps(part) {
       step(row('trash-open-btn'),
         'Deleting is not final. Notes and customers go here for 30 days and can be put back — including a customer with all their notes.'),
       step(row('backup-btn'),
-        'Downloads everything as one file you can keep. Worth doing before anything drastic. Photos and documents are NOT in it — those live on the device.'),
+        'Downloads everything — including jobs and hours — as one file you can keep. Worth doing before anything drastic. Photos and documents are NOT in it; those live on the device. Restore from backup adds back anything that has gone missing, and never changes or deletes what is already here.'),
       step(row('import-csv-btn'),
         'Already have your customers in a spreadsheet? Paste the rows here and each one becomes a customer with their details as their first note.'),
     ];

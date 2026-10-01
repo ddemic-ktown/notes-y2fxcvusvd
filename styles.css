@@ -107,6 +107,9 @@ body { min-height: 100vh; }
    `clip` cuts that off without creating a scroll container, so `position:
    sticky` headers keep working — `hidden` would break them. */
 html, body { overflow-x: clip; }
+/* Dark mode on <html> too (v2026.09.30-2250): the strip a keyboard uncovers while it
+   slides in is the html background, and that stayed the light one. */
+html.dark-mode { background: #111827; color-scheme: dark; }
 /* Headers are flex rows of a title and some buttons. Without this the title
    refuses to shrink below its content and pushes the buttons out instead. */
 .app-header, .home-header-top, .customers-header-top, .customers-header-bottom { min-width: 0; }
@@ -820,7 +823,11 @@ select.iif-date-input { appearance: none; -webkit-appearance: none; padding-righ
 }
 .cal-filter-bar[hidden] { display: none; }
 .cal-filter-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.cal-filter-clear { color: inherit; flex-shrink: 0; }
+.cal-filter-clear {
+  flex-shrink: 0; font: inherit; font-size: 13px; font-weight: 700; cursor: pointer;
+  color: var(--accent); background: var(--accent-ink);
+  border: 0; border-radius: 999px; padding: 5px 12px;
+}
 .cal-filter-select {
   display: block; width: 100%; margin: 4px 0 12px;
   background: var(--bg); color: var(--ink);
@@ -866,6 +873,9 @@ select.iif-date-input { appearance: none; -webkit-appearance: none; padding-righ
    scrollHeight by autoGrowNote, so no drag handle and no inner scrollbar until
    the cap. 16px minimum — iOS auto-zoom (§13 #14). */
 .job-crew-note {
+  /* One line minimum (v2026.09.30-2250): the box is sized while the sheet is still hidden,
+     where scrollHeight is 0, and the placeholder hung half outside it. */
+  min-height: calc(1.35em + 24px);
   font-size: 16px;
   resize: none;
   overflow-y: auto;

@@ -278,7 +278,7 @@
       </div>
     </header>
     <main class="cal-main">
-      
+      <div class="cal-filter-bar" hidden><span class="cal-filter-label"></span><button class="cal-filter-clear" type="button">Cancel filter</button></div>
       <div id="cal-results" class="cal-results" hidden></div>
       <div id="cal-grid" class="cal-grid"></div>
     </main>
@@ -294,7 +294,7 @@
       </div>
     </header>
     <main class="cal-day-main">
-      
+      <div class="cal-filter-bar" hidden><span class="cal-filter-label"></span><button class="cal-filter-clear" type="button">Cancel filter</button></div>
       <div class="cal-day-cues">
         <button type="button" id="cal-day-prev" class="cal-cue cal-cue-side" data-shift="-1"></button>
         <!-- The day you are ON, between the two destinations — without it the
@@ -711,6 +711,9 @@
         <h3 class="setting-list-title">Backup</h3>
         <p class="muted setting-hint">Downloads everything — customers, notes, settings and the price table — as one file you can keep somewhere safe. Customer files stored on this device are not included.</p>
         <button id="backup-btn" class="secondary setting-wide-btn" type="button">Download backup</button>
+        <!-- Admin only. Adds back what is MISSING; never overwrites. (v2026.09.30-2250) -->
+        <button id="restore-btn" class="secondary setting-wide-btn" type="button">Restore from backup</button>
+        <input id="restore-file" type="file" accept=".json,application/json" hidden />
         <p id="backup-status" class="muted setting-hint" style="margin-top:8px;"></p>
       </div>
 
@@ -1062,6 +1065,7 @@
       <select id="cal-filter-cust" class="cal-filter-select"></select>
       <div class="setting-btn-col">
         <button id="cal-filter-apply" class="primary setting-wide-btn" type="button">Show</button>
+        <button id="cal-filter-reset" class="secondary setting-wide-btn" type="button">Clear filter</button>
       </div>
     </div>
   </div>
