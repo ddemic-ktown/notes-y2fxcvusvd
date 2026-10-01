@@ -20,6 +20,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 100, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.09.30-2205', 'Fixes the app sticking on the loading screen after the last update'],
   ['v2026.09.30-2137', 'Android: the keyboard no longer pushes the note editor’s toolbar off the top of the screen'],
   ['v2026.09.30-2127', 'Settings › Calendar swipe: change month or week by swiping sideways or up and down'],
   ['v2026.09.30-2112', 'Tutorials 3, 7 and 9 open by saying which screen you are on and how to get there yourself'],
@@ -6645,16 +6646,14 @@ function repairReplacementNewlines(prev, next, caret) {
 // since rewriting the value mid-composition would fight the keyboard.
 //
 // A break you remove on purpose is left alone: typing over a selection that
-// spans lines starts with a selection containing '
-', and then no snapshot is
+// spans lines starts with a selection containing '\n', and then no snapshot is
 // taken at all.
 const REPAIR_TYPES = new Set(['insertReplacementText', 'insertText', 'insertCompositionText']);
 let replacementPrev = null;   // text as it stood just before a suggestion landed
 let compositionPrev = null;   // text as it stood when the current composition began
 function selectionHasBreak() {
   const a = bodyInput.selectionStart, b = bodyInput.selectionEnd;
-  return a != null && b != null && a !== b && bodyInput.value.slice(a, b).includes('
-');
+  return a != null && b != null && a !== b && bodyInput.value.slice(a, b).includes('\n');
 }
 function applyNewlineRepair(prev) {
   const fix = repairReplacementNewlines(prev, bodyInput.value, bodyInput.selectionStart);
