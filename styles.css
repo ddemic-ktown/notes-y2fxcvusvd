@@ -1591,6 +1591,22 @@ body.vv-zoomed .sync-toast { display: none !important; }
 .home-header-top { display: flex; align-items: center; gap: 8px; }
 .home-header-top h1 { flex: 1; }
 .home-search-input { width: 100%; box-sizing: border-box; }
+/* Home toolbar (v2026.10.01-1646) */
+.home-nav { display: flex; gap: 6px; }
+.home-nav[hidden] { display: none; }
+.home-nav-btn {
+  flex: 1 1 0; min-width: 0; padding: 8px 6px;
+  font: inherit; font-size: 14px; font-weight: 600;
+  background: var(--surface); color: var(--ink);
+  border: 1px solid var(--line); border-radius: var(--radius); cursor: pointer;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.home-nav-btn:active { opacity: 0.6; }
+/* Dark mode: the native date/time icons were dark on dark (v2026.10.01-1646). */
+body.dark-mode input[type="date"], body.dark-mode input[type="time"] { color-scheme: dark; }
+/* Current time (v2026.10.01-1646) */
+.cal-now { position: absolute; left: 0; right: 0; height: 0; border-top: 2px solid #2563eb; z-index: 30; pointer-events: none; }
+.cal-now::before { content: ''; position: absolute; left: 0; top: -5px; width: 8px; height: 8px; border-radius: 50%; background: #2563eb; }
 .customers-header { flex-direction: column; align-items: stretch; gap: 8px; }
 .customers-header-top { display: flex; align-items: center; gap: 8px; }
 .customers-header-bottom { display: flex; align-items: center; gap: 8px; }

@@ -20,6 +20,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 100, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.10.01-1646', 'Customers, Calendar and Price Table moved to a row at the top of Home; Hours lives in Settings › QuickBooks; a blue line marks the current time in week and day view; copying a job no longer copies the hours; date and time icons are visible in dark mode'],
   ['v2026.09.30-2326', 'Week view: overlapping jobs stack over each other like the day view when their text still shows, and less space between days'],
   ['v2026.09.30-2322', 'The home screen’s See all links are readable again in dark mode'],
   ['v2026.09.30-2316', 'The job description box grows to show all its text, pasting a checkbox line onto a checkbox gives one box however you paste, and Insert a date opens the date picker on Android and desktop'],
@@ -610,14 +611,8 @@ const FEATURE_TOGGLES = [
     hint: 'The keyword sections on the home screen and the Aggregator Keywords list in Settings.' },
   { key: 'hours', label: 'Hours & QuickBooks export',
     hint: 'The hours chart and the QuickBooks .iif export, including the service item names in Settings. Employees and customer accounts stay — the calendar needs them.' },
-  // The two Hours switches were reported as "both give the same result"
-  // (v2026.09.21-2317). They do not — but everything the BIG one additionally
-  // hides lives in Settings and is role-gated, so to someone who cannot see
-  // those rows anyway the only visible effect of either is the home button
-  // going. Say what the difference actually is rather than describing this one
-  // in isolation.
-  { key: 'hoursCard', label: 'Hours button on the home screen',
-    hint: 'Hides ONLY the home screen shortcut — the chart and the QuickBooks export stay, reachable from Settings. Turn off the switch above instead to hide the whole feature. Nothing is deleted.' },
+  // 'hoursCard' (Hours button on the home screen) removed v2026.10.01-1646: Home no
+  // longer has an Hours button — it lives in Settings › QuickBooks only.
 ];
 
 function getHiddenFeatures() {
@@ -682,7 +677,6 @@ function applyFeatureVisibility() {
 }
 // The home shortcut needs BOTH: hiding the feature outright must not leave a
 // card pointing at a screen that now sends you straight back home.
-function isHoursCardOn() { return isFeatureOn('hours') && isFeatureOn('hoursCard'); }
 
 // ---------- preferences that follow the user ----------
 // These describe the PERSON, so they sync via users/{uid}/prefs/app and
@@ -1773,6 +1767,13 @@ function renderCalendar() {
     const trackPx = Math.max(200, (calGrid.clientHeight || 600) - 70 - untimedH);
     const clearMin = (shortPills ? 40 : 30) / (trackPx / range);
     const indentPx = shortPills ? 6 : 12;
+    // Current time on today's column, when it falls inside the range (v2026.10.01-1646).
+    const nowLineWk = (s) => {
+      if (s !== todayStr) return '';
+      const n = new Date().getHours() * 60 + new Date().getMinutes();
+      if (n < lo || n > hi) return '';
+      return `<div class="cal-now" data-now="week" data-lo="${lo}" data-range="${range}" style="top:${pct(n)}"></div>`;
+    };
     const cols = days.map((d, i) => {
       const s = ymd(d);
       const js = dayJobs[i];
@@ -1802,7 +1803,7 @@ function renderCalendar() {
       return `<div class="${classes.join(' ')}" data-date="${s}">`
         + `<div class="cal-daynum">${d.getDate()}</div>`
         + `<div class="cal-wk-top" style="height:${untimedH}px">${untimed}</div>`
-        + `<div class="cal-wk-track">${hourLines}${blocks}</div></div>`;
+        + `<div class="cal-wk-track">${hourLines}${blocks}${nowLineWk(s)}</div></div>`;
     }).join('');
     headHtml = '<div class="cal-head"></div>' + head;
     cellsHtml = gutter + cols;
@@ -2124,7 +2125,11 @@ function renderCalendarDay() {
     </div>`;
   }).join('');
   timeline.style.height = `${24 * HOUR_PX}px`;
-  timeline.innerHTML = hours + blocks;
+  // Current time (v2026.10.01-1646) — today only; moved each minute by tickNowLines.
+  const nowMin = new Date().getHours() * 60 + new Date().getMinutes();
+  const nowLine = calSelectedDate === ymd(new Date())
+    ? `<div class="cal-now" data-now="day" style="top:${(nowMin / 60) * HOUR_PX}px"></div>` : '';
+  timeline.innerHTML = hours + blocks + nowLine;
 
   if (!jobs.length) {
     untimedWrap.hidden = false;
@@ -2373,6 +2378,20 @@ if (calGrid) {
     }
   });
 }
+
+// Keep the current-time lines moving (v2026.10.01-1646). Repositions the lines
+// already drawn rather than re-rendering, so nothing scrolls or flickers.
+setInterval(() => {
+  const n = new Date().getHours() * 60 + new Date().getMinutes();
+  document.querySelectorAll('.cal-now').forEach(el => {
+    if (el.dataset.now === 'day') el.style.top = ((n / 60) * HOUR_PX) + 'px';
+    else {
+      const lo = +el.dataset.lo, range = +el.dataset.range;
+      if (n < lo || n > lo + range) { el.remove(); return; }
+      el.style.top = ((n - lo) / range * 100).toFixed(3) + '%';
+    }
+  });
+}, 60000);
 
 // Swipe left/right to change the day. Re-renders in place rather than calling
 // showCalendarDay, which would push a history entry per swipe and bury the
@@ -2975,6 +2994,12 @@ if (jobDuplicate) jobDuplicate.addEventListener('click', () => {
   const dateEl = document.getElementById('job-date');
   if (dateEl && dateEl.value) dateEl.value = shiftYmd(dateEl.value, 1);
   document.getElementById('job-modal-title').textContent = 'New job (copy)';
+  // Hours are what someone actually WORKED on that day — a copy is a new day
+  // nobody has worked yet. Crew, notes and billable carry over. (v2026.10.01-1646)
+  renderJobEmployees(jobCrewDraft.map(c => ({ ...c, hours: null })));
+  requestAnimationFrame(() => {
+    document.querySelectorAll('#job-employees [data-crew-note]').forEach(autoGrowNote);
+  });
   jobDuplicate.hidden = true;
   const delBtn = document.getElementById('job-delete');
   if (delBtn) delBtn.hidden = true;
@@ -5484,7 +5509,33 @@ function renderHomeSearchResults(term) {
 }
 
 // ---------- list rendering ----------
+// Home toolbar (v2026.10.01-1646): the destinations the big cards used to carry, as a
+// row of buttons under the title. Same role rules as the cards had.
+function renderHomeNav() {
+  const nav = document.getElementById('home-nav');
+  if (!nav) return;
+  const ready = Storage.isReady();
+  const items = [];
+  if (ready && canViewAllRole()) items.push(['customers', 'Customers']);
+  if (ready) items.push(['calendar', 'Calendar']);
+  if (ready && !isCustomerRole() && Storage.canViewPriceTable()) items.push(['price', 'Price Table']);
+  nav.innerHTML = items.map(([k, label]) =>
+    `<button type="button" class="home-nav-btn" data-nav="${k}">${label}</button>`).join('');
+  nav.hidden = !items.length;
+}
+(() => {
+  const nav = document.getElementById('home-nav');
+  if (nav) nav.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-nav]');
+    if (!b) return;
+    if (b.dataset.nav === 'customers') setTimeout(showCustomers, 0);
+    else if (b.dataset.nav === 'calendar') showCalendar();
+    else if (b.dataset.nav === 'price') showPriceTable();
+  });
+})();
+
 function renderNotesList() {
+  renderHomeNav();
   if (homeSearchTerm.trim()) { renderHomeSearchResults(homeSearchTerm); return; }
   if (!Storage.isReady()) {
     notesList.innerHTML = '<p class="empty-state" style="font-style:normal"><span class="nav-spinner" style="width:20px;height:20px;border-width:3px;"></span></p>';
@@ -5503,15 +5554,8 @@ function renderNotesList() {
     // full home is built, so anything not repeated here is invisible to them —
     // which is exactly how the Calendar card went missing for employees even
     // though the card itself was role-gated to include them.
-    const navCards = [
-      `<article class="note-card nav-card" data-nav="calendar">
-        <div class="note-head"><p class="note-title">Calendar</p><span class="note-chevron">›</span></div>
-      </article>`,
-      // Price table is staff-only; a customer never sees it.
-      (!isCustomerRole() && Storage.canViewPriceTable()) ? `<article class="note-card nav-card" data-nav="price">
-        <div class="note-head"><p class="note-title">Price Table</p><span class="note-chevron">›</span></div>
-      </article>` : '',
-    ].join('');
+    // Calendar and Price Table are in the home toolbar now (v2026.10.01-1646).
+    const navCards = '';
     notesList.innerHTML = navCards + (assigned.length === 0
       ? emptyState
       : '<p class="section-label">Your notes:</p>' + assigned.map(n => renderNoteCard(n)).join(''));
@@ -5564,14 +5608,6 @@ function renderNotesList() {
   ` : '';
   // Hours card — same audience as the Settings entry: admin (full) and
   // bookkeeper (read-only export).
-  const hoursCard = ((isAdminRole() || isBookkeeperRole()) && isHoursCardOn()) ? `
-    <article class="note-card nav-card" data-nav="hours">
-      <div class="note-head">
-        <p class="note-title">Hours</p>
-        <span class="note-chevron">›</span>
-      </div>
-    </article>
-  ` : '';
 
   const keywordsRanked = getKeywords()
     .map(kw => {
@@ -5686,8 +5722,10 @@ function renderNotesList() {
     </article>`;
   // Customers and Price Table sit side by side at the top of the home screen;
   // Calendar and Hours pair up on the row beneath. A lone card fills the row.
-  const navRow = `<div class="nav-card-row">${customersCard}${priceCard}</div>`
-    + ((calendarCard || hoursCard) ? `<div class="nav-card-row">${calendarCard}${hoursCard}</div>` : '');
+  // The cards above are no longer drawn (v2026.10.01-1646): Customers, Calendar and
+  // Price Table are in the home toolbar, and Hours is in Settings only.
+  void customersCard; void calendarCard; void priceCard;
+  const navRow = '';
   notesList.innerHTML = gettingStartedCardsHtml() + navRow + pinnedBlock + olderHtml + orphanCard;
 
   applyLayoutMode();
@@ -10585,7 +10623,7 @@ function tutorialSteps(part) {
     },
     {
       screen: 'home',
-      target: () => document.querySelector('#notes-list .note-card[data-nav="customers"]'),
+      target: () => document.querySelector('#home-nav [data-nav="customers"]'),
       text: 'Your customers live here. Tap to open the list.',
     },
     {
@@ -10599,7 +10637,7 @@ function tutorialSteps(part) {
       group: 'customer',
       requires: () => Storage.listCustomers().length > 0,
       fallback: {
-        target: () => document.querySelector('#notes-list .note-card[data-nav="customers"]'),
+        target: () => document.querySelector('#home-nav [data-nav="customers"]'),
         text: 'You have no customers yet. Add one from the Customers list — or load sample data from Settings — then run this tour again to see the rest.',
       },
       setup: () => {
@@ -10697,7 +10735,7 @@ function tutorialSteps(part) {
     {
       screen: 'home',
       setup: () => { goHome(); return true; },
-      target: () => document.querySelector('#notes-list .note-card[data-nav="price"]'),
+      target: () => document.querySelector('#home-nav [data-nav="price"]'),
       text: 'The price table keeps what you buy (rows) against who you buy it from (columns), so you can compare before you order.',
     },
     {
@@ -10804,7 +10842,7 @@ function tutorialSteps(part) {
       {
         screen: 'home',
         setup: () => { goHome(); return true; },
-        target: () => document.querySelector('#notes-list .note-card[data-nav="calendar"]'),
+        target: () => document.querySelector('#home-nav [data-nav="calendar"]'),
         text: 'The calendar is who is working where, and when. It’s a plan — hours you actually worked are recorded separately.',
       },
       {
@@ -10985,15 +11023,16 @@ function tutorialSteps(part) {
       return true;
     };
     const noJobsFallback = {
-      target: () => document.querySelector('#notes-list .note-card[data-nav="calendar"]'),
+      target: () => document.querySelector('#home-nav [data-nav="calendar"]'),
       text: 'This reads your calendar. Book a job, put each person’s hours on it, then run this part again.',
     };
     return [
       {
-        screen: 'home',
-        setup: () => { goHome(); return true; },
-        target: () => document.querySelector('#notes-list .note-card[data-nav="hours"]'),
-        text: 'Hours collects what everyone actually worked — the hours you enter on each calendar job — so you can check it and send it to QuickBooks.',
+        // Hours has no Home button since v2026.10.01-1646 — it lives in Settings.
+        screen: 'settings',
+        setup: () => { if (!settingsView.classList.contains('active')) showSettings(); return true; },
+        target: () => document.getElementById('iif-btn'),
+        text: 'Hours is in Settings, under Time Logger — QuickBooks. It collects what everyone actually worked — the hours you enter on each calendar job — so you can check it and send it to QuickBooks.',
       },
       {
         screen: 'hours',
