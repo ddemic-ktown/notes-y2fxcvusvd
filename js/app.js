@@ -20,6 +20,8 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 100, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.09.30-2326', 'Week view: overlapping jobs stack over each other like the day view when their text still shows, and less space between days'],
+  ['v2026.09.30-2322', 'The home screen’s See all links are readable again in dark mode'],
   ['v2026.09.30-2316', 'The job description box grows to show all its text, pasting a checkbox line onto a checkbox gives one box however you paste, and Insert a date opens the date picker on Android and desktop'],
   ['v2026.09.30-2312', 'Week view is now a timeline: each day is divided into hours, from the week’s earliest start to its latest finish, with jobs drawn as blocks'],
   ['v2026.09.30-2250', 'Restore from backup (adds back only what is missing), backups now include jobs and hours, a Cancel filter button on the calendar and Clear filter in the filter box, pinch-zoom no longer flips the month, a dark keyboard gap in dark mode, crew note boxes sized right, and pasting a checkbox line onto a checkbox gives one box'],
@@ -1763,29 +1765,21 @@ function renderCalendar() {
       + `<div class="cal-wk-top" style="height:${untimedH}px"></div>`
       + `<div class="cal-wk-track">${hourMarks.map(m =>
           `<span class="cal-wk-hour" style="top:${pct(m)}">${escapeHtml(fmtHourLabel((m / 60) % 24))}</span>`).join('')}</div></div>`;
+    // Overlaps CASCADE like the day view (v2026.09.30-2326): a later job draws over an
+    // earlier one, indented, when enough of the earlier one stays visible for
+    // its name and crew tags. The hours here are a share of the screen, not
+    // HOUR_PX, so the clearance is converted from an estimate of the track's
+    // height. Narrow phone columns wrap names, so they need more.
+    const trackPx = Math.max(200, (calGrid.clientHeight || 600) - 70 - untimedH);
+    const clearMin = (shortPills ? 40 : 30) / (trackPx / range);
+    const indentPx = shortPills ? 6 : 12;
     const cols = days.map((d, i) => {
       const s = ymd(d);
       const js = dayJobs[i];
       const timed = js.map(j => ({ j, sp: jobSpan(j) })).filter(t => t.sp)
-        .sort((a, b) => (a.sp.start - b.sp.start) || (b.sp.end - a.sp.end));
-      // Lanes per cluster of overlapping jobs, so one clash doesn't halve the
-      // width of every other job that day.
-      let laneEnds = [], cluster = [], clusterEnd = -1;
-      const flush = () => {
-        const n = Math.max(...cluster.map(c => c.lane)) + 1;
-        cluster.forEach(c => { c.n = n; });
-        cluster = []; laneEnds = []; clusterEnd = -1;
-      };
-      timed.forEach(t => {
-        if (cluster.length && t.sp.start >= clusterEnd) flush();
-        let lane = laneEnds.findIndex(e => e <= t.sp.start);
-        if (lane === -1) { lane = laneEnds.length; laneEnds.push(0); }
-        laneEnds[lane] = t.sp.end;
-        t.lane = lane;
-        cluster.push(t);
-        clusterEnd = Math.max(clusterEnd, t.sp.end);
-      });
-      if (cluster.length) flush();
+        .sort((a, b) => (a.sp.start - b.sp.start) || (a.sp.end - b.sp.end));
+      const lay = layoutLanes(timed.map(t => t.sp), clearMin);
+      timed.forEach((t, k) => { t.lane = lay[k].lane; t.n = lay[k].lanes; t.depth = lay[k].depth; });
       const blocks = timed.map(t => {
         const j = t.j;
         const crew = jobCrew(j);
@@ -1793,9 +1787,10 @@ function renderCalendar() {
           ? `<span class="cal-chip cal-chip-initial" style="${chipStyle(n)}" title="${escapeHtml(n)}">${escapeHtml(n.split(/[\s(]+/)[0].slice(0, 1).toUpperCase())}</span>`
           : `<span class="cal-chip" style="${chipStyle(n)}" title="${escapeHtml(n)}">${escapeHtml(crewChipLabel(crew, n, true))}</span>`).join('');
         const w = 100 / t.n;
+        const ind = t.depth * indentPx;
         const who = jobTitle(j) || '—';
         return `<div class="cal-wk-job${j.noWork ? ' cal-nowork' : ' cal-working'}"`
-          + ` style="top:${pct(t.sp.start)};height:${((t.sp.end - t.sp.start) / range * 100).toFixed(3)}%;left:${(t.lane * w).toFixed(3)}%;width:${w.toFixed(3)}%"`
+          + ` style="top:${pct(t.sp.start)};height:${((t.sp.end - t.sp.start) / range * 100).toFixed(3)}%;left:calc(${(t.lane * w).toFixed(3)}% + ${ind}px);width:calc(${w.toFixed(3)}% - ${ind}px)"`
           + ` title="${escapeHtml(`${who} · ${fmtClock(t.sp.start)}–${fmtClock(t.sp.end)}`)}">`
           + `<span class="cal-wk-who">${escapeHtml(who)}</span><span class="cal-wk-chips">${chips}</span></div>`;
       }).join('');
@@ -1955,7 +1950,9 @@ function jobSpan(job) {
 const CASCADE_INDENT = 14;   // px the later block is pushed in by
 const CASCADE_CLEAR  = 28;   // px of the earlier block that must stay visible
 
-function layoutLanes(spans) {
+// clearMin: minutes of the earlier block that must stay visible to cascade.
+// The week view passes its own, since its hours are not HOUR_PX tall. (v2026.09.30-2326)
+function layoutLanes(spans, clearMinArg) {
   const placed = spans.map(() => ({ lane: 0, lanes: 1, depth: 0, visible: Infinity }));
   const order = spans.map((s, i) => ({ s, i })).sort((a, b) =>
     a.s.start - b.s.start || a.s.end - b.s.end);
@@ -1971,7 +1968,7 @@ function layoutLanes(spans) {
   });
   if (cluster.length) clusters.push(cluster);
 
-  const clearMin = (CASCADE_CLEAR / HOUR_PX) * 60;   // px of clearance, in minutes
+  const clearMin = clearMinArg != null ? clearMinArg : (CASCADE_CLEAR / HOUR_PX) * 60;   // px of clearance, in minutes
 
   clusters.forEach(items => {
     // Each column tracks the last block placed in it: a new job joins that
