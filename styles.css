@@ -812,6 +812,22 @@ select.iif-date-input { appearance: none; -webkit-appearance: none; padding-righ
    These REPLACE the grid rather than floating over it: a phone has no room for
    both, and the grid is not useful while you are reading a list of matches. */
 .cal-results { flex: 1; min-height: 0; overflow-y: auto; padding: 8px 12px 24px; }
+/* Calendar filter (v2026.09.30-2042) */
+.cal-filter-bar {
+  display: flex; align-items: center; gap: 8px; flex-shrink: 0;
+  padding: 6px 12px; background: var(--accent); color: var(--accent-ink);
+  font-size: 14px; font-weight: 600;
+}
+.cal-filter-bar[hidden] { display: none; }
+.cal-filter-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cal-filter-clear { color: inherit; flex-shrink: 0; }
+.cal-filter-select {
+  display: block; width: 100%; margin: 4px 0 12px;
+  background: var(--bg); color: var(--ink);
+  border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 10px 8px; font-family: inherit;
+  font-size: 16px;   /* 16px minimum — iOS auto-zoom */
+}
 .cal-results-count { margin: 0 0 8px; font-size: 12px; color: var(--ink-soft); }
 .cal-result {
   background: var(--surface);
@@ -945,6 +961,14 @@ select.iif-date-input { appearance: none; -webkit-appearance: none; padding-righ
 .job-time-row { display: flex; gap: 8px; flex-wrap: wrap; }
 .job-time-row label { flex: 1 1 30%; min-width: 92px; display: flex; flex-direction: column; gap: 2px; }
 .job-time-row input { width: 100%; }
+/* iOS gives a native time field a fixed intrinsic width and ignores width:100%,
+   so Start, End and Hours overlapped and pushed the sheet wider than the
+   screen. Dropping the native appearance lets it shrink. (v2026.09.30-2033) */
+.job-time-row input[type="time"] {
+  -webkit-appearance: none; appearance: none;
+  min-width: 0; max-width: 100%; display: block;
+}
+.job-time-row input[type="time"]::-webkit-date-and-time-value { text-align: left; }
 /* Three pulses on a prompt that is easy to miss, then it settles. Reduced
    motion gets the end state and no movement. (v2026.09.24-2005) */
 @keyframes pulse-attn {
@@ -1045,6 +1069,10 @@ select.iif-date-input { appearance: none; -webkit-appearance: none; padding-righ
 /* ---- Price table ---- */
 .price-main { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .price-scroll { flex: 1; overflow: auto; -webkit-overflow-scrolling: touch; padding: 0; position: relative; }
+/* No scroll bars — on iPhone they flashed on every cell tap. The sticky header
+   and item column already show where you are. (v2026.09.30-2033) */
+.price-scroll { scrollbar-width: none; }
+.price-scroll::-webkit-scrollbar { display: none; }
 /* Margin, NOT padding on the scroller: a sticky element sticks to the PADDING
    box, so 8px of padding leaves a strip where scrolled rows show through above
    the header and beside the item column. */
@@ -1285,6 +1313,32 @@ body.dark-mode .price-best-badge { color: #4ade80; }
 .app-back-btn { display: none; }
 body.show-app-back .app-back-btn { display: inline-flex; }
 body.show-app-back .app-back-btn[hidden] { display: none !important; }
+/* Settings › Back button › Bottom right (v2026.09.30-2048): the header Backs go, a round
+   one sits in the corner, and the + (and its menu, and Cancel/Save on a new
+   record) moves left of it. body.back-floating is set only while it shows. */
+body.show-app-back.back-bottom .app-back-btn { display: none !important; }
+.float-back { display: none; }
+body.back-floating .float-back {
+  display: flex; align-items: center; justify-content: center;
+  position: fixed;
+  right: 20px;
+  bottom: calc(24px + var(--kb-inset, 0px) + env(safe-area-inset-bottom, 0));
+  width: 60px; height: 60px; border-radius: 50%;
+  background: var(--surface); color: var(--ink);
+  border: 1px solid var(--line);
+  box-shadow: 0 6px 16px rgba(0,0,0,0.2);
+  font-size: 34px; line-height: 1; padding: 0 0 4px;
+  cursor: pointer;
+  z-index: 101;   /* above the fixed full-screen views (100) */
+}
+.float-back:active { transform: scale(0.96); }
+body.back-floating.vv-zoomed .float-back,
+html.modal-open body.back-floating .float-back { display: none; }
+body.back-floating .fab,
+body.back-floating .editor-new-actions { right: 92px; }
+body.back-floating .fab-menu { right: 90px; }
+/* With the floating Back hidden by the keyboard, the + is hidden too
+   (vv-zoomed), so nothing needs to slide back. */
 
 /* Inline home-screen section controls: − + ↑ ↓ beside each heading */
 /* Section controls are hidden until the Layout button is pressed */
@@ -2071,7 +2125,21 @@ body.dark-mode .iif-grid tbody tr.iif-differs td { background: #3f1212; }
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
   box-shadow: 0 -4px 20px rgba(0,0,0,0.2);
+  /* Up and down only. iOS let the job sheet be dragged sideways, and a scroll
+     that hit the end carried on into the screen behind. (v2026.09.30-2033) */
+  overflow-x: hidden;
+  touch-action: pan-y pinch-zoom;
+  overscroll-behavior: contain;
 }
+/* See PAGE LOCK in app.js. */
+html.modal-open #price-view.active,
+html.modal-open #calendar-view.active,
+html.modal-open #calendar-day-view.active,
+html.modal-open #hours-view.active {
+  height: var(--app-vh-locked, 100dvh);
+  max-height: var(--app-vh-locked, 100dvh);
+}
+html.modal-open, html.modal-open body { overflow: hidden; }
 .modal-header {
   display: flex;
   align-items: center;
@@ -2445,6 +2513,12 @@ input[type="search"]::-webkit-search-cancel-button {
   cursor: pointer;
 }
 .setting-list-toggle:active { opacity: 0.6; }
+/* Collapsible Settings sections (v2026.09.30-2105). The heading is the toggle; a closed
+   section shows its heading only. */
+.setting-fold-title { cursor: pointer; user-select: none; -webkit-user-select: none; }
+.setting-fold-title:active { opacity: 0.6; }
+.setting-row.setting-collapsed > :not(.setting-list-title) { display: none !important; }
+.setting-row.setting-collapsed > .setting-list-title { margin-bottom: 0; }
 .setting-list-caret { margin-left: 4px; }
 /* Why a row is locked, under the row it refers to. */
 .member-note {

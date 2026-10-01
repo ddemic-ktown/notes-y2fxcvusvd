@@ -2,7 +2,10 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <!-- interactive-widget (v2026.09.30-2137): Android Chrome SHRINKS the page for the
+       keyboard instead of covering it and panning the view, which pushed the
+       editor toolbar off the top. iOS ignores it. -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
   <meta name="theme-color" content="#1f2937" />
   <title>JobPilot</title>
   <link rel="manifest" href="manifest.json" />
@@ -108,7 +111,7 @@
         <button id="settings-btn" class="icon-btn" aria-label="Settings">⚙</button>
       </div>
       <div class="search-wrap">
-        <input id="home-search-input" class="search-input home-search-input" type="search" placeholder="Search all notes…" autocomplete="off" />
+        <input id="home-search-input" class="search-input home-search-input" type="search" placeholder="Search customers and notes…" autocomplete="off" />
         <button class="search-clear" type="button" aria-label="Clear search" hidden>✕</button>
         <button class="search-open icon-btn" type="button" aria-label="Open search">🔍</button>
       </div>
@@ -167,6 +170,8 @@
         <div class="editor-more-wrap">
           <button id="customer-more-btn" class="icon-btn date-btn editor-more-btn" type="button" aria-label="More options for this customer">⋯</button>
           <div id="customer-more-dropdown" class="editor-more-dropdown" hidden>
+            <!-- Admin + bookkeeper; Delete is admin-only. (v2026.09.30-2044) -->
+            <button id="customer-cal-btn" class="editor-more-item" type="button">See customer in calendar</button>
             <button id="customer-delete-btn" class="editor-more-item editor-more-danger" type="button">Delete customer</button>
           </div>
         </div>
@@ -254,6 +259,8 @@
         <div class="editor-more-wrap">
           <button id="cal-more-btn" class="icon-btn date-btn editor-more-btn" type="button" aria-label="More calendar options">⋯</button>
           <div id="cal-more-dropdown" class="editor-more-dropdown" hidden>
+            <!-- Admin/bookkeeper only, same as search. (v2026.09.30-2042) -->
+            <button id="cal-filter-btn" class="editor-more-item" type="button">Filter…</button>
             <button class="editor-more-item" type="button" data-tutorial-part="6" data-tutorial-skip-home data-tutorial-solo>How the calendar works</button>
             <button class="editor-more-item" type="button" data-tutorial-part="7" data-tutorial-skip-home data-tutorial-solo>How jobs work</button>
           </div>
@@ -271,6 +278,7 @@
       </div>
     </header>
     <main class="cal-main">
+      
       <div id="cal-results" class="cal-results" hidden></div>
       <div id="cal-grid" class="cal-grid"></div>
     </main>
@@ -286,6 +294,7 @@
       </div>
     </header>
     <main class="cal-day-main">
+      
       <div class="cal-day-cues">
         <button type="button" id="cal-day-prev" class="cal-cue cal-cue-side" data-shift="-1"></button>
         <!-- The day you are ON, between the two destinations — without it the
@@ -367,6 +376,8 @@
       </div>
       <div class="setting-btn-col">
         <button id="job-save" class="primary setting-wide-btn" type="button">Save</button>
+        <!-- Same as the ✕ — closes without saving. (v2026.09.30-2059) -->
+        <button id="job-cancel" class="secondary setting-wide-btn" type="button">Cancel</button>
         <button id="job-duplicate" class="secondary setting-wide-btn" type="button" hidden>Duplicate to next day</button>
         <button id="job-delete" class="secondary setting-wide-btn danger-item" type="button" hidden>Delete job</button>
       </div>
@@ -577,6 +588,11 @@
         <nav class="crumbs" id="crumbs-settings" aria-label="Breadcrumb"></nav>
     </header>
     <main class="settings-main">
+      <!-- Every section collapses; all start closed. (v2026.09.30-2105) -->
+      <div class="setting-btn-row settings-fold-all">
+        <button id="settings-expand-all" class="secondary" type="button">Expand all</button>
+        <button id="settings-collapse-all" class="secondary" type="button">Collapse all</button>
+      </div>
       <div class="setting-row setting-list-row">
         <h3 class="setting-list-title">Appearance &amp; editing</h3>
         <label class="setting-inline-label">Theme</label>
@@ -589,6 +605,21 @@
           <button id="clock-cycle-btn" class="theme-btn secondary cycle-btn">12-hour</button>
         </div>
         <p class="setting-check-hint">Tap to cycle: 12-hour, 24-hour, or Auto (follows your phone). This device only. The start and end time pickers in the job editor follow your phone's own setting and can't be changed here.</p>
+        <!-- Only where the in-app Back exists (iOS home-screen app, desktop
+             PWA). (v2026.09.30-2048) -->
+        <div id="back-pos-setting" hidden>
+          <label class="setting-inline-label">Back button</label>
+          <div class="setting-btn-row">
+            <button id="back-pos-cycle-btn" class="theme-btn secondary cycle-btn">Top</button>
+          </div>
+          <p class="setting-check-hint">Tap to switch: Top, or Bottom right beside the +. This device only.</p>
+        </div>
+        <!-- (v2026.09.30-2127) -->
+        <label class="setting-inline-label">Calendar swipe</label>
+        <div class="setting-btn-row">
+          <button id="cal-swipe-cycle-btn" class="theme-btn secondary cycle-btn">Sideways</button>
+        </div>
+        <p class="setting-check-hint">How you change month or week: swipe sideways, or up and down. The day view always swipes sideways, since its timeline scrolls up and down. This device only.</p>
         <label class="setting-check" data-editor-pref>
           <input id="setting-move-checked" type="checkbox" />
           <span>
@@ -1010,6 +1041,27 @@
       <div class="setting-btn-col">
         <button id="name-modal-save" class="primary setting-wide-btn" type="button">Save</button>
         <button id="name-modal-delete" class="secondary setting-wide-btn danger-item" type="button" hidden>Delete</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Floating Back, for Settings › Back button › Bottom right. (v2026.09.30-2048) -->
+  <button id="float-back-btn" class="float-back" type="button" aria-label="Back" hidden>‹</button>
+
+  <!-- CALENDAR FILTER (v2026.09.30-2042). Stays on — on this device — until the ✕ on the
+       bar above the calendar clears it. -->
+  <div id="cal-filter-modal" class="modal-overlay" hidden>
+    <div class="modal-panel name-modal-panel">
+      <div class="modal-header">
+        <h2 class="modal-title">Filter calendar</h2>
+        <button id="cal-filter-close" class="icon-btn" aria-label="Close">✕</button>
+      </div>
+      <label class="setting-inline-label" for="cal-filter-emp">Employee</label>
+      <select id="cal-filter-emp" class="cal-filter-select"></select>
+      <label class="setting-inline-label" for="cal-filter-cust">Customer</label>
+      <select id="cal-filter-cust" class="cal-filter-select"></select>
+      <div class="setting-btn-col">
+        <button id="cal-filter-apply" class="primary setting-wide-btn" type="button">Show</button>
       </div>
     </div>
   </div>

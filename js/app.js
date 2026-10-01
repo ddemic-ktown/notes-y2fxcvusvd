@@ -20,6 +20,20 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 100, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.09.30-2137', 'Android: the keyboard no longer pushes the note editor’s toolbar off the top of the screen'],
+  ['v2026.09.30-2127', 'Settings › Calendar swipe: change month or week by swiping sideways or up and down'],
+  ['v2026.09.30-2112', 'Tutorials 3, 7 and 9 open by saying which screen you are on and how to get there yourself'],
+  ['v2026.09.30-2107', 'Settings › Features: the Hours button hint says the switch above hides the whole feature, not removes it — nothing is deleted'],
+  ['v2026.09.30-2105', 'Settings: every section opens and closes from its heading, all start closed, and Expand all / Collapse all sit at the top'],
+  ['v2026.09.30-2103', 'The home search bar says “Search customers and notes…”, since it finds both'],
+  ['v2026.09.30-2101', 'The note under each employee on a job sits fully inside its box'],
+  ['v2026.09.30-2059', 'The job editor has a Cancel button at the bottom as well as the ✕ at the top'],
+  ['v2026.09.30-2053', 'Android: tapping a keyboard suggestion at the end of a line no longer swallows the line break'],
+  ['v2026.09.30-2048', 'Settings › Back button: keep Back at the top, or move it to the bottom right beside the + (iPhone home-screen app and desktop)'],
+  ['v2026.09.30-2044', 'A customer’s ⋯ menu has “See customer in calendar”, which opens the calendar filtered to them; calendar search now looks only at the jobs the filter is showing'],
+  ['v2026.09.30-2042', 'Calendar ⋯ › Filter: show only one employee’s or one customer’s jobs. A bar above the calendar shows the filter until you tap its ✕'],
+  ['v2026.09.30-2038', 'Settings › Customer accounts: the customer list starts on “Select customer” instead of showing a real customer’s name'],
+  ['v2026.09.30-2033', 'iPhone: the price chart and the job editor no longer jump or drift sideways while you type, Start/End/Hours no longer overlap, and the price chart’s scroll bars stay hidden'],
   ['v2026.09.24-2219', 'The note box under an employee’s hours grows to fit what you type instead of hiding it on one line'],
   ['v2026.09.24-2121', 'Hours on a job are now picked from hours and minutes dropdowns, and the hours chart has a “:” key so you can type 3:30 on a phone'],
   ['v2026.09.24-2044', 'The ✕ that deletes a recorded price is now big enough to hit on a phone, and the history sheet no longer closes itself the moment it opens'],
@@ -597,7 +611,7 @@ const FEATURE_TOGGLES = [
   // going. Say what the difference actually is rather than describing this one
   // in isolation.
   { key: 'hoursCard', label: 'Hours button on the home screen',
-    hint: 'Hides ONLY the home screen shortcut — the chart and the QuickBooks export stay, reachable from Settings. Turn off the switch above instead to remove the feature itself.' },
+    hint: 'Hides ONLY the home screen shortcut — the chart and the QuickBooks export stay, reachable from Settings. Turn off the switch above instead to hide the whole feature. Nothing is deleted.' },
 ];
 
 function getHiddenFeatures() {
@@ -918,6 +932,29 @@ if (isStandaloneApp && !isAndroid) document.body.classList.add('show-app-back');
 let appHistoryDepth = 0;
 function updateAppBackButtons() {
   document.querySelectorAll('.app-back-btn').forEach(btn => { btn.hidden = appHistoryDepth <= 0; });
+  // Floating Back (v2026.09.30-2048): only when the setting asks for it, the app has an
+  // in-app Back at all, and there is somewhere to go back to.
+  const bottom = document.body.classList.contains('show-app-back')
+    && document.body.classList.contains('back-bottom');
+  document.body.classList.toggle('back-floating', bottom && appHistoryDepth > 0);
+  const fb = document.getElementById('float-back-btn');
+  if (fb) fb.hidden = !(bottom && appHistoryDepth > 0);
+}
+// Settings › Back button: 'top' (default) or 'bottom'. This device only.
+function getBackPos() {
+  try { return localStorage.getItem('na-back-pos') === 'bottom' ? 'bottom' : 'top'; } catch (e) { return 'top'; }
+}
+function applyBackPos() {
+  document.body.classList.toggle('back-bottom', getBackPos() === 'bottom');
+  const btn = document.getElementById('back-pos-cycle-btn');
+  if (btn) {
+    const label = getBackPos() === 'bottom' ? 'Bottom right' : 'Top';
+    btn.textContent = label;
+    btn.setAttribute('aria-label', `Back button: ${label}. Tap to change.`);
+  }
+  const row = document.getElementById('back-pos-setting');
+  if (row) row.hidden = !document.body.classList.contains('show-app-back');
+  updateAppBackButtons();
 }
 // Every screen change routes through pushState/replaceState; wrap them so the
 // depth count stays honest without touching each call site.
@@ -971,6 +1008,40 @@ document.querySelectorAll('.modal-overlay').forEach(el => {
     }
   }).observe(el, { attributes: true, attributeFilter: ['hidden'] });
 });
+// PAGE LOCK while any sheet is open (v2026.09.30-2033). Opening the keyboard in a sheet
+// shrinks --app-vh, and every fixed screen sized from it (price chart,
+// calendar, hours) reflowed behind the sheet — on iPhone that read as the
+// chart scrolling by itself. Freeze their height at what it was when the sheet
+// opened; the sheet itself still follows --app-vh.
+(() => {
+  const overlays = Array.from(document.querySelectorAll('.modal-overlay'));
+  const root = document.documentElement;
+  const sync = () => {
+    const open = overlays.some(o => !o.hidden);
+    if (open === root.classList.contains('modal-open')) return;
+    if (open) {
+      const vh = getComputedStyle(root).getPropertyValue('--app-vh').trim();
+      root.style.setProperty('--app-vh-locked', vh || '100dvh');
+    }
+    root.classList.toggle('modal-open', open);
+  };
+  overlays.forEach(o => new MutationObserver(sync)
+    .observe(o, { attributes: true, attributeFilter: ['hidden'] }));
+  sync();
+})();
+(() => {
+  const fb = document.getElementById('float-back-btn');
+  if (fb) fb.addEventListener('click', () => { if (appHistoryDepth > 0) history.back(); });
+  const cyc = document.getElementById('back-pos-cycle-btn');
+  if (cyc) cyc.addEventListener('click', () => {
+    try {
+      if (getBackPos() === 'bottom') localStorage.removeItem('na-back-pos');
+      else localStorage.setItem('na-back-pos', 'bottom');
+    } catch (e) {}
+    applyBackPos();
+  });
+  applyBackPos();
+})();
 document.querySelectorAll('.app-back-btn').forEach(btn => {
   // history.back() fires the same popstate path Android's system back uses,
   // so editor cleanup / save flushing / return-screen logic is shared.
@@ -1172,6 +1243,29 @@ function prettyDate(s) {
 // is the other half of that answer: same grid, same columns, seven cells
 // instead of thirty-five, so each one is big enough to actually read.
 let calMode = localStorage.getItem('na-cal-mode') === 'week' ? 'week' : 'month';
+// Settings › Calendar swipe (v2026.09.30-2127): 'sideways' (default) or 'vertical', for the
+// month and week grid only. This device only.
+function calSwipeVertical() {
+  try { return localStorage.getItem('na-cal-swipe') === 'vertical'; } catch (e) { return false; }
+}
+function applyCalSwipeButton() {
+  const btn = document.getElementById('cal-swipe-cycle-btn');
+  if (!btn) return;
+  const label = calSwipeVertical() ? 'Up and down' : 'Sideways';
+  btn.textContent = label;
+  btn.setAttribute('aria-label', `Calendar swipe: ${label}. Tap to change.`);
+}
+(() => {
+  const btn = document.getElementById('cal-swipe-cycle-btn');
+  if (btn) btn.addEventListener('click', () => {
+    try {
+      if (calSwipeVertical()) localStorage.removeItem('na-cal-swipe');
+      else localStorage.setItem('na-cal-swipe', 'vertical');
+    } catch (e) {}
+    applyCalSwipeButton();
+  });
+  applyCalSwipeButton();
+})();
 
 // The Sunday of the week `cursor` falls in — the grid's columns start on Sunday,
 // so a week has to as well or the day names would sit above the wrong dates.
@@ -1260,7 +1354,9 @@ function askForName({ title, hint = '', value = '', saveLabel = 'Save', deletabl
   input.value = value;
   refreshNameModalHint();
   modal.hidden = false;
-  input.focus();
+  // preventScroll: iOS otherwise scrolls whatever is behind the sheet to
+  // "reveal" the field — the price chart lurched on every add/rename.
+  input.focus({ preventScroll: true });
   input.select();
   return new Promise(res => { nameModalResolve = res; });
 }
@@ -1358,7 +1454,8 @@ function calSearchMatches(term) {
   const q = term.trim().toLowerCase();
   if (!q) return [];
   const hideNotes = isCustomerRole();
-  return Storage.listJobs().filter(j => {
+  // Only what the filter is showing (v2026.09.30-2044).
+  return Storage.listJobs().filter(calFilterMatch).filter(j => {
     const hay = [
       jobTitle(j),
       j.address || '',
@@ -1385,7 +1482,7 @@ function renderCalSearchResults() {
   box.hidden = false;
   const hits = calSearchMatches(calSearchTerm);
   if (!hits.length) {
-    box.innerHTML = `<p class="empty-state">No jobs match “${escapeHtml(calSearchTerm.trim())}”.</p>`;
+    box.innerHTML = `<p class="empty-state">No jobs match “${escapeHtml(calSearchTerm.trim())}”${calFilterOn() ? ' with this filter' : ''}.</p>`;
     return;
   }
   box.innerHTML = `<p class="cal-results-count">${hits.length} job${hits.length === 1 ? '' : 's'}</p>`
@@ -1422,7 +1519,95 @@ if (calSearchInput) {
   });
 }
 
+// ---------- calendar filter (v2026.09.30-2042) ----------
+// One employee and/or one customer. Remembered on this device and left on
+// until the ✕ on the bar clears it — leaving the calendar does not.
+let calFilter = { emp: '', cust: '' };
+try {
+  const saved = JSON.parse(localStorage.getItem('na-cal-filter') || 'null');
+  if (saved) calFilter = { emp: String(saved.emp || ''), cust: String(saved.cust || '') };
+} catch (e) {}
+function calFilterOn() {
+  // Admin and bookkeeper only — anyone else never sees the control, so a
+  // filter saved under another role must not quietly hide their jobs.
+  return (isAdminRole() || isBookkeeperRole()) && !!(calFilter.emp || calFilter.cust);
+}
+function calFilterMatch(j) {
+  if (!calFilterOn()) return true;
+  if (calFilter.emp && !crewNames(jobCrew(j)).includes(calFilter.emp)) return false;
+  if (calFilter.cust && j.customerId !== calFilter.cust) return false;
+  return true;
+}
+function calJobsByDate(d) { return Storage.listJobsByDate(d).filter(calFilterMatch); }
+function saveCalFilter() {
+  try {
+    if (calFilter.emp || calFilter.cust) localStorage.setItem('na-cal-filter', JSON.stringify(calFilter));
+    else localStorage.removeItem('na-cal-filter');
+  } catch (e) {}
+}
+function renderCalFilterBars() {
+  const on = calFilterOn();
+  const parts = [];
+  if (on && calFilter.emp) parts.push(calFilter.emp);
+  if (on && calFilter.cust) parts.push(customerCrumbLabel(calFilter.cust) || 'Customer');
+  document.querySelectorAll('.cal-filter-bar').forEach(bar => {
+    bar.hidden = !on;
+    const label = bar.querySelector('.cal-filter-label');
+    if (label) label.textContent = on ? 'Showing: ' + parts.join(' · ') : '';
+  });
+}
+function rerenderCalendarScreens() {
+  renderCalFilterBars();
+  if (calSearchTerm.trim()) renderCalSearchResults();
+  if (calendarView && calendarView.classList.contains('active')) renderCalendar();
+  const dayView = document.getElementById('calendar-day-view');
+  if (dayView && dayView.classList.contains('active')) renderCalendarDay();
+}
+function openCalFilter() {
+  const modal = document.getElementById('cal-filter-modal');
+  const empSel = document.getElementById('cal-filter-emp');
+  const custSel = document.getElementById('cal-filter-cust');
+  if (!modal || !empSel || !custSel) return;
+  const emps = getEmployeeNames().slice().sort((a, b) => a.localeCompare(b));
+  if (calFilter.emp && !emps.includes(calFilter.emp)) emps.unshift(calFilter.emp);
+  empSel.innerHTML = '<option value="">Everyone</option>'
+    + emps.map(n => `<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`).join('');
+  empSel.value = calFilter.emp;
+  const custs = Storage.liveCustomers()
+    .map(c => ({ id: c.id, label: customerCrumbLabel(c.id) }))
+    .sort((a, b) => a.label.localeCompare(b.label));
+  custSel.innerHTML = '<option value="">All customers</option>'
+    + custs.map(c => `<option value="${escapeHtml(c.id)}">${escapeHtml(c.label)}</option>`).join('');
+  custSel.value = calFilter.cust;
+  modal.hidden = false;
+}
+(() => {
+  const btn = document.getElementById('cal-filter-btn');
+  const modal = document.getElementById('cal-filter-modal');
+  if (btn) btn.addEventListener('click', openCalFilter);
+  const close = () => { if (modal) modal.hidden = true; };
+  const closeBtn = document.getElementById('cal-filter-close');
+  if (closeBtn) closeBtn.addEventListener('click', close);
+  if (modal) modal.addEventListener('click', (e) => { if (e.target === modal) close(); });
+  const apply = document.getElementById('cal-filter-apply');
+  if (apply) apply.addEventListener('click', () => {
+    calFilter = {
+      emp: document.getElementById('cal-filter-emp').value,
+      cust: document.getElementById('cal-filter-cust').value,
+    };
+    saveCalFilter();
+    close();
+    rerenderCalendarScreens();
+  });
+  document.querySelectorAll('.cal-filter-clear').forEach(b => b.addEventListener('click', () => {
+    calFilter = { emp: '', cust: '' };
+    saveCalFilter();
+    rerenderCalendarScreens();
+  }));
+})();
+
 function renderCalendar() {
+  renderCalFilterBars();
   // Older months aren't in the live window — pull them once, on demand. The
   // grid draws trailing days of both neighbours, so cover those too.
   for (const off of [-1, 0, 1]) {
@@ -1453,7 +1638,7 @@ function renderCalendar() {
     .map(d => `<div class="cal-head">${d}</div>`).join('');
   const cells = days.map(d => {
     const s = ymd(d);
-    const jobs = Storage.listJobsByDate(s);
+    const jobs = calJobsByDate(s);
     // In week view every cell is 'this week', so nothing is greyed as an
     // adjacent month — a week that straddles two months is one week, not a
     // week with four faded days in it.
@@ -1531,10 +1716,13 @@ function renderCalendar() {
   };
   // One row, prev on the left and next on the right — the same shape the day
   // view uses, now that both change with a left/right swipe.
+  // Arrows follow Settings › Calendar swipe (v2026.09.30-2127).
+  const cueBack = calSwipeVertical() ? '∧' : '‹';
+  const cueFwd = calSwipeVertical() ? '∨' : '›';
   const cues = `<div class="cal-cues">`
-    + `<button type="button" class="cal-cue cal-cue-side" data-shift="-1">‹ ${escapeHtml(cueLabel(-1))}</button>`
+    + `<button type="button" class="cal-cue cal-cue-side" data-shift="-1">${cueBack} ${escapeHtml(cueLabel(-1))}</button>`
     + `<span class="cal-cue-current">${escapeHtml(cueLabel(0))}</span>`
-    + `<button type="button" class="cal-cue cal-cue-side" data-shift="1">${escapeHtml(cueLabel(1))} ›</button>`
+    + `<button type="button" class="cal-cue cal-cue-side" data-shift="1">${escapeHtml(cueLabel(1))} ${cueFwd}</button>`
     + `</div>`;
   calGrid.classList.toggle('cal-grid-week', calMode === 'week');
   // Desktop month only: week rows size to their content, so a busy week is
@@ -1759,7 +1947,8 @@ function renderCalendarDay() {
   const dayFab = document.getElementById('cal-day-fab');
   if (dayFab) dayFab.style.display = canEdit ? '' : 'none';
 
-  const jobs = Storage.listJobsByDate(calSelectedDate);
+  renderCalFilterBars();
+  const jobs = calJobsByDate(calSelectedDate);
   const timed = [], untimed = [];
   jobs.forEach(j => { (jobSpan(j) ? timed : untimed).push(j); });
 
@@ -2026,7 +2215,8 @@ function calShiftMonth(delta) {
   }
   renderCalendar();
   // renderCalendar rebuilds .cal-cells, so grab it after the render
-  calSlide(calGrid && calGrid.querySelector('.cal-cells'), delta > 0 ? 'left' : 'right');
+  calSlide(calGrid && calGrid.querySelector('.cal-cells'),
+    calSwipeVertical() ? (delta > 0 ? 'up' : 'down') : (delta > 0 ? 'left' : 'right'));
 }
 function setCalMode(mode) {
   calMode = mode === 'week' ? 'week' : 'month';
@@ -2061,16 +2251,31 @@ if (calGrid) {
 }
 
 if (calGrid) {
-  let sx = 0, sy = 0, tracking = false;
+  let sx = 0, sy = 0, tracking = false, atTop = true, atBottom = true;
   calGrid.addEventListener('touchstart', (e) => {
     if (e.touches.length !== 1) return;
     sx = e.touches[0].clientX; sy = e.touches[0].clientY; tracking = true;
+    // Up-and-down mode: a grid that scrolls its own overflow only changes
+    // month once it was ALREADY at that edge when the finger landed —
+    // otherwise the swipe is just a scroll. (v2026.09.30-2127)
+    const sc = calGrid.querySelector('.cal-cells');
+    const scrolls = sc && getComputedStyle(sc).overflowY !== 'visible' && sc.scrollHeight > sc.clientHeight + 2;
+    atTop = !scrolls || sc.scrollTop <= 1;
+    atBottom = !scrolls || sc.scrollTop + sc.clientHeight >= sc.scrollHeight - 2;
   }, { passive: true });
   calGrid.addEventListener('touchend', (e) => {
     if (!tracking) return;
     tracking = false;
     const t = e.changedTouches[0];
     const dx = t.clientX - sx, dy = t.clientY - sy;
+    if (calSwipeVertical()) {
+      // Up = forward, the grid moving the way the finger does.
+      if (Math.abs(dy) > 60 && Math.abs(dy) > Math.abs(dx) * 1.5) {
+        if (dy < 0 && atBottom) calShiftMonth(1);
+        else if (dy > 0 && atTop) calShiftMonth(-1);
+      }
+      return;
+    }
     // Left = forward, matching the day view. Vertical is deliberately NOT
     // handled here: the grid scrolls its own overflow that way.
     if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.5) {
@@ -2219,7 +2424,10 @@ let jobCrewDraft = [];
 function autoGrowNote(el) {
   if (!el) return;
   el.style.height = 'auto';
-  el.style.height = el.scrollHeight + 'px';
+  // + the border (v2026.09.30-2101): box-sizing is border-box, and scrollHeight leaves the
+  // border out, so the box came out a couple of pixels short of its text.
+  const border = el.offsetHeight - el.clientHeight;
+  el.style.height = (el.scrollHeight + border) + 'px';
 }
 
 function renderJobEmployees(crew) {
@@ -2622,6 +2830,8 @@ if (jobCustomerSearch) {
 }
 const jobClose = document.getElementById('job-close');
 if (jobClose) jobClose.addEventListener('click', () => { jobModal.hidden = true; });
+const jobCancel = document.getElementById('job-cancel');
+if (jobCancel) jobCancel.addEventListener('click', () => { jobModal.hidden = true; });
 if (jobModal) jobModal.addEventListener('click', (e) => { if (e.target === jobModal) jobModal.hidden = true; });
 
 const jobSave = document.getElementById('job-save');
@@ -2862,7 +3072,8 @@ function focusOpenPriceCell() {
     if (c.left < s.left) scroller.scrollLeft += (c.left - s.left) - 8;
     else if (c.right > s.right) scroller.scrollLeft += (c.right - s.right) + 8;
     const input = cell.querySelector('.price-input');
-    if (input) input.focus();
+    // We have already scrolled it into place; don't let iOS scroll it again.
+    if (input) input.focus({ preventScroll: true });
   });
 }
 
@@ -3572,8 +3783,20 @@ function keyboardInset(vv) {
 // reads as "up", since a dismissal and an opening look the same from one
 // sample. Shorten it before removing it — open animations run about 250ms.
 let kbLastUpAt = 0;
+// Android with interactive-widget=resizes-content (v2026.09.30-2137): the keyboard shrinks
+// the LAYOUT viewport, so keyboardInset's gap is 0 and it never reports. The
+// tell there is innerHeight dropping well below the tallest seen at this width.
+let tallestInner = window.innerHeight, tallestAtWidth = window.innerWidth;
+function keyboardShrunkLayout() {
+  if (window.innerWidth !== tallestAtWidth) {        // rotated: start over
+    tallestAtWidth = window.innerWidth;
+    tallestInner = window.innerHeight;
+  }
+  tallestInner = Math.max(tallestInner, window.innerHeight);
+  return editableFocused() && (tallestInner - window.innerHeight) > 120;
+}
 function keyboardIsUp() {
-  if (keyboardInset(window.visualViewport) > 0) return true;
+  if (keyboardInset(window.visualViewport) > 0 || keyboardShrunkLayout()) return true;
   return editableFocused() && (Date.now() - kbLastUpAt) < 600;
 }
 // How far the page is pinch-zoomed. `vv.scale` is the direct answer but Android
@@ -3611,7 +3834,7 @@ function updateAppVh() {
   // focused text field, ignore anything small enough to be chrome, and cap it
   // so a bad reading can never launch a control off-screen.
   const kb = keyboardInset(vv);
-  if (kb > 0) kbLastUpAt = Date.now();   // feeds keyboardIsUp's grace window
+  if (kb > 0 || keyboardShrunkLayout()) kbLastUpAt = Date.now();   // feeds keyboardIsUp's grace window
   document.documentElement.style.setProperty('--kb-inset', kb + 'px');
   // PINCH ZOOM. A `position: fixed` control is laid out against the layout
   // viewport, so the browser magnifies it with everything else: the calendar's
@@ -4692,8 +4915,56 @@ function renderSectionView(key) {
   }
 }
 
+// ---------- collapsible Settings sections (v2026.09.30-2105) ----------
+// Every .setting-list-row's heading toggles it. All closed each time Settings
+// opens. What's new keeps its own toggle (it builds its list lazily) and is
+// driven through it.
+const settingsFoldRows = Array.from(document.querySelectorAll('.settings-main > .setting-list-row'))
+  .filter(r => r.querySelector(':scope > h3.setting-list-title'));
+function setSettingFold(row, open) {
+  row.classList.toggle('setting-collapsed', !open);
+  const h = row.querySelector(':scope > h3.setting-list-title');
+  if (h) {
+    h.setAttribute('aria-expanded', String(open));
+    const caret = h.querySelector('.setting-list-caret');
+    if (caret) caret.textContent = open ? '▾' : '▸';
+  }
+}
+function setChangelogFold(open) {
+  const t = document.getElementById('changelog-toggle');
+  if (t && (t.getAttribute('aria-expanded') === 'true') !== open) t.click();
+}
+function setAllSettingFolds(open) {
+  settingsFoldRows.forEach(r => setSettingFold(r, open));
+  setChangelogFold(open);
+}
+settingsFoldRows.forEach(row => {
+  const h = row.querySelector(':scope > h3.setting-list-title');
+  h.classList.add('setting-fold-title');
+  h.setAttribute('role', 'button');
+  h.tabIndex = 0;
+  h.insertAdjacentHTML('beforeend', ' <span class="setting-list-caret" aria-hidden="true">▸</span>');
+  const toggle = () => setSettingFold(row, row.classList.contains('setting-collapsed'));
+  h.addEventListener('click', toggle);
+  h.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); }
+  });
+});
+(() => {
+  const ex = document.getElementById('settings-expand-all');
+  const co = document.getElementById('settings-collapse-all');
+  if (ex) ex.addEventListener('click', () => setAllSettingFolds(true));
+  if (co) co.addEventListener('click', () => setAllSettingFolds(false));
+})();
+// The tour points INTO sections; open the one holding its target.
+function openSettingFoldFor(el) {
+  const row = el && el.closest ? el.closest('.setting-row.setting-collapsed') : null;
+  if (row) setSettingFold(row, true);
+}
+
 function showSettings() {
   hideAllScreens();
+  setAllSettingFolds(false);
   renderCrumbs('crumbs-settings', [{ label: 'Home', go: 'home' }, { label: 'Settings' }]);
   window.scrollTo(0, 0);
   renderKeywordList();
@@ -5925,6 +6196,17 @@ sortRecentBtn.addEventListener('click', async () => {
 // customer". Storage.deleteCustomer is a SOFT delete: the customer and every
 // note filed under them get a deletedAt and appear in Trash as one entry for
 // 30 days, so the confirmation promises a way back rather than finality.
+// See customer in calendar (v2026.09.30-2044): the calendar filter, set to this customer
+// and no one employee. Stays on until the ✕ on the bar, like any filter.
+const customerCalBtn = document.getElementById('customer-cal-btn');
+if (customerCalBtn) customerCalBtn.addEventListener('click', () => {
+  const id = activeCustomerId;
+  if (!id) return;
+  calFilter = { emp: '', cust: id };
+  saveCalFilter();
+  showCalendar();
+  rerenderCalendarScreens();
+});
 const customerDeleteBtn = document.getElementById('customer-delete-btn');
 if (customerDeleteBtn) customerDeleteBtn.addEventListener('click', async () => {
   const id = activeCustomerId;
@@ -6355,20 +6637,53 @@ function repairReplacementNewlines(prev, next, caret) {
   };
 }
 
+// (v2026.09.30-2053) Android does not only use 'insertReplacementText'. Gboard and others
+// usually deliver a suggestion as a COMPOSITION (insertCompositionText, then
+// compositionend) or a plain insertText, and those swallowed the line break at
+// the end of a line unrepaired. So: snapshot before any insert, and for a
+// composition keep the snapshot from where it STARTED and repair once it ends,
+// since rewriting the value mid-composition would fight the keyboard.
+//
+// A break you remove on purpose is left alone: typing over a selection that
+// spans lines starts with a selection containing '
+', and then no snapshot is
+// taken at all.
+const REPAIR_TYPES = new Set(['insertReplacementText', 'insertText', 'insertCompositionText']);
 let replacementPrev = null;   // text as it stood just before a suggestion landed
-bodyInput.addEventListener('beforeinput', (e) => {
-  replacementPrev = (e.inputType === 'insertReplacementText') ? bodyInput.value : null;
-});
-bodyInput.addEventListener('input', (e) => {
-  if (e.inputType !== 'insertReplacementText' || replacementPrev === null) return;
-  const fix = repairReplacementNewlines(replacementPrev, bodyInput.value, bodyInput.selectionStart);
-  replacementPrev = null;
+let compositionPrev = null;   // text as it stood when the current composition began
+function selectionHasBreak() {
+  const a = bodyInput.selectionStart, b = bodyInput.selectionEnd;
+  return a != null && b != null && a !== b && bodyInput.value.slice(a, b).includes('
+');
+}
+function applyNewlineRepair(prev) {
+  const fix = repairReplacementNewlines(prev, bodyInput.value, bodyInput.selectionStart);
   if (!fix) return;
   // No pushUndo here: beforeinput already snapshotted this as a chunk edit, so
   // the suggestion and its repair undo together as one step.
   bodyInput.value = fix.text;
   bodyInput.setSelectionRange(fix.caret, fix.caret);
   scheduleSave();
+}
+bodyInput.addEventListener('compositionstart', () => {
+  compositionPrev = selectionHasBreak() ? null : bodyInput.value;
+});
+bodyInput.addEventListener('compositionend', () => {
+  const prev = compositionPrev;
+  compositionPrev = null;
+  if (prev === null) return;
+  // After the final input event of the composition has landed.
+  setTimeout(() => applyNewlineRepair(prev), 0);
+});
+bodyInput.addEventListener('beforeinput', (e) => {
+  replacementPrev = (REPAIR_TYPES.has(e.inputType) && !e.isComposing && !selectionHasBreak())
+    ? bodyInput.value : null;
+});
+bodyInput.addEventListener('input', (e) => {
+  if (e.isComposing || !REPAIR_TYPES.has(e.inputType) || replacementPrev === null) return;
+  const prev = replacementPrev;
+  replacementPrev = null;
+  applyNewlineRepair(prev);
 });
 
 // Typing granularity: snapshot at word boundaries, on insert/delete direction
@@ -7758,10 +8073,14 @@ function applyRoleUI(role) {
     document.getElementById('customers-fab'),
     document.getElementById('customer-notes-fab'),
     document.getElementById('delete-btn'),
-    // The ⋯ on a customer holds only Delete, so the whole button goes.
-    document.getElementById('customer-more-btn'),
   ];
   adminControls.forEach(el => { if (el) el.style.display = isAdminRole ? '' : 'none'; });
+  // A customer's ⋯: admin and bookkeeper (See customer in calendar); its
+  // Delete item is admin-only. (v2026.09.30-2044)
+  const custMore = document.getElementById('customer-more-btn');
+  if (custMore) custMore.style.display = (isAdminRole || role === 'bookkeeper') ? '' : 'none';
+  const custDel = document.getElementById('customer-delete-btn');
+  if (custDel) custDel.hidden = !isAdminRole;
   // Home + FAB: admins and employees can create general notes; read-only roles cannot
   const homeFab = document.getElementById('fab');
   if (homeFab) homeFab.style.display = (isCustomer || role === 'bookkeeper') ? 'none' : '';
@@ -7777,6 +8096,9 @@ function applyRoleUI(role) {
     const on = isAdminRole || role === 'bookkeeper';
     calSearchWrap.hidden = !on;
     if (!on) clearCalSearch();
+    const filterBtn = document.getElementById('cal-filter-btn');
+    if (filterBtn) filterBtn.hidden = !on;
+    renderCalFilterBars();
   }
   // Layout button only for roles that see the home sections at all
   const layoutBtnEl = document.getElementById('layout-btn');
@@ -7813,8 +8135,10 @@ function renderCustomerLinks() {
   const customers = Storage.liveCustomers();
   const accounts = Storage.listMembers().filter(m => m.role === 'customer');
 
+  // A blank first choice, not the first real customer — that read as a
+  // placeholder and showed an actual customer's name. (v2026.09.30-2038)
   custSel.innerHTML = customers.length
-    ? customers.map(c => `<option value="${c.id}">${escapeHtml(customerCrumbLabel(c.id))}</option>`).join('')
+    ? '<option value="">Select customer</option>' + customers.map(c => `<option value="${c.id}">${escapeHtml(customerCrumbLabel(c.id))}</option>`).join('')
     : '<option value="">No customers yet</option>';
   acctSel.innerHTML = accounts.length
     ? accounts.map(m => `<option value="${m.uid}">${escapeHtml(m.name || m.email || m.uid)}</option>`).join('')
@@ -10093,13 +10417,15 @@ function tutorialSteps(part) {
       text: 'The trail at the top always shows where you are. Tap an earlier step — Home, Customers — to go back there.',
     },
     {
-      // No `requires` for the admin check: the ⋯ is hidden for everyone else,
-      // and isTargetVisible() already skips a step whose target is hidden.
+      // No `requires` for the role check: the ⋯ is hidden for employees and
+      // customers, and isTargetVisible() already skips a hidden target.
       screen: 'customer-notes',
       group: 'customer',
       requires: () => Storage.listCustomers().length > 0,
       target: () => document.getElementById('customer-more-btn'),
-      text: 'The ⋯ menu deletes a customer. They and all their notes go to Trash, in Settings, where you can put them back for 30 days — so it is safe to tidy up.',
+      text: isAdminRole()
+        ? 'The ⋯ menu has See customer in calendar — the calendar showing only this customer’s jobs, until you tap the ✕ on its bar. It also deletes a customer: they and all their notes go to Trash, in Settings, where you can put them back for 30 days.'
+        : 'The ⋯ menu has See customer in calendar — the calendar showing only this customer’s jobs, until you tap the ✕ on its bar.',
     },
   ];
 
@@ -10282,7 +10608,10 @@ function tutorialSteps(part) {
         screen: 'calendar',
         setup: goMonth,
         target: () => document.querySelector('#cal-grid .cal-cues'),
-        text: 'Swipe left for next month and right for last. These cues name the month you’re heading to, and you can tap them instead.',
+        // Follows Settings › Calendar swipe (v2026.09.30-2127).
+        text: calSwipeVertical()
+          ? 'Swipe up for next month and down for last. These cues name the month you’re heading to, and you can tap them instead. Settings › Calendar swipe switches this to sideways.'
+          : 'Swipe left for next month and right for last. These cues name the month you’re heading to, and you can tap them instead. Settings › Calendar swipe switches this to up and down.',
       },
       {
         screen: 'calendar',
@@ -10301,6 +10630,13 @@ function tutorialSteps(part) {
         screen: 'calendar',
         target: () => document.getElementById('cal-search'),
         text: 'Search your jobs by customer, address, note, or who was on them. Tap a result to open that day. It looks through the months already loaded — browse back further and those come with it.',
+      },
+      {
+        // Admin/bookkeeper only — the Filter item is hidden for anyone else.
+        screen: 'calendar',
+        requires: () => isAdminRole() || isBookkeeperRole(),
+        target: () => document.getElementById('cal-more-btn'),
+        text: 'Filter, in this ⋯ menu, shows just one employee’s or one customer’s jobs. A bar above the calendar says what you’re looking at, and the filter stays on until you tap the ✕ on that bar.',
       },
       {
         screen: 'calendar-day',
@@ -10346,6 +10682,15 @@ function tutorialSteps(part) {
       return true;
     };
     return [
+      {
+        // Where you are and how you'd get here alone (v2026.09.30-2112). Every role that
+        // sees this part sees the trail, so the route survives the + step
+        // being skipped for a non-admin.
+        screen: 'calendar',
+        setup: goMonth,
+        target: () => document.getElementById('crumbs-calendar'),
+        text: 'You’re on the Calendar. To get here yourself, tap Calendar on the Home screen.',
+      },
       {
         screen: 'calendar',
         requires: canEditJobs,
@@ -10501,6 +10846,8 @@ function tutorialSteps(part) {
     };
     const step = (target, text) => ({ screen: 'settings', setup: goSettings, target, text });
     return [
+      step(() => document.querySelector('.settings-fold-all'),
+        'This is Settings — the ⚙ at the top of the Home screen. Every section starts closed. Tap a heading to open it, or open and close the lot with these two buttons.'),
       step(() => document.getElementById('members-list'),
         'Everyone with access to this company, and what each can do. Admin does everything. Bookkeeper sees everything but changes nothing. Employee sees only the notes and jobs given to them. Customer sees only their own. You can change your own role too, as long as somebody else is an admin — the last admin is locked so the company can never be left without one.'),
       step(() => document.getElementById('invite-email'),
@@ -10552,7 +10899,8 @@ function tutorialSteps(part) {
         return true;
       },
       target: () => document.getElementById('crumbs-editor'),
-      text: 'The trail shows which customer this note belongs to — tap their name to go to their file.',
+      // Says where you are and how you'd get here alone (v2026.09.30-2112).
+      text: 'This is the note editor — you get here by tapping any note on Home or in a customer. The trail shows which customer this note belongs to; tap their name to go to their file.',
     },
     {
       screen: 'editor',
@@ -10806,6 +11154,7 @@ async function runTutorialStep(index) {
   await new Promise(r => setTimeout(r, 120));
 
   const target = step.target();
+  openSettingFoldFor(target);   // a closed Settings section hides it (v2026.09.30-2105)
   if (!isTargetVisible(target)) { tutorialSkipStep(index); return; }
 
   await showTutorialBubble(target, step.text, index, steps.length);
