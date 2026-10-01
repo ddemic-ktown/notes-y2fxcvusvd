@@ -20,6 +20,8 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 100, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.09.30-2316', 'The job description box grows to show all its text, pasting a checkbox line onto a checkbox gives one box however you paste, and Insert a date opens the date picker on Android and desktop'],
+  ['v2026.09.30-2312', 'Week view is now a timeline: each day is divided into hours, from the week’s earliest start to its latest finish, with jobs drawn as blocks'],
   ['v2026.09.30-2250', 'Restore from backup (adds back only what is missing), backups now include jobs and hours, a Cancel filter button on the calendar and Clear filter in the filter box, pinch-zoom no longer flips the month, a dark keyboard gap in dark mode, crew note boxes sized right, and pasting a checkbox line onto a checkbox gives one box'],
   ['v2026.09.30-2205', 'Fixes the app sticking on the loading screen after the last update'],
   ['v2026.09.30-2137', 'Android: the keyboard no longer pushes the note editor’s toolbar off the top of the screen'],
@@ -1733,12 +1735,90 @@ function renderCalendar() {
     + `<span class="cal-cue-current">${escapeHtml(cueLabel(0))}</span>`
     + `<button type="button" class="cal-cue cal-cue-side" data-shift="1">${escapeHtml(cueLabel(1))} ${cueFwd}</button>`
     + `</div>`;
+  // WEEK TIMELINE (v2026.09.30-2312). Each day a column of hours, from the hour of the
+  // week's earliest start to the hour of its latest finish, squeezed to fit —
+  // no scrolling. Jobs are blocks at their times; overlapping ones share the
+  // width in lanes. Untimed jobs sit in a strip above, the SAME height in every
+  // column, so the hour lines and the gutter labels stay level across the week.
+  let headHtml = head, cellsHtml = cells;
+  const weekTl = calMode === 'week';
+  if (weekTl) {
+    const dayJobs = days.map(d => calJobsByDate(ymd(d)));
+    let lo = Infinity, hi = -Infinity;
+    dayJobs.forEach(js => js.forEach(j => {
+      const sp = jobSpan(j);
+      if (sp) { lo = Math.min(lo, sp.start); hi = Math.max(hi, sp.end); }
+    }));
+    if (lo === Infinity) { lo = 7 * 60; hi = 17 * 60; }          // empty week: 7–5
+    lo = Math.floor(lo / 60) * 60;
+    hi = Math.max(lo + 60, Math.ceil(hi / 60) * 60);
+    const range = hi - lo;
+    const pct = (m) => ((m - lo) / range * 100).toFixed(3) + '%';
+    const hourMarks = [];
+    for (let m = lo; m <= hi; m += 60) hourMarks.push(m);
+    const hourLines = hourMarks.map(m => `<div class="cal-wk-line" style="top:${pct(m)}"></div>`).join('');
+    const maxUntimed = Math.max(0, ...dayJobs.map(js => js.filter(j => !jobSpan(j)).length));
+    const untimedH = maxUntimed ? Math.min(maxUntimed, 3) * 18 : 0;
+    const gutter = `<div class="cal-wk-gutter"><div class="cal-daynum">&nbsp;</div>`
+      + `<div class="cal-wk-top" style="height:${untimedH}px"></div>`
+      + `<div class="cal-wk-track">${hourMarks.map(m =>
+          `<span class="cal-wk-hour" style="top:${pct(m)}">${escapeHtml(fmtHourLabel((m / 60) % 24))}</span>`).join('')}</div></div>`;
+    const cols = days.map((d, i) => {
+      const s = ymd(d);
+      const js = dayJobs[i];
+      const timed = js.map(j => ({ j, sp: jobSpan(j) })).filter(t => t.sp)
+        .sort((a, b) => (a.sp.start - b.sp.start) || (b.sp.end - a.sp.end));
+      // Lanes per cluster of overlapping jobs, so one clash doesn't halve the
+      // width of every other job that day.
+      let laneEnds = [], cluster = [], clusterEnd = -1;
+      const flush = () => {
+        const n = Math.max(...cluster.map(c => c.lane)) + 1;
+        cluster.forEach(c => { c.n = n; });
+        cluster = []; laneEnds = []; clusterEnd = -1;
+      };
+      timed.forEach(t => {
+        if (cluster.length && t.sp.start >= clusterEnd) flush();
+        let lane = laneEnds.findIndex(e => e <= t.sp.start);
+        if (lane === -1) { lane = laneEnds.length; laneEnds.push(0); }
+        laneEnds[lane] = t.sp.end;
+        t.lane = lane;
+        cluster.push(t);
+        clusterEnd = Math.max(clusterEnd, t.sp.end);
+      });
+      if (cluster.length) flush();
+      const blocks = timed.map(t => {
+        const j = t.j;
+        const crew = jobCrew(j);
+        const chips = crewNames(crew).map(n => shortPills
+          ? `<span class="cal-chip cal-chip-initial" style="${chipStyle(n)}" title="${escapeHtml(n)}">${escapeHtml(n.split(/[\s(]+/)[0].slice(0, 1).toUpperCase())}</span>`
+          : `<span class="cal-chip" style="${chipStyle(n)}" title="${escapeHtml(n)}">${escapeHtml(crewChipLabel(crew, n, true))}</span>`).join('');
+        const w = 100 / t.n;
+        const who = jobTitle(j) || '—';
+        return `<div class="cal-wk-job${j.noWork ? ' cal-nowork' : ' cal-working'}"`
+          + ` style="top:${pct(t.sp.start)};height:${((t.sp.end - t.sp.start) / range * 100).toFixed(3)}%;left:${(t.lane * w).toFixed(3)}%;width:${w.toFixed(3)}%"`
+          + ` title="${escapeHtml(`${who} · ${fmtClock(t.sp.start)}–${fmtClock(t.sp.end)}`)}">`
+          + `<span class="cal-wk-who">${escapeHtml(who)}</span><span class="cal-wk-chips">${chips}</span></div>`;
+      }).join('');
+      const untimed = js.filter(j => !jobSpan(j)).slice(0, 3).map(j =>
+        `<div class="cal-wk-untimed${j.noWork ? ' cal-nowork-text' : ''}">${escapeHtml(jobTitle(j) || '—')}</div>`).join('');
+      const classes = ['cal-cell', 'cal-wk-col'];
+      if (!js.length) classes.push('cal-empty');
+      if (s === todayStr) classes.push('cal-today');
+      return `<div class="${classes.join(' ')}" data-date="${s}">`
+        + `<div class="cal-daynum">${d.getDate()}</div>`
+        + `<div class="cal-wk-top" style="height:${untimedH}px">${untimed}</div>`
+        + `<div class="cal-wk-track">${hourLines}${blocks}</div></div>`;
+    }).join('');
+    headHtml = '<div class="cal-head"></div>' + head;
+    cellsHtml = gutter + cols;
+  }
+  calGrid.classList.toggle('cal-grid-wktl', weekTl);
   calGrid.classList.toggle('cal-grid-week', calMode === 'week');
   // Desktop month only: week rows size to their content, so a busy week is
   // taller than a quiet one. Week view already gives each day a full row, and a
   // phone has no height to spend, so neither gets it.
   calGrid.classList.toggle('cal-grid-tall', calMode === 'month' && !shortPills);
-  calGrid.innerHTML = cues + `<div class="cal-headrow">${head}</div><div class="cal-cells">${cells}</div>`;
+  calGrid.innerHTML = cues + `<div class="cal-headrow">${headHtml}</div><div class="cal-cells">${cellsHtml}</div>`;
   // A redraw while a search is open must not put the grid back on screen.
   renderCalSearchResults();
   const modeBtn = document.getElementById('cal-mode');
@@ -2408,6 +2488,7 @@ function openJobModal(jobId, dateStr) {
   // Size the crew notes now that they can be measured (v2026.09.30-2250).
   requestAnimationFrame(() => {
     document.querySelectorAll('#job-employees [data-crew-note]').forEach(autoGrowNote);
+    autoGrowNote(document.getElementById('job-desc'));   // v2026.09.30-2316
   });
 }
 
@@ -2850,6 +2931,9 @@ if (jobCustomerSearch) {
 }
 const jobClose = document.getElementById('job-close');
 if (jobClose) jobClose.addEventListener('click', () => { jobModal.hidden = true; });
+// Description grows with its text, capped by CSS (v2026.09.30-2316).
+const jobDescEl = document.getElementById('job-desc');
+if (jobDescEl) jobDescEl.addEventListener('input', () => autoGrowNote(jobDescEl));
 const jobCancel = document.getElementById('job-cancel');
 if (jobCancel) jobCancel.addEventListener('click', () => { jobModal.hidden = true; });
 if (jobModal) jobModal.addEventListener('click', (e) => { if (e.target === jobModal) jobModal.hidden = true; });
@@ -6303,6 +6387,21 @@ if (editorMoreDropdown) editorMoreDropdown.addEventListener('click', (e) => {
   if (e.target.closest('#date-picker-btn')) return;
   closeMoreDropdown();
 });
+// v2026.09.30-2316: tapping the invisible date box only opens a picker on iOS. Android
+// and desktop Chrome just focus it (desktop opens the picker from its icon
+// alone). Where showPicker() exists and this isn't iOS, the ROW opens the
+// picker instead and the box stops catching taps.
+const IS_IOS = /iP(hone|ad|od)/.test(navigator.userAgent)
+  || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const datePickerRow = document.getElementById('date-picker-btn');
+if (datePickerInput && datePickerRow && !IS_IOS && typeof datePickerInput.showPicker === 'function') {
+  datePickerInput.style.pointerEvents = 'none';
+  datePickerRow.addEventListener('click', () => {
+    datePickerInput.value = '';
+    try { datePickerInput.showPicker(); }
+    catch (e) { datePickerInput.focus(); datePickerInput.click(); }
+  });
+}
 // Start every pick from empty, so a value left over from last time can't be
 // re-committed by a dismissal.
 if (datePickerInput) datePickerInput.addEventListener('pointerdown', () => {
@@ -6668,24 +6767,35 @@ function repairReplacementNewlines(prev, next, caret) {
 // spans lines starts with a selection containing '\n', and then no snapshot is
 // taken at all.
 const REPAIR_TYPES = new Set(['insertReplacementText', 'insertText', 'insertCompositionText']);
-// Pasting "☐ item" onto a line that already starts with a box gave "☐ ☐ item"
-// (v2026.09.30-2250). Drop the pasted box; the line's own one stays.
-bodyInput.addEventListener('paste', (e) => {
-  const text = e.clipboardData && e.clipboardData.getData('text/plain');
-  if (!text || !/^[☐☑] /.test(text)) return;
+// Pasting "☐ item" onto a line that already starts with a box gave "☐ ☐ item".
+// v2026.09.30-2250 caught only the 'paste' event, which keyboard clipboards
+// (Gboard, iOS suggestions) never fire — they insert as plain input. So
+// (v{V}) check AFTER any multi-character insert instead: remember which line
+// it started on, and if that line now opens with two boxes, drop the line's
+// own one and keep the pasted one. Any spacing between them is tolerated.
+const DOUBLE_BOX_RE = /^[☐☑][  \t]+(?=[☐☑][  ])/;
+const PASTE_TYPES = new Set(['insertFromPaste', 'insertFromDrop', 'insertText', 'insertReplacementText']);
+let pasteLineStart = null;
+bodyInput.addEventListener('beforeinput', (e) => {
+  pasteLineStart = null;
+  if (!PASTE_TYPES.has(e.inputType)) return;
+  // Single typed characters are left alone; e.data is null for a real paste.
+  if (e.inputType === 'insertText' && e.data != null && e.data.length < 2) return;
   const pos = bodyInput.selectionStart;
-  const lineStart = bodyInput.value.lastIndexOf('\n', pos - 1) + 1;
-  if (!/^[☐☑] /.test(bodyInput.value.slice(lineStart))) return;
-  e.preventDefault();
-  const clean = text.replace(/^[☐☑] /, '');
-  // execCommand keeps the browser's own undo and fires the usual input events;
-  // setRangeText is the fallback where it is unsupported.
-  let done = false;
-  try { done = document.execCommand('insertText', false, clean); } catch (err) {}
-  if (!done) {
-    bodyInput.setRangeText(clean, bodyInput.selectionStart, bodyInput.selectionEnd, 'end');
-    bodyInput.dispatchEvent(new Event('input', { bubbles: true }));
-  }
+  pasteLineStart = bodyInput.value.lastIndexOf('\n', pos - 1) + 1;
+});
+bodyInput.addEventListener('input', () => {
+  if (pasteLineStart === null) return;
+  const ls = pasteLineStart;
+  pasteLineStart = null;
+  const m = DOUBLE_BOX_RE.exec(bodyInput.value.slice(ls));
+  if (!m) return;
+  const cut = m[0].length;
+  const caret = bodyInput.selectionStart;
+  bodyInput.value = bodyInput.value.slice(0, ls) + bodyInput.value.slice(ls + cut);
+  const c = caret > ls ? Math.max(ls, caret - cut) : caret;
+  bodyInput.setSelectionRange(c, c);
+  scheduleSave();
 });
 let replacementPrev = null;   // text as it stood just before a suggestion landed
 let compositionPrev = null;   // text as it stood when the current composition began
@@ -10724,7 +10834,7 @@ function tutorialSteps(part) {
       {
         screen: 'calendar',
         target: () => document.getElementById('cal-mode'),
-        text: 'Switch between a month and a single week. The button says where it GOES, not where you are. A week gives each day a full row, which is the readable one on a phone.',
+        text: 'Switch between a month and a single week. The button says where it GOES, not where you are. The week shows each day divided into hours, from the earliest start that week to the latest finish, with every job drawn as a block at its time.',
       },
       {
         // Admin/bookkeeper only — isTargetVisible skips it for anyone else,

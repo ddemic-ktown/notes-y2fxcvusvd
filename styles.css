@@ -667,6 +667,39 @@ select.iif-date-input { appearance: none; -webkit-appearance: none; padding-righ
 .cal-grid-week .cal-daynum { font-size: 13px; }
 .cal-grid-week .cal-chip { font-size: 10px; padding: 1px 6px; }
 .cal-grid-week .cal-job-who { font-size: 11px; white-space: normal; }
+/* WEEK TIMELINE (v2026.09.30-2312) — an hour gutter plus seven day columns. Cell padding
+   (5px) + border (1px) is mirrored by the gutter's 6px so the tracks line up.
+   Today is marked with an inset ring rather than a 2px border for the same
+   reason: a thicker border would push its track 1px out of line. */
+.cal-grid-wktl .cal-headrow, .cal-grid-wktl .cal-cells { grid-template-columns: 34px repeat(7, minmax(0, 1fr)); }
+.cal-grid-wktl .cal-cells { overflow: hidden; }
+.cal-grid-wktl .cal-cell.cal-wk-col { overflow: hidden; gap: 3px; }
+.cal-grid-wktl .cal-cell.cal-today { border-width: 1px; box-shadow: inset 0 0 0 1px var(--accent); }
+.cal-wk-gutter { display: flex; flex-direction: column; gap: 3px; padding: 6px 0; min-width: 0; }
+.cal-wk-top { flex-shrink: 0; overflow: hidden; display: flex; flex-direction: column; gap: 2px; }
+.cal-wk-track { position: relative; flex: 1; min-height: 0; }
+.cal-wk-line { position: absolute; left: 0; right: 0; border-top: 1px dashed var(--line); }
+.cal-wk-hour {
+  position: absolute; right: 3px; transform: translateY(-50%);
+  font-size: 9px; color: var(--ink-soft); white-space: nowrap;
+}
+.cal-wk-job {
+  position: absolute; box-sizing: border-box; overflow: hidden;
+  display: flex; flex-direction: column; gap: 1px;
+  padding: 1px 3px; font-size: 10px; line-height: 1.2;
+  background: var(--surface); border: 1px solid var(--job-ok); border-left-width: 3px; border-radius: 4px;
+}
+.cal-wk-job.cal-nowork { border-color: var(--job-off); }
+.cal-wk-who {
+  font-weight: 600; color: var(--ink); overflow-wrap: anywhere;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; line-clamp: 3; overflow: hidden;
+}
+.cal-wk-chips { display: flex; flex-wrap: wrap; gap: 1px; }
+.cal-wk-untimed {
+  height: 16px; line-height: 14px; font-size: 10px; padding: 0 3px;
+  border: 1px dashed var(--line); border-radius: 4px;
+  overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+}
 .cal-job-who { font-size: 10px; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Desktop grid: one entry per job, customer on its own line with the crew
    underneath. `column` is the whole difference from the phone's single row —
@@ -1170,6 +1203,8 @@ body.dark-mode .price-best-badge { color: #4ade80; }
 .price-legend-list .avail-dot { flex-shrink: 0; }
 .price-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .price-zoom { display: flex; gap: 2px; flex-shrink: 0; }
+/* Job Description grows with its text (v2026.09.30-2316); ~10 lines, then it scrolls. */
+#job-desc { resize: none; overflow-y: auto; max-height: calc(10 * 1.45em + 18px); }
 /* Inline cell entry */
 /* NOTE the `td.` — `.price-table th, .price-table td { white-space: nowrap }`
    outranks a bare `.price-cell-editing`, which kept the price, date and
