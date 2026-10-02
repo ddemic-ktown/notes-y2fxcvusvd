@@ -1498,15 +1498,15 @@ body.back-floating .fab-menu { right: 90px; }
 /* Header */
 .app-header {
   background: var(--surface);
-  padding: 14px 16px;
+  padding: 6px 12px;          /* was 14px 16px (v2026.10.01-1904) */
   border-bottom: 1px solid var(--line);
   position: sticky;
   top: 0;
   z-index: 5;
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding-top: max(14px, env(safe-area-inset-top));
+  gap: 6px;
+  padding-top: max(6px, env(safe-area-inset-top));
 }
 .app-header h1 { margin: 0; font-size: 18px; font-weight: 600; }
 
@@ -1587,7 +1587,7 @@ body.dark-mode .sync-toast.sync-offline { background: #78350f; color: #fde68a; b
 body.vv-zoomed .sync-toast { display: none !important; }
 .update-btn { font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--accent); background: var(--accent); color: #fff; cursor: pointer; flex-shrink: 0; }
 .update-btn:active { opacity: 0.8; }
-.home-header { flex-direction: column; align-items: stretch; gap: 8px; }
+.home-header { flex-direction: column; align-items: stretch; gap: 4px; }
 .home-header-top { display: flex; align-items: center; gap: 8px; }
 .home-header-top h1 { flex: 1; }
 .home-search-input { width: 100%; box-sizing: border-box; }
@@ -1617,7 +1617,7 @@ body.dark-mode input[type="date"], body.dark-mode input[type="time"] { color-sch
 /* Current time (v2026.10.01-1646) */
 .cal-now { position: absolute; left: 0; right: 0; height: 0; border-top: 2px solid #2563eb; z-index: 30; pointer-events: none; }
 .cal-now::before { content: ''; position: absolute; left: 0; top: -5px; width: 8px; height: 8px; border-radius: 50%; background: #2563eb; }
-.customers-header { flex-direction: column; align-items: stretch; gap: 8px; }
+.customers-header { flex-direction: column; align-items: stretch; gap: 4px; }
 .customers-header-top { display: flex; align-items: center; gap: 8px; }
 .customers-header-bottom { display: flex; align-items: center; gap: 8px; }
 /* Editor header — stacked into two rows: nav row + tools row */
@@ -1625,14 +1625,15 @@ body.dark-mode input[type="date"], body.dark-mode input[type="time"] { color-sch
   flex-direction: column;
   align-items: stretch;
   justify-content: flex-start;
-  gap: 6px;
-  padding: 8px 12px;
+  gap: 4px;
+  padding: 4px 10px;
+  padding-top: max(4px, env(safe-area-inset-top));
 }
 .editor-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
 /* Buttons must never be squeezed out on a narrow phone — the breadcrumb
    absorbs the shortfall and truncates instead. */
 .editor-row-nav > button,
-.editor-row-nav > .editor-more-wrap,
+.editor-row-nav > .editor-more-wrap { flex-shrink: 0; }   /* repaired v2026.10.01-1904 */
 /* Shared pills (v2026.10.01-1827) — a row filled by fitSharedPills, never wrapping. */
 .shared-pills {
   display: flex; flex-wrap: nowrap; gap: 4px; min-width: 0;
@@ -3038,6 +3039,7 @@ body.vv-zoomed-pinch .cal-cells { overflow-y: visible; }
   position: sticky;
   top: 0;
   z-index: 10;
+  border-bottom: 0;          /* no line above the title (v2026.10.01-1904) */
 }
 
 .editor-main {
@@ -3053,7 +3055,7 @@ body.vv-zoomed-pinch .cal-cells { overflow-y: visible; }
   width: 100%;
   border: 0;
   outline: 0;
-  padding: 16px 16px 6px;
+  padding: 4px 12px 2px;     /* was 16px 16px 6px (v2026.10.01-1904) */
   font: 700 19px/1.35 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   background: var(--surface);
   color: var(--ink);
@@ -3151,7 +3153,7 @@ body.vv-zoomed-pinch .cal-cells { overflow-y: visible; }
 
 /* Manual refresh button (home header) */
 #refresh-btn { font-size: 18px; line-height: 1; }
-#refresh-btn.spinning { animation: refresh-spin 0.6s linear infinite; }
+#refresh-btn.spinning { opacity: 0.5; }   /* a menu row now — no spin (v2026.10.01-1904) */
 @keyframes refresh-spin { to { transform: rotate(360deg); } }
 
 /* Day view: swipe cues, the same ‹ › pair the month grid uses */

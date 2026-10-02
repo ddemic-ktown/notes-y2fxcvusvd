@@ -20,6 +20,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 100, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.10.01-1904', 'A slimmer top on every screen and in notes, Refresh and Layout moved into a ⋯ menu on Home, and the stray Back button in Android notes is gone'],
   ['v2026.10.01-1846', 'Android: Back from a screen opened with the nav bar no longer closes the app — it goes Home'],
   ['v2026.10.01-1832', 'Shared pills use each employee’s calendar colour'],
   ['v2026.10.01-1827', 'A shared note shows a pill for each person it is shared with instead of “Shared” — as many as fit, then +N'],
@@ -4153,6 +4154,7 @@ const moreMenus = [
   ['hours-more-btn', 'hours-more-dropdown'],
   // v2026.09.21-2300: the customers list (sort) and one customer (delete).
   ['customers-more-btn', 'customers-more-dropdown'],
+  ['home-more-btn', 'home-more-dropdown'],   // v2026.10.01-1904: Refresh, Layout
   ['customer-more-btn', 'customer-more-dropdown'],
   ['orphan-more-btn', 'orphan-more-dropdown'],   // v2026.09.21-2331 (sort)
 ].map(([btnId, dropId]) => ({
@@ -6267,7 +6269,13 @@ function applyLayoutMode() {
     layoutBtn.setAttribute('aria-pressed', String(homeLayoutMode));
     layoutBtn.classList.toggle('active', homeLayoutMode);
   }
+  const done = document.getElementById('layout-done-btn');
+  if (done) done.hidden = !homeLayoutMode;
 }
+(() => {
+  const done = document.getElementById('layout-done-btn');
+  if (done) done.addEventListener('click', () => { homeLayoutMode = false; applyLayoutMode(); });
+})();
 if (layoutBtn) layoutBtn.addEventListener('click', () => {
   homeLayoutMode = !homeLayoutMode;
   applyLayoutMode();
@@ -10855,7 +10863,7 @@ function tutorialSteps(part) {
     ordered.push({
       screen: 'home',
       target: () => document.querySelector('#notes-list .section-ctrls'),
-      text: 'Tap Layout at the top to show these controls: − and + change how many items a section shows, ↑ and ↓ reorder the sections.',
+      text: 'Tap ⋯ › Layout at the top to show these controls (Done puts them away): − and + change how many items a section shows, ↑ and ↓ reorder the sections.',
     });
     ordered.push({
       screen: 'home',
