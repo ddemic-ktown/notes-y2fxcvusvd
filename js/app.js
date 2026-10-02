@@ -20,6 +20,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 100, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.10.01-1756', 'The nav bar is now the top line of every screen, above the breadcrumb and search; it stays put while typing, which fixes the checkbox button in the note editor'],
   ['v2026.10.01-1713', 'The Customers / Calendar / Price Table row is slimmer'],
   ['v2026.10.01-1710', 'Customers, Calendar and Price Table buttons are now at the top of every screen, with the one you are on highlighted'],
   ['v2026.10.01-1646', 'Customers, Calendar and Price Table moved to a row at the top of Home; Hours lives in Settings › QuickBooks; a blue line marks the current time in week and day view; copying a job no longer copies the hours; date and time icons are visible in dark mode'],
@@ -5545,9 +5546,9 @@ function getScreenNavs() {
     n.className = 'home-nav screen-nav';
     n.setAttribute('aria-label', 'Go to');
     n.hidden = true;
-    const stacked = header.classList.contains('customers-header') || header.classList.contains('editor-header');
-    if (stacked && header.firstElementChild) header.firstElementChild.after(n);
-    else header.appendChild(n);
+    // The very first line of the header (v2026.10.01-1756): nav, then the breadcrumb row,
+    // then search.
+    header.prepend(n);
     n.addEventListener('click', (e) => {
       const b = e.target.closest('[data-nav]');
       if (!b || b.classList.contains('active')) return;

@@ -1610,7 +1610,8 @@ body.vv-zoomed .sync-toast { display: none !important; }
 /* flex-basis only in the ROW header — in a column header it would mean height. */
 #settings-view > .app-header { flex-wrap: wrap; }
 #settings-view > .app-header > .screen-nav { flex-basis: 100%; }
-body.vv-zoomed #editor-view .screen-nav { display: none; }
+/* Never hidden while typing (v2026.10.01-1756): hiding it shifted the editor toolbar
+   mid-tap, so the checkbox button missed. */
 /* Dark mode: the native date/time icons were dark on dark (v2026.10.01-1646). */
 body.dark-mode input[type="date"], body.dark-mode input[type="time"] { color-scheme: dark; }
 /* Current time (v2026.10.01-1646) */
