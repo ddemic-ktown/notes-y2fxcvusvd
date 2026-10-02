@@ -1096,6 +1096,7 @@ select.iif-date-input { appearance: none; -webkit-appearance: none; padding-righ
 /* Side by side when there's room, stacked on a narrow phone (below). */
 .employee-card-fields { display: flex; gap: 8px; }
 .employee-field { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.employee-payroll-input { font-size: 16px; padding: 7px 10px; }   /* v2026.10.01-2229; 16px: iOS zoom */
 .employee-field-label { font-size: 11px; color: var(--ink-soft); text-transform: uppercase; letter-spacing: 0.04em; }
 .employee-field select {
   width: 100%; min-width: 0; padding: 6px 8px; font-size: 13px;

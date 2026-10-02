@@ -20,6 +20,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 100, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.10.01-2229', 'Employees can have a QuickBooks payroll item; their hours are exported with it and marked for transfer to payroll'],
   ['v2026.10.01-2033', 'The QuickBooks .iif export writes dates as MM/DD/YY'],
   ['v2026.10.01-1904', 'A slimmer top on every screen and in notes, Refresh and Layout moved into a ⋯ menu on Home, and the stray Back button in Android notes is gone'],
   ['v2026.10.01-1846', 'Android: Back from a screen opened with the nav bar no longer closes the app — it goes Home'],
@@ -288,6 +289,8 @@ function normalizeEmployee(e) {
     name: e.name,
     type: e.type === 'apprentice' ? 'apprentice' : 'journeyman',
     colour: validHex(e.colour),
+    // QuickBooks payroll item (v2026.10.01-2229); blank = not on payroll.
+    payrollItem: typeof e.payrollItem === 'string' ? e.payrollItem.trim() : '',
   };
 }
 function getEmployees() {
@@ -297,6 +300,12 @@ function getEmployees() {
 }
 function getEmployeeNames() { return getEmployees().map(e => e.name); }
 // Map of lowercased employee name → type, for the IIF generator
+// lowercased name → payroll item, for the IIF generator (v2026.10.01-2229)
+function getEmployeePayrollMap() {
+  const map = {};
+  getEmployees().forEach(e => { if (e.payrollItem) map[e.name.toLowerCase()] = e.payrollItem; });
+  return map;
+}
 function getEmployeeTypeMap() {
   const map = {};
   getEmployees().forEach(e => { map[e.name.toLowerCase()] = e.type; });
@@ -452,9 +461,23 @@ function renderEmployeeList() {
           </select>
         </label>
       </div>
+      <label class="employee-field">
+        <span class="employee-field-label">Payroll item (QuickBooks)</span>
+        <input type="text" class="signin-input employee-payroll-input" data-emp-payroll="${escapeHtml(e.name)}"
+               value="${escapeHtml(e.payrollItem || '')}" placeholder="Leave blank if not on payroll"
+               autocomplete="off" spellcheck="false" aria-label="QuickBooks payroll item for ${escapeHtml(e.name)}" />
+      </label>
     </li>
   `).join('');
   wireEmployeeRelink();
+  // Payroll item (v2026.10.01-2229). 'change', not 'input' — one settings write when you
+  // finish typing. Must match QuickBooks' payroll item name exactly.
+  employeeListEl.querySelectorAll('input[data-emp-payroll]').forEach(inp => {
+    inp.addEventListener('change', async () => {
+      const v = inp.value.trim();
+      await setEmployees(getEmployees().map(e => e.name === inp.dataset.empPayroll ? { ...e, payrollItem: v } : e));
+    });
+  });
   employeeListEl.querySelectorAll('select[data-emp-link]').forEach(sel => {
     sel.addEventListener('change', async () => {
       const next = { ...(Storage.getSettings().employeeLinks || {}) };
@@ -10570,7 +10593,7 @@ if (iifDownloadBtn) iifDownloadBtn.addEventListener('click', () => {
     iifStatus.textContent = 'Nothing ticked to export.';
     return;
   }
-  const iif = generateIIF(includedEntries, getEmployeeTypeMap(), undefined, getIifItems());
+  const iif = generateIIF(includedEntries, getEmployeeTypeMap(), undefined, getIifItems(), getEmployeePayrollMap());
   const blob = new Blob([iif], { type: 'text/plain' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -11250,7 +11273,7 @@ function tutorialSteps(part) {
       step(() => document.getElementById('org-name-input'),
         'Your company name, shown at the top of this Account section. Change it whenever you like.'),
       step(() => document.getElementById('employee-list'),
-        'Your crew. Apprentice or journeyman is not just a label — it picks which QuickBooks item their hours are billed against, so getting it wrong makes the import land in the wrong place. Rename fixes a spelling everywhere at once, including on jobs from last year.'),
+        'Your crew. Apprentice or journeyman is not just a label — it picks which QuickBooks item their hours are billed against, so getting it wrong makes the import land in the wrong place. Anyone on payroll needs their QuickBooks payroll item typed in exactly, or QuickBooks rejects their hours. Rename fixes a spelling everywhere at once, including on jobs from last year.'),
       step(() => document.getElementById('feature-toggle-list'),
         'Switch off what you do not use and it disappears from the app — nothing is deleted, and turning it back on puts everything where it was. This is your account only; it follows you to your other devices and changes nothing for anyone else. If part of the app has vanished, look here first.'),
       step(() => document.getElementById('customer-link-list'),

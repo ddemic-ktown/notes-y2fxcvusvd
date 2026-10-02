@@ -404,7 +404,11 @@ export const DEFAULT_ITEM_JOURNEYMAN = 'Service Rates:Standard Labour';
 // items: { apprentice, journeyman } — blank or missing falls back to the
 // defaults above rather than writing an empty ITEM, which QuickBooks would
 // reject with a less obvious error than a wrong name.
-export function generateIIF(entries, employeeTypeMap = {}, companyName = 'Company Organizer Ninja', items = {}) {
+// payrollMap (v2026.10.01-2229): lowercased employee name → QuickBooks PAYROLL item.
+// Employees on payroll need their hours transferred to it (PITEM +
+// XFERTOPAYROLL=Y), or the import errors on their rows. Blank = not on
+// payroll: PITEM empty and N, which is what every row effectively was before.
+export function generateIIF(entries, employeeTypeMap = {}, companyName = 'Company Organizer Ninja', items = {}, payrollMap = {}) {
   const ITEM_APPRENTICE = String(items.apprentice || '').trim() || DEFAULT_ITEM_APPRENTICE;
   const ITEM_JOURNEYMAN = String(items.journeyman || '').trim() || DEFAULT_ITEM_JOURNEYMAN;
   const lines = [
@@ -415,7 +419,7 @@ export function generateIIF(entries, employeeTypeMap = {}, companyName = 'Compan
     // non-billable time would turn up when you invoice the customer. The ITEM
     // is deliberately the SAME for both — the hours are paid either way, only
     // the billing flag differs.
-    `!TIMEACT\tDATE\tJOB\tEMP\tITEM\tDURATION\tBILLINGSTATUS\tNOTE`,
+    `!TIMEACT\tDATE\tJOB\tEMP\tITEM\tPITEM\tDURATION\tXFERTOPAYROLL\tBILLINGSTATUS\tNOTE`,
   ];
   for (const e of entries) {
     if (!e.employees.length || !e.hours || !e.customerMatched) continue;
@@ -425,7 +429,9 @@ export function generateIIF(entries, employeeTypeMap = {}, companyName = 'Compan
       // NOTE stays EMPTY. The crew line's note ("travel", "warranty") is
       // internal — it explains the hours to you, not to QuickBooks. The entry
       // still carries `e.note` if that decision is ever revisited.
-      lines.push(`TIMEACT\t${e.dateFormatted}\t${e.customerMatched}\t${emp}\t${item}\t${e.hoursFormatted}\t${billing}\t`);
+      const pitem = String(payrollMap[emp.toLowerCase()] || '').trim();
+      const xfer = pitem ? 'Y' : 'N';
+      lines.push(`TIMEACT\t${e.dateFormatted}\t${e.customerMatched}\t${emp}\t${item}\t${pitem}\t${e.hoursFormatted}\t${xfer}\t${billing}\t`);
     }
   }
   return lines.join('\n');
