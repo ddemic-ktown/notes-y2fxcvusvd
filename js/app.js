@@ -20,6 +20,8 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 100, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.10.01-1713', 'The Customers / Calendar / Price Table row is slimmer'],
+  ['v2026.10.01-1710', 'Customers, Calendar and Price Table buttons are now at the top of every screen, with the one you are on highlighted'],
   ['v2026.10.01-1646', 'Customers, Calendar and Price Table moved to a row at the top of Home; Hours lives in Settings › QuickBooks; a blue line marks the current time in week and day view; copying a job no longer copies the hours; date and time icons are visible in dark mode'],
   ['v2026.09.30-2326', 'Week view: overlapping jobs stack over each other like the day view when their text still shows, and less space between days'],
   ['v2026.09.30-2322', 'The home screen’s See all links are readable again in dark mode'],
@@ -671,9 +673,12 @@ function applyFeatureVisibility() {
     .forEach(id => { const el = document.getElementById(id); if (el) el.hidden = !hoursOn; });
   // With the export gone, the card is no longer about QuickBooks at all.
   const tlTitle = document.getElementById('timelogger-card-title');
-  if (tlTitle) tlTitle.textContent = hoursOn
-    ? 'Time Logger — QuickBooks'
-    : 'Employees & customer accounts';
+  if (tlTitle) {
+    // Keep the fold arrow — textContent alone wiped it.
+    const caret = tlTitle.querySelector('.setting-list-caret');
+    tlTitle.textContent = hoursOn ? 'Time Logger — QuickBooks' : 'Employees & customer accounts';
+    if (caret) tlTitle.append(' ', caret);
+  }
 }
 // The home shortcut needs BOTH: hiding the feature outright must not leave a
 // card pointing at a screen that now sends you straight back home.
@@ -5519,10 +5524,56 @@ function renderHomeNav() {
   if (ready && canViewAllRole()) items.push(['customers', 'Customers']);
   if (ready) items.push(['calendar', 'Calendar']);
   if (ready && !isCustomerRole() && Storage.canViewPriceTable()) items.push(['price', 'Price Table']);
-  nav.innerHTML = items.map(([k, label]) =>
+  const html = items.map(([k, label]) =>
     `<button type="button" class="home-nav-btn" data-nav="${k}">${label}</button>`).join('');
-  nav.hidden = !items.length;
+  // Same row on every screen (v2026.10.01-1710).
+  [nav, ...getScreenNavs()].forEach(n => { n.innerHTML = html; n.hidden = !items.length; });
+  markActiveNav();
 }
+// One copy of the row per screen header, built on first use. Column headers
+// get it under their first row (like Home); the plain row header in Settings
+// gets it on a line of its own at the end. A hoisted function rather than
+// top-level consts, so an early renderNotesList can't hit them uninitialised.
+function getScreenNavs() {
+  if (getScreenNavs.cache) return getScreenNavs.cache;
+  const ids = ['customers-view', 'customer-notes-view', 'calendar-view', 'calendar-day-view',
+    'price-view', 'hours-view', 'section-view', 'orphan-view', 'settings-view', 'editor-view'];
+  getScreenNavs.cache = ids.map(id => {
+    const header = document.querySelector(`#${id} > header`);
+    if (!header) return null;
+    const n = document.createElement('nav');
+    n.className = 'home-nav screen-nav';
+    n.setAttribute('aria-label', 'Go to');
+    n.hidden = true;
+    const stacked = header.classList.contains('customers-header') || header.classList.contains('editor-header');
+    if (stacked && header.firstElementChild) header.firstElementChild.after(n);
+    else header.appendChild(n);
+    n.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-nav]');
+      if (!b || b.classList.contains('active')) return;
+      if (b.dataset.nav === 'customers') setTimeout(showCustomers, 0);
+      else if (b.dataset.nav === 'calendar') showCalendar();
+      else if (b.dataset.nav === 'price') showPriceTable();
+    });
+    return n;
+  }).filter(Boolean);
+  return getScreenNavs.cache;
+}
+function markActiveNav() {
+  const active = {
+    'customers-view': 'customers', 'customer-notes-view': 'customers',
+    'calendar-view': 'calendar', 'calendar-day-view': 'calendar', 'price-view': 'price',
+  };
+  const cur = document.querySelector('.screen.active');
+  const key = cur ? active[cur.id] : null;
+  document.querySelectorAll('.home-nav-btn').forEach(b => {
+    b.classList.toggle('active', !!key && b.dataset.nav === key);
+  });
+}
+// Follow screen changes without touching every show* function.
+document.querySelectorAll('.screen').forEach(sec => {
+  new MutationObserver(markActiveNav).observe(sec, { attributes: true, attributeFilter: ['class'] });
+});
 (() => {
   const nav = document.getElementById('home-nav');
   if (nav) nav.addEventListener('click', (e) => {

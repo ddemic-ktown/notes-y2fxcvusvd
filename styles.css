@@ -1595,13 +1595,22 @@ body.vv-zoomed .sync-toast { display: none !important; }
 .home-nav { display: flex; gap: 6px; }
 .home-nav[hidden] { display: none; }
 .home-nav-btn {
-  flex: 1 1 0; min-width: 0; padding: 8px 6px;
-  font: inherit; font-size: 14px; font-weight: 600;
+  flex: 1 1 0; min-width: 0; padding: 4px 6px;   /* slimmer (v2026.10.01-1713) */
+  font: inherit; font-size: 13px; font-weight: 600; line-height: 1.3;
   background: var(--surface); color: var(--ink);
   border: 1px solid var(--line); border-radius: var(--radius); cursor: pointer;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .home-nav-btn:active { opacity: 0.6; }
+.home-nav-btn.active { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+/* On every screen (v2026.10.01-1710). Fixed full-screen views are flex columns — don't
+   let the row be squeezed. Settings' header is a plain row, so it wraps and
+   the nav takes a line of its own. The editor drops it while you type. */
+.screen-nav { flex-shrink: 0; }
+/* flex-basis only in the ROW header — in a column header it would mean height. */
+#settings-view > .app-header { flex-wrap: wrap; }
+#settings-view > .app-header > .screen-nav { flex-basis: 100%; }
+body.vv-zoomed #editor-view .screen-nav { display: none; }
 /* Dark mode: the native date/time icons were dark on dark (v2026.10.01-1646). */
 body.dark-mode input[type="date"], body.dark-mode input[type="time"] { color-scheme: dark; }
 /* Current time (v2026.10.01-1646) */
