@@ -20,6 +20,8 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 100, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.10.01-2326', 'Hours history: every change to someone’s hours on a job is kept with when and by whom — long-press the hours on the Hours sheet or in the job editor to see it'],
+  ['v2026.10.01-2321', 'The .iif file is named after the date range and the time you exported, in local time'],
   ['v2026.10.01-2313', 'Hours › Who is a checklist with Everyone and Nobody at the top; jobs with nobody on them no longer appear on the hours sheet'],
   ['v2026.10.01-2308', 'The calendar’s ⋯ menu has Hours, when the Hours feature is on'],
   ['v2026.10.01-2305', 'Shared pills show the person’s name — from the linked employee or customer, or a customer whose notes contain their email — instead of their email'],
@@ -2672,6 +2674,13 @@ function renderJobEmployees(crew) {
       btn.addEventListener('click', () => { openPicker = +btn.dataset.crewRename; draw(); });
     });
     ul.querySelectorAll('[data-crew-hours]').forEach(inp => {
+      // Long-press: this line's hours history, for a saved job (v2026.10.01-2326).
+      onLongPress(inp, () => {
+        if (!jobEditingId) return;
+        const i = +inp.dataset.crewHours;
+        inp.blur();
+        openHoursHistory(jobEditingId, i, (jobCrewDraft[i] || {}).name);
+      });
       inp.addEventListener('input', () => {
         const v = parseFloat(inp.value);
         jobCrewDraft[+inp.dataset.crewHours].hours = Number.isFinite(v) && v > 0 ? v : null;
@@ -3843,6 +3852,45 @@ function openPriceHistory(key) {
   // on a phone: the sheet was gone before the ✕ could be aimed at.
   // (v2026.09.24-2044)
   priceHistoryOpenedAt = Date.now();
+}
+// ---------- hours history (v2026.10.01-2326) ----------
+// Same sheet as the price history. The log lives on the job's crew line —
+// see Storage._crewWithHoursLog.
+function openHoursHistory(jobId, crewIndex, crewName) {
+  if (!priceHistoryModal) return;
+  const job = Storage.getJob(jobId);
+  if (!job || !Array.isArray(job.crew)) return;
+  let line = job.crew[crewIndex];
+  if (!line || (crewName && line.name !== crewName)) line = job.crew.find(c => c.name === crewName) || line;
+  if (!line) return;
+  priceHistoryTitle.textContent = `${line.name} — hours`;
+  priceHistorySub.textContent = `${jobTitle(job) || 'No customer'} · ${job.date ? prettyDate(job.date) : ''}`;
+  const log = Array.isArray(line.hoursLog) ? line.hoursLog.slice().reverse() : [];
+  const fmtH = (h) => (h == null ? 'cleared' : formatDuration(h));
+  priceHistoryList.innerHTML = log.length
+    ? log.map(e => `<li class="price-history-item">
+        <span class="price-history-price">${escapeHtml(fmtH(e.hours))}</span>
+        <span class="price-history-date">${e.at ? escapeHtml(new Date(e.at).toLocaleString([], { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })) : 'before history'}</span>
+        <span class="price-history-avail">${escapeHtml(e.by || '')}</span>
+      </li>`).join('')
+    : `<li class="price-history-item">${line.hours != null ? `${escapeHtml(fmtH(line.hours))} — no changes recorded yet.` : 'No hours entered yet.'}</li>`;
+  try { window.getSelection()?.removeAllRanges(); } catch {}
+  priceHistoryModal.hidden = false;
+  priceHistoryOpenedAt = Date.now();
+}
+// Long-press helper: 500ms, cancelled by 8px of movement. Returns a function
+// that says whether a click right now is the long-press's own release.
+function onLongPress(el, fire) {
+  let t = null, x = 0, y = 0, firedAt = 0;
+  const clear = () => { if (t) { clearTimeout(t); t = null; } };
+  el.addEventListener('pointerdown', (e) => {
+    x = e.clientX; y = e.clientY; clear();
+    t = setTimeout(() => { t = null; firedAt = Date.now(); fire(); }, 500);
+  });
+  el.addEventListener('pointermove', (e) => { if (Math.hypot(e.clientX - x, e.clientY - y) > 8) clear(); });
+  ['pointerup', 'pointercancel', 'pointerleave'].forEach(ev => el.addEventListener(ev, clear));
+  el.addEventListener('contextmenu', (e) => { if (Date.now() - firedAt < 1000) e.preventDefault(); });
+  return () => Date.now() - firedAt < 700;
 }
 // Clicks landing within this window of the sheet opening are the long-press
 // release, not a decision.
@@ -10353,7 +10401,13 @@ function wireIifGrid() {
     });
   });
   iifGrid.querySelectorAll('.price-cell').forEach(cell => {
+    // Long-press: this line's hours history (v2026.10.01-2326).
+    const wasLongPress = onLongPress(cell, () => {
+      const row = iifRenderedRows.find(r => iifRowKey(r.idx, r.empIdx) === String(cell.dataset.cellkey || '').split('|')[0]);
+      if (row && row.e) openHoursHistory(row.e.jobId, row.e.crewIndex, row.e.employeeName || row.emp);
+    });
     cell.addEventListener('click', () => {
+      if (wasLongPress()) return;
       const key = cell.dataset.cellkey;
       // Already open: the editor inside owns the tap.
       if (!key || openIifCell === key) return;
@@ -10695,7 +10749,14 @@ if (iifDownloadBtn) iifDownloadBtn.addEventListener('click', () => {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `hours-${new Date().toISOString().slice(0,10)}.iif`;
+  // hours-FROM-to-TO-HHMM.iif, all LOCAL (v2026.10.01-2321) — toISOString was UTC, so an
+  // evening export was stamped with tomorrow's date.
+  const now = new Date();
+  const today = ymd(now);
+  const from = (iifFromDate && iifFromDate.value) || today;
+  const to = (iifToDate && iifToDate.value) || today;
+  const hhmm = String(now.getHours()).padStart(2, '0') + String(now.getMinutes()).padStart(2, '0');
+  a.download = `hours-${from}-to-${to}-${hhmm}.iif`;
   a.click();
   URL.revokeObjectURL(url);
   // (Export markers retired — the Settings date range decides what gets parsed.)
@@ -11295,7 +11356,7 @@ function tutorialSteps(part) {
         screen: 'settings',
         setup: () => { if (!settingsView.classList.contains('active')) showSettings(); return true; },
         target: () => document.getElementById('iif-btn'),
-        text: 'Hours is in Settings, under Time Logger — QuickBooks, and in the calendar’s ⋯ menu. It collects what everyone actually worked — the hours you enter on each calendar job — so you can check it and send it to QuickBooks.',
+        text: 'Hours is in Settings, under Time Logger — QuickBooks, and in the calendar’s ⋯ menu. Long-press anyone’s hours, here or in the job editor, to see every value entered, when and by whom. It collects what everyone actually worked — the hours you enter on each calendar job — so you can check it and send it to QuickBooks.',
       },
       {
         screen: 'hours',

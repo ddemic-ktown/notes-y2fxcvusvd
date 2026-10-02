@@ -1041,15 +1041,7 @@ export const Storage = {
       // rename sweep, the read rules' employeeUids and the employee-role filter
       // all still read them. A job written by an older build has no crew field;
       // normaliseCrew() below builds one on read.
-      crew: Array.isArray(job.crew) ? job.crew.map(c => ({
-        name: String(c.name || ''),
-        hours: Number.isFinite(Number(c.hours)) && Number(c.hours) > 0 ? Number(c.hours) : null,
-        billable: c.billable !== false,
-        // Why this line's time was what it was — travel, warranty, shop. Goes
-        // out in the .iif NOTE column. A line with no name is dropped here:
-        // the editor can hold an empty row while you pick someone.
-        note: String(c.note || ''),
-      })).filter(c => c.name) : [],
+      crew: Array.isArray(job.crew) ? this._crewWithHoursLog(job.crew, existing, now) : [],
       employeeUids: this.employeeUidsFor(job.employeeNames),
       customerUids: this.customerUidsFor(job.customerId),
       customerId: job.customerId || null,
@@ -1075,6 +1067,45 @@ export const Storage = {
 // reconnect. Do not put an await back in front of these.
     tracked(setDoc(doc(jobsCol(), id), stripId(next))).catch(err => console.warn("saveJob", err));
     return next;
+  },
+  // HOURS HISTORY (v2026.10.01-2326). Each crew line carries hoursLog: [{ hours, at, by }],
+  // appended whenever its hours change, from any screen — this is the one
+  // place every job write passes through. Lines are matched to the saved job
+  // as "the same person's n-th line", since callers rebuild crew without the
+  // log. The first change to hours entered before this existed keeps the old
+  // value as an entry with at/by null ("before history"). Capped at 50.
+  _crewWithHoursLog(crewIn, existing, now) {
+    const prev = (existing && Array.isArray(existing.crew)) ? existing.crew : [];
+    const me = this.getMember(_uid);
+    const by = (me && me.name) || _userEmail || '';
+    const seen = {};
+    const num = (h) => (Number.isFinite(Number(h)) && Number(h) > 0 ? Number(h) : null);
+    return crewIn.map(c => {
+      const name = String(c.name || '');
+      const hours = num(c.hours);
+      const k = name.toLowerCase();
+      const nth = (seen[k] = (seen[k] || 0) + 1);
+      let count = 0;
+      const old = prev.find(p => String(p.name || '').toLowerCase() === k && ++count === nth) || null;
+      const log = Array.isArray(c.hoursLog) ? c.hoursLog.slice()
+        : (old && Array.isArray(old.hoursLog) ? old.hoursLog.slice() : []);
+      const oldHours = old ? num(old.hours) : null;
+      if (name && hours !== oldHours) {
+        if (!log.length && oldHours != null) log.push({ hours: oldHours, at: null, by: null });
+        log.push({ hours, at: now, by });
+      }
+      const line = {
+        name,
+        hours,
+        billable: c.billable !== false,
+        // Why this line's time was what it was — travel, warranty, shop. A
+        // line with no name is dropped: the editor can hold an empty row
+        // while you pick someone.
+        note: String(c.note || ''),
+      };
+      if (log.length) line.hoursLog = log.slice(-50);
+      return line;
+    }).filter(c => c.name);
   },
   // Rename an employee EVERYWHERE, in one action.
   //
