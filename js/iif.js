@@ -408,7 +408,12 @@ export const DEFAULT_ITEM_JOURNEYMAN = 'Service Rates:Standard Labour';
 // Employees on payroll need their hours transferred to it (PITEM +
 // XFERTOPAYROLL=Y), or the import errors on their rows. Blank = not on
 // payroll: PITEM empty and N, which is what every row effectively was before.
-export function generateIIF(entries, employeeTypeMap = {}, companyName = 'Company Organizer Ninja', items = {}, payrollMap = {}) {
+// otMap (v2026.10.01-2234): lowercased name → OVERTIME payroll item. When an employee
+// has both, each day's hours are counted in entry order and anything past
+// OT_DAILY_HOURS goes to the overtime item (BC's daily rule); a row that
+// crosses the line is split in two. Days are keyed by e.dateIso.
+export const OT_DAILY_HOURS = 8;
+export function generateIIF(entries, employeeTypeMap = {}, companyName = 'Company Organizer Ninja', items = {}, payrollMap = {}, otMap = {}) {
   const ITEM_APPRENTICE = String(items.apprentice || '').trim() || DEFAULT_ITEM_APPRENTICE;
   const ITEM_JOURNEYMAN = String(items.journeyman || '').trim() || DEFAULT_ITEM_JOURNEYMAN;
   const lines = [
@@ -421,6 +426,7 @@ export function generateIIF(entries, employeeTypeMap = {}, companyName = 'Compan
     // the billing flag differs.
     `!TIMEACT\tDATE\tJOB\tEMP\tITEM\tPITEM\tDURATION\tXFERTOPAYROLL\tBILLINGSTATUS\tNOTE`,
   ];
+  const usedByEmpDay = {};          // `${emp}|${day}` → hours already counted
   for (const e of entries) {
     if (!e.employees.length || !e.hours || !e.customerMatched) continue;
     const billing = e.billable === false ? 0 : 1;
@@ -430,8 +436,23 @@ export function generateIIF(entries, employeeTypeMap = {}, companyName = 'Compan
       // internal — it explains the hours to you, not to QuickBooks. The entry
       // still carries `e.note` if that decision is ever revisited.
       const pitem = String(payrollMap[emp.toLowerCase()] || '').trim();
+      const otItem = String(otMap[emp.toLowerCase()] || '').trim();
       const xfer = pitem ? 'Y' : 'N';
-      lines.push(`TIMEACT\t${e.dateFormatted}\t${e.customerMatched}\t${emp}\t${item}\t${pitem}\t${e.hoursFormatted}\t${xfer}\t${billing}\t`);
+      const row = (p, x, dur) =>
+        `TIMEACT\t${e.dateFormatted}\t${e.customerMatched}\t${emp}\t${item}\t${p}\t${dur}\t${x}\t${billing}\t`;
+      if (!pitem || !otItem) {
+        lines.push(row(pitem, xfer, e.hoursFormatted));
+        continue;
+      }
+      const key = `${emp.toLowerCase()}|${e.dateIso || e.dateFormatted}`;
+      const before = usedByEmpDay[key] || 0;
+      const hours = Number(e.hours) || 0;
+      usedByEmpDay[key] = before + hours;
+      const regular = Math.max(0, Math.min(hours, OT_DAILY_HOURS - before));
+      const over = hours - regular;
+      if (over <= 0) { lines.push(row(pitem, 'Y', e.hoursFormatted)); continue; }
+      if (regular > 0) lines.push(row(pitem, 'Y', formatDuration(regular)));
+      lines.push(row(otItem, 'Y', formatDuration(over)));
     }
   }
   return lines.join('\n');
