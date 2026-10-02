@@ -1633,7 +1633,15 @@ body.dark-mode input[type="date"], body.dark-mode input[type="time"] { color-sch
    absorbs the shortfall and truncates instead. */
 .editor-row-nav > button,
 .editor-row-nav > .editor-more-wrap,
-.editor-row-nav > .shared-badge { flex-shrink: 0; }
+/* Shared pills (v2026.10.01-1827) — a row filled by fitSharedPills, never wrapping. */
+.shared-pills {
+  display: flex; flex-wrap: nowrap; gap: 4px; min-width: 0;
+  overflow: hidden; white-space: nowrap; margin: 0 0 4px;
+}
+.shared-pills[hidden] { display: none; }
+.shared-pills .shared-badge { margin-left: 0; flex-shrink: 0; }
+.shared-pills .shared-more { background: var(--ink-soft); color: #fff; }   /* v2026.10.01-1832 */
+.editor-row-nav > .shared-pills { flex: 0 1 auto; max-width: 45%; margin: 0; }
 .editor-row-nav > .crumbs { flex: 1 1 auto; min-width: 0; }
 .editor-row-tools { width: 100%; }
 .editor-header .note-search-input { font-size: 16px; padding: 7px 12px; flex: 1; min-width: 0; }

@@ -20,6 +20,9 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 100, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.10.01-1846', 'Android: Back from a screen opened with the nav bar no longer closes the app — it goes Home'],
+  ['v2026.10.01-1832', 'Shared pills use each employee’s calendar colour'],
+  ['v2026.10.01-1827', 'A shared note shows a pill for each person it is shared with instead of “Shared” — as many as fit, then +N'],
   ['v2026.10.01-1756', 'The nav bar is now the top line of every screen, above the breadcrumb and search; it stays put while typing, which fixes the checkbox button in the note editor'],
   ['v2026.10.01-1713', 'The Customers / Calendar / Price Table row is slimmer'],
   ['v2026.10.01-1710', 'Customers, Calendar and Price Table buttons are now at the top of every screen, with the one you are on highlighted'],
@@ -983,6 +986,18 @@ window.addEventListener('popstate', () => {
   appHistoryDepth = Math.max(0, appHistoryDepth - 1);
   updateAppBackButtons();
 });
+// FLOOR (v2026.10.01-1846). Android Chrome may skip history steps it judges were added
+// without a tap, and could skip straight past Home and close the app from a
+// sub-screen. So the launch entry becomes a hidden 'floor' with Home pushed
+// above it. Landing on the floor from anywhere but Home shows Home and puts
+// Home back on top (see the popstate handler). Raw push/replace: these are
+// not screen changes and must not touch the Back-button depth.
+(() => {
+  const st = history.state;
+  if (st && st.screen === 'floor') return;
+  _replaceState({ screen: 'floor' }, '');
+  _pushState({ screen: 'home' }, '');
+})();
 
 // ---------- modals own the back press ----------
 // A sheet used to stay open while the SCREEN BEHIND IT navigated, because
@@ -5258,6 +5273,8 @@ function showEditor(record, type, cursorHint) {
   if (editorSharedBadge) {
     const isShared = type === 'note' && isSharedWithLimitedUsers(record);
     editorSharedBadge.hidden = !(isAdminRole() && isShared);
+    editorSharedBadge.innerHTML = editorSharedBadge.hidden ? '' : sharedPillsInner(record);
+    fitSharedPillsSoon();
   }
 
   renderEditorCrumbs(type, record.customerId);
@@ -5707,9 +5724,7 @@ function renderNotesList() {
       : '<span style="color:var(--ink-soft);font-style:italic">Untitled</span>';
     const firstBodyLine = (body.split('\n').find(l => l.trim() !== '') || '').trim();
     const safePreview = firstBodyLine ? escapeHtml(firstBodyLine) : '';
-    const sharedBadge = isSharedWithLimitedUsers(n)
-      ? '<span class="shared-badge" title="Shared with assigned users">Shared</span>'
-      : '';
+    const sharedBadge = sharedPillsHtml(n);
     return `
       <article class="note-card home-pinned" data-id="${n.id}" data-kind="note">
         <span class="customer-tag">${tag}</span>${sharedBadge}
@@ -5928,9 +5943,7 @@ function renderNoteCard(n) {
     customerTag = `<span class="customer-tag">${escapeHtml(name || 'Unnamed customer')}</span>`;
   }
   // Shared badge for admin/bookkeeper: this note is visible to assigned users
-  const sharedBadge = (canViewAllRole() && isSharedWithLimitedUsers(n))
-    ? '<span class="shared-badge" title="Shared with assigned users">Shared</span>'
-    : '';
+  const sharedBadge = canViewAllRole() ? sharedPillsHtml(n) : '';
   return `
     <article class="note-card ${pinned}" data-id="${n.id}" data-kind="note">
       ${customerTag}${sharedBadge}
@@ -7156,6 +7169,23 @@ window.addEventListener('popstate', (e) => {
     el.hidden = true;
     modalSyncing = false;
     if (el.id === 'trash-modal') renderTrashButton();
+    return;
+  }
+
+  // The floor (v2026.10.01-1846): reached from a sub-screen, go Home and rebuild Home on
+  // top of it. Reached from Home, do nothing — the next Back leaves the app.
+  if (e.state && e.state.screen === 'floor') {
+    if (!listView.classList.contains('active')) {
+      handlingPopstate = true;
+      try {
+        if (editorView.classList.contains('active')) commitAndCleanupEditor();
+        showNotes();                       // stamps this entry 'home'…
+      } finally { handlingPopstate = false; }
+      _replaceState({ screen: 'floor' }, '');   // …so restore the floor
+      _pushState({ screen: 'home' }, '');
+      appHistoryDepth = 0;
+      updateAppBackButtons();
+    }
     return;
   }
 
@@ -8514,6 +8544,58 @@ function canViewAllRole() { return isAdminRole() || isBookkeeperRole(); }
 // A note counts as "shared" only when someone with a limited role
 // (employee/customer) is on its assigned list — admin/bookkeeper accounts
 // see every note anyway, so sharing with them means nothing for the badge.
+// Shared pills (v2026.10.01-1827): one per employee/customer the note is shared with,
+// first name only. The row is filled with as many as fit and the rest become
+// "+N" — measured after layout by fitSharedPills, since names vary in width.
+function sharedNames(note) {
+  if (!note || !Array.isArray(note.assignedTo)) return [];
+  // Calendar colour (v2026.10.01-1832) comes from the EMPLOYEE NAME an account is linked
+  // to in Settings › Time Logger. Customers and unlinked accounts have none
+  // and keep the plain pill.
+  const links = Storage.getSettings().employeeLinks || {};
+  const empFor = (uid) => Object.keys(links).find(n => links[n] === uid) || null;
+  return note.assignedTo.map(uid => Storage.getMember(uid))
+    .filter(m => m && (m.role === 'employee' || m.role === 'customer'))
+    .map(m => ({
+      name: String(m.name || (m.email || '').split('@')[0] || '?').trim().split(/\s+/)[0],
+      emp: m.role === 'employee' ? empFor(m.uid) : null,
+    }));
+}
+function sharedPillsInner(note) {
+  return sharedNames(note).map(({ name, emp }) =>
+    `<span class="shared-badge" title="Shared with ${escapeHtml(name)}"${emp ? ` style="${chipStyle(emp)}"` : ''}>${escapeHtml(name)}</span>`).join('')
+    + '<span class="shared-badge shared-more" hidden></span>';
+}
+function sharedPillsHtml(note) {
+  if (!isSharedWithLimitedUsers(note)) return '';
+  fitSharedPillsSoon();
+  return `<span class="shared-pills">${sharedPillsInner(note)}</span>`;
+}
+function fitSharedPills() {
+  document.querySelectorAll('.shared-pills').forEach(box => {
+    if (box.hidden || !box.offsetParent) return;
+    const pills = [...box.querySelectorAll('.shared-badge:not(.shared-more)')];
+    const more = box.querySelector('.shared-more');
+    pills.forEach(p => { p.hidden = false; });
+    if (more) more.hidden = true;
+    if (!more || box.scrollWidth <= box.clientWidth + 1) return;
+    more.hidden = false;
+    // Drop names from the end until the rest plus "+N" fit; always keep one.
+    for (let k = pills.length - 1; k >= 1; k--) {
+      pills[k].hidden = true;
+      more.textContent = '+' + (pills.length - k);
+      if (box.scrollWidth <= box.clientWidth + 1) break;
+    }
+  });
+}
+var fitPillsQueued = false;   // var: hoisted, safe if a render runs first
+function fitSharedPillsSoon() {
+  if (fitPillsQueued) return;
+  fitPillsQueued = true;
+  requestAnimationFrame(() => { fitPillsQueued = false; fitSharedPills(); });
+}
+window.addEventListener('resize', fitSharedPillsSoon);
+
 function isSharedWithLimitedUsers(note) {
   if (!note || !Array.isArray(note.assignedTo)) return false;
   return note.assignedTo.some(uid => {
@@ -8571,7 +8653,7 @@ document.addEventListener('click', (e) => {
   e.stopPropagation();
   e.preventDefault();
   let note = null;
-  if (pill.id === 'editor-shared-badge') {
+  if (pill.closest('#editor-shared-badge')) {
     note = currentId ? Storage.getNote(currentId) : null;
   } else {
     const card = pill.closest('.note-card');

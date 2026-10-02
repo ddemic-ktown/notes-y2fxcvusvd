@@ -848,7 +848,8 @@
       <div class="editor-row editor-row-nav">
         <button class="icon-btn date-btn app-back-btn" aria-label="Back">‹ Back</button>
         <nav class="crumbs" id="crumbs-editor" aria-label="Breadcrumb"></nav>
-        <span id="editor-shared-badge" class="shared-badge" title="Shared with assigned users" hidden>Shared</span>
+        <!-- One pill per person it's shared with, +N when they don't fit. (v2026.10.01-1827) -->
+        <span id="editor-shared-badge" class="shared-pills" hidden></span>
         <div class="editor-more-wrap">
           <button id="editor-more-btn" class="icon-btn date-btn editor-more-btn" aria-label="More options">⋯</button>
           <div id="editor-more-dropdown" class="editor-more-dropdown" hidden>
