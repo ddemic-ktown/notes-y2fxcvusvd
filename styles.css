@@ -1641,7 +1641,7 @@ body.dark-mode input[type="date"], body.dark-mode input[type="time"] { color-sch
   overflow: hidden; white-space: nowrap; margin: 0 0 4px;
 }
 .shared-pills[hidden] { display: none; }
-.shared-pills .shared-badge { margin-left: 0; flex-shrink: 0; }
+.shared-pills .shared-badge { margin-left: 0; flex-shrink: 0; max-width: 12em; overflow: hidden; text-overflow: ellipsis; }
 .shared-pills .shared-more { background: var(--ink-soft); color: #fff; }   /* v2026.10.01-1832 */
 .editor-row-nav > .shared-pills { flex: 0 1 auto; max-width: 45%; margin: 0; }
 .editor-row-nav > .crumbs { flex: 1 1 auto; min-width: 0; }

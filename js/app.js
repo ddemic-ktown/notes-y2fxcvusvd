@@ -20,6 +20,8 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 100, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.10.01-2308', 'The calendar’s ⋯ menu has Hours, when the Hours feature is on'],
+  ['v2026.10.01-2305', 'Shared pills show the person’s name — from the linked employee or customer, or a customer whose notes contain their email — instead of their email'],
   ['v2026.10.01-2234', 'Employees can have an overtime payroll item; hours past 8 in a day export to it, splitting a job that crosses the line'],
   ['v2026.10.01-2229', 'Employees can have a QuickBooks payroll item; their hours are exported with it and marked for transfer to payroll'],
   ['v2026.10.01-2033', 'The QuickBooks .iif export writes dates as MM/DD/YY'],
@@ -8605,12 +8607,33 @@ function sharedNames(note) {
   // and keep the plain pill.
   const links = Storage.getSettings().employeeLinks || {};
   const empFor = (uid) => Object.keys(links).find(n => links[n] === uid) || null;
+  // Display name, best source first (v2026.10.01-2305): the linked Employees name, the
+  // linked customer, a customer whose details contain the account's email,
+  // the account's own name — and only then the email.
+  const custLinks = Storage.getSettings().customerLinks || {};
+  const linkedCust = (uid) => Object.keys(custLinks).find(cid => custLinks[cid] === uid) || null;
+  const custByEmail = (email) => {
+    const e = String(email || '').trim().toLowerCase();
+    if (!e) return null;
+    const hits = Storage.liveCustomers().filter(c => {
+      const def = Storage.getDefaultNoteForCustomer(c.id);
+      return def && String(def.body || '').toLowerCase().includes(e);
+    });
+    return hits.length === 1 ? hits[0].id : null;   // ambiguous → no guess
+  };
   return note.assignedTo.map(uid => Storage.getMember(uid))
     .filter(m => m && (m.role === 'employee' || m.role === 'customer'))
-    .map(m => ({
-      name: String(m.name || (m.email || '').split('@')[0] || '?').trim().split(/\s+/)[0],
-      emp: m.role === 'employee' ? empFor(m.uid) : null,
-    }));
+    .map(m => {
+      const emp = m.role === 'employee' ? empFor(m.uid) : null;
+      let name = emp ? emp.split(/\s+/)[0] : '';
+      if (!name) {
+        const cid = linkedCust(m.uid) || custByEmail(m.email);
+        if (cid) name = (customerCrumbLabel(cid) || '').trim();
+      }
+      if (!name && m.name) name = String(m.name).trim().split(/\s+/)[0];
+      if (!name) name = String(m.email || '').split('@')[0] || '?';   // as before
+      return { name, emp };
+    });
 }
 function sharedPillsInner(note) {
   return sharedNames(note).map(({ name, emp }) =>
@@ -10583,6 +10606,17 @@ function showHoursView() {
 }
 
 if (iifBtn) iifBtn.addEventListener('click', showHoursView);
+// Calendar ⋯ › Hours (v2026.10.01-2308). Visibility is decided as the menu opens, so it
+// always follows the Features switch and the role without extra wiring.
+(() => {
+  const b = document.getElementById('cal-hours-btn');
+  const more = document.getElementById('cal-more-btn');
+  if (!b || !more) return;
+  more.addEventListener('click', () => {
+    b.hidden = !(isFeatureOn('hours') && (isAdminRole() || isBookkeeperRole()));
+  });
+  b.addEventListener('click', showHoursView);
+})();
 // (#editor-iif-btn — the Hours shortcut in a note's ⋯ menu — is permanently
 // hidden as of v2026.08.18-2325: it only ever appeared on the "hours" note,
 // which no longer means anything to this screen. Handler left wired in case
@@ -11218,7 +11252,7 @@ function tutorialSteps(part) {
         screen: 'settings',
         setup: () => { if (!settingsView.classList.contains('active')) showSettings(); return true; },
         target: () => document.getElementById('iif-btn'),
-        text: 'Hours is in Settings, under Time Logger — QuickBooks. It collects what everyone actually worked — the hours you enter on each calendar job — so you can check it and send it to QuickBooks.',
+        text: 'Hours is in Settings, under Time Logger — QuickBooks, and in the calendar’s ⋯ menu. It collects what everyone actually worked — the hours you enter on each calendar job — so you can check it and send it to QuickBooks.',
       },
       {
         screen: 'hours',
