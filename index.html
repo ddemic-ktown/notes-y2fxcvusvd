@@ -533,7 +533,11 @@
         <!-- Narrows the chart, the weekly totals AND the .iif to one person.
              Options are the people with rows in the range, not the whole
              employee list — picking someone with nothing to show is a dead end. -->
-        <label class="iif-range-label">Who <select id="iif-emp-filter" class="iif-date-input"></select></label>
+        <!-- A checklist since v2026.10.01-2313: Everyone / Nobody, then a box per person. -->
+        <div class="iif-range-label iif-who-wrap">Who
+          <button id="iif-emp-btn" type="button" class="iif-date-input iif-who-btn" aria-haspopup="true">Everyone</button>
+          <div id="iif-emp-panel" class="iif-who-panel" hidden></div>
+        </div>
       </div>
       <!-- (#iif-src-bar, which pinned the note line the open row was read
            from, was removed in v2026.08.18-2325 — rows come from calendar jobs

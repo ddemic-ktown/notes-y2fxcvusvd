@@ -2024,6 +2024,24 @@ body.dark-mode .compiled-action.danger-soft { color: #f87171; border-color: #b91
 #hours-view { --price-scale: 1; }
 .hours-main { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .hours-actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+/* Who checklist (v2026.10.01-2313) */
+.iif-who-wrap { position: relative; }
+.iif-who-btn { text-align: left; cursor: pointer; font: inherit; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.iif-who-panel {
+  position: absolute; top: 100%; right: 0; z-index: 50; margin-top: 4px;
+  min-width: 190px; max-height: 60vh; overflow-y: auto;
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+  box-shadow: 0 6px 18px rgba(0,0,0,0.18); padding: 4px;
+  display: flex; flex-direction: column;
+}
+.iif-who-panel[hidden] { display: none; }
+.iif-who-opt {
+  text-align: left; font: inherit; font-size: 14px; font-weight: 600; color: var(--accent);
+  background: none; border: 0; padding: 8px 10px; cursor: pointer;
+}
+.iif-who-opt + .iif-who-row { border-top: 1px solid var(--line); }
+.iif-who-row { display: flex; align-items: center; gap: 8px; padding: 6px 10px; cursor: pointer; font-size: 14px; }
+.iif-who-row input { width: 18px; height: 18px; margin: 0; }
 /* Carries the spinner while parsing and the "no hours note" message — nothing
    else. Collapses when empty so a cleared status leaves no gap. */
 .iif-status { font-size: 13px; color: var(--ink-soft); padding: 8px 12px 0; flex-shrink: 0; }

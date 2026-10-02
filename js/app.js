@@ -20,6 +20,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 100, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.10.01-2313', 'Hours › Who is a checklist with Everyone and Nobody at the top; jobs with nobody on them no longer appear on the hours sheet'],
   ['v2026.10.01-2308', 'The calendar’s ⋯ menu has Hours, when the Hours feature is on'],
   ['v2026.10.01-2305', 'Shared pills show the person’s name — from the linked employee or customer, or a customer whose notes contain their email — instead of their email'],
   ['v2026.10.01-2234', 'Employees can have an overtime payroll item; hours past 8 in a day export to it, splitting a job that crosses the line'],
@@ -9886,40 +9887,59 @@ let openIifCell = null;
 // alone in Firestore — nothing reads them now, and nothing deletes them.
 // Who the chart is narrowed to; '' is everyone. Per DEVICE, like the zoom —
 // it is a way of looking at the screen, not a property of the org.
-let iifEmpFilter = localStorage.getItem('na-iif-emp') || '';
-function setIifEmpFilter(name) {
-  iifEmpFilter = name || '';
-  if (iifEmpFilter) localStorage.setItem('na-iif-emp', iifEmpFilter);
-  else localStorage.removeItem('na-iif-emp');
+// v{V}: a SET of names, or null for Everyone. Stored as a JSON list under
+// na-iif-emps; the old single-name key is read once as a migration.
+let iifEmpSel = (() => {
+  try {
+    const raw = localStorage.getItem('na-iif-emps');
+    if (raw) { const a = JSON.parse(raw); if (Array.isArray(a)) return new Set(a.map(String)); }
+    const old = localStorage.getItem('na-iif-emp');
+    if (old) return new Set([old]);
+  } catch (e) {}
+  return null;
+})();
+function setIifEmpSel(sel) {
+  iifEmpSel = sel;
+  try {
+    localStorage.removeItem('na-iif-emp');
+    if (sel) localStorage.setItem('na-iif-emps', JSON.stringify([...sel]));
+    else localStorage.removeItem('na-iif-emps');
+  } catch (e) {}
 }
-// Every name with a row in the loaded range, plus the current filter even when
-// it has none — otherwise choosing a person who then falls out of the range
-// silently reverts to Everyone and the chart appears to ignore the pick.
+// Every name with a row in the loaded range, plus anyone selected even when
+// they have none — otherwise a pick silently disappears from the list.
 function iifEmployeesInRange() {
   const set = new Set();
   iifParsedEntries.forEach(e => (e.employees || []).forEach(n => { if (n) set.add(n); }));
-  if (iifEmpFilter) set.add(iifEmpFilter);
+  if (iifEmpSel) iifEmpSel.forEach(n => set.add(n));
   return [...set].sort((a, b) => a.localeCompare(b));
 }
 function renderIifEmpFilter() {
-  const sel = document.getElementById('iif-emp-filter');
-  if (!sel) return;
+  const btn = document.getElementById('iif-emp-btn');
+  const panel = document.getElementById('iif-emp-panel');
+  if (!btn || !panel) return;
   const names = iifEmployeesInRange();
-  sel.innerHTML = `<option value="">Everyone</option>`
-    + names.map(n => `<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`).join('');
-  sel.value = iifEmpFilter;
-  // A stored name from another org (or a since-renamed employee) isn't in the
-  // list; the select falls back to '' and the state has to follow it.
-  if (sel.value !== iifEmpFilter) setIifEmpFilter('');
+  const picked = iifEmpSel ? names.filter(n => iifEmpSel.has(n)) : names;
+  btn.textContent = !iifEmpSel ? 'Everyone'
+    : !picked.length ? 'Nobody'
+    : picked.length <= 2 ? picked.join(', ')
+    : `${picked.length} people`;
+  panel.innerHTML =
+    `<button type="button" class="iif-who-opt" data-who="all">Everyone</button>`
+    + `<button type="button" class="iif-who-opt" data-who="none">Nobody</button>`
+    + names.map(n => `<label class="iif-who-row"><input type="checkbox" data-who-emp="${escapeHtml(n)}" ${(!iifEmpSel || iifEmpSel.has(n)) ? 'checked' : ''} />`
+      + `<span class="cal-chip" style="${chipStyle(n)}">${escapeHtml(n)}</span></label>`).join('');
 }
 function iifGridRows() {
   const rows = [];
   iifParsedEntries.forEach((e, idx) => {
-    const emps = e.employees.length ? e.employees : [''];
+    // Jobs with nobody on them are not hours anyone worked — left off the
+    // sheet entirely (v2026.10.01-2313).
+    const emps = e.employees.filter(Boolean);
     emps.forEach((emp, empIdx) => {
       // The filter narrows the rendered rows, and the totals and the .iif are
-      // both built from those — so filtering to one person exports that person.
-      if (iifEmpFilter && emp !== iifEmpFilter) return;
+      // both built from those — so filtering exports exactly who is ticked.
+      if (iifEmpSel && !iifEmpSel.has(emp)) return;
       rows.push({ e, idx, emp, empIdx, first: empIdx === 0, kind: 'note', editable: true });
     });
   });
@@ -10064,8 +10084,9 @@ function renderIIFEntries(entries) {
   // which, or the filter looks like a broken screen.
   const rowsNow = entries.length ? iifGridRows() : [];
   if (!entries.length || !rowsNow.length) {
-    const msg = entries.length && iifEmpFilter
-      ? `No jobs for ${escapeHtml(iifEmpFilter)} between these dates.`
+    const msg = !entries.length ? 'No entries found.'
+      : (iifEmpSel && !iifEmpSel.size) ? 'Nobody is selected — tick someone under Who.'
+      : iifEmpSel ? 'No jobs for the people selected between these dates.'
       : 'No entries found.';
     iifGrid.innerHTML = `<tbody><tr><td class="price-empty-state">${msg}</td></tr></tbody>`;
     const empty = document.getElementById('iif-totals');
@@ -10634,12 +10655,34 @@ if (iifToDate) iifToDate.addEventListener('change', iifRangeChanged);
 // Who-filter: a redraw, not a re-read — the jobs are already loaded, and a
 // re-parse would clear the ticks, which are keyed to entries the filter only
 // hides. Switching back to Everyone brings them back as they were.
-const iifEmpSelect = document.getElementById('iif-emp-filter');
-if (iifEmpSelect) iifEmpSelect.addEventListener('change', () => {
-  closeIifCell(false);
-  setIifEmpFilter(iifEmpSelect.value);
-  renderIIFEntries(iifParsedEntries);
-});
+(() => {
+  const btn = document.getElementById('iif-emp-btn');
+  const panel = document.getElementById('iif-emp-panel');
+  if (!btn || !panel) return;
+  const apply = (sel) => {
+    closeIifCell(false);
+    setIifEmpSel(sel);
+    renderIIFEntries(iifParsedEntries);   // also rebuilds the panel; it stays open
+  };
+  btn.addEventListener('click', (e) => { e.stopPropagation(); panel.hidden = !panel.hidden; });
+  panel.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const opt = e.target.closest('[data-who]');
+    if (opt) apply(opt.dataset.who === 'all' ? null : new Set());
+  });
+  panel.addEventListener('change', (e) => {
+    const box = e.target.closest('[data-who-emp]');
+    if (!box) return;
+    const names = iifEmployeesInRange();
+    const next = new Set(iifEmpSel ? iifEmpSel : names);
+    if (box.checked) next.add(box.dataset.whoEmp); else next.delete(box.dataset.whoEmp);
+    // Everyone ticked is Everyone again, so new people in a later range show.
+    apply(names.every(n => next.has(n)) ? null : next);
+  });
+  document.addEventListener('click', (e) => {
+    if (!panel.hidden && !panel.contains(e.target) && e.target !== btn) panel.hidden = true;
+  });
+})();
 
 if (iifDownloadBtn) iifDownloadBtn.addEventListener('click', () => {
   const includedEntries = iifExportEntries();
