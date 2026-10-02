@@ -6,7 +6,7 @@ import {
   signInWithEmailAndPassword, updatePassword,
 } from "./firebase-init.js";
 // formatDate is aliased: app.js already has its own formatDate(iso) for note
-// timestamps, and iif.js's returns the MM/DD/YYYY that QuickBooks expects.
+// timestamps, and iif.js's returns the MM/DD/YY that QuickBooks expects.
 // parseHoursNote is deliberately NOT imported any more (v2026.08.18-2325): the
 // hours chart is built from calendar jobs now. The parser is still exported
 // from iif.js, unchanged, so switching back is a one-line change.
@@ -20,6 +20,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 100, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.10.01-2033', 'The QuickBooks .iif export writes dates as MM/DD/YY'],
   ['v2026.10.01-1904', 'A slimmer top on every screen and in notes, Refresh and Layout moved into a ⋯ menu on Home, and the stray Back button in Android notes is gone'],
   ['v2026.10.01-1846', 'Android: Back from a screen opened with the nav bar no longer closes the app — it goes Home'],
   ['v2026.10.01-1832', 'Shared pills use each employee’s calendar colour'],

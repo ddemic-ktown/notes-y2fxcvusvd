@@ -212,7 +212,9 @@ function parseDate(line) {
 export function formatDate(d) {
   const mm = String(d.getMonth() + 1).padStart(2, '0');
   const dd = String(d.getDate()).padStart(2, '0');
-  return `${mm}/${dd}/${d.getFullYear()}`;
+  // Two-digit year (v2026.10.01-2033): QuickBooks Desktop's .iif import expects MM/DD/YY.
+  const yy = String(d.getFullYear() % 100).padStart(2, '0');
+  return `${mm}/${dd}/${yy}`;
 }
 
 export function formatDuration(hours) {
