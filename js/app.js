@@ -20,6 +20,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 100, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.10.03-0725', 'Day view: a 📍 on each job with an address opens directions; the version number sits at the top of Settings'],
   ['v2026.10.02-2217', 'The nav bar has the top line to itself on every screen; each screen’s own buttons moved down beside its search'],
   ['v2026.10.02-2126', 'A Home button starts the nav bar on every screen, and the calendar’s Today and Week/Month moved into its ⋯ menu'],
   ['v2026.10.02-1936', 'A customer’s screen has a 📍 Navigate button for each address, opening Apple Maps on iPhone and Google Maps elsewhere'],
@@ -2206,6 +2207,8 @@ function renderCalendarDay() {
     // a name you can read the start of beats losing the chips entirely.
     const tight = shown < 52;
     const addr = j.address && !tight ? `<div class="cal-block-addr">${escapeHtml(j.address)}</div>` : '';
+    // 📍 directions (v2026.10.03-0725) — its own tap target; see the stopPropagation below.
+    const pin = j.address ? `<a class="cal-pin" href="${escapeHtml(mapsUrl(j.address))}" target="_blank" rel="noopener" aria-label="Directions to ${escapeHtml(j.address)}" title="Directions">📍</a>` : '';
     return `<div class="cal-block${tight ? ' cal-block-tight' : ''}${sizeClass}${j.noWork ? ' cal-nowork' : ' cal-working'}" data-job="${j.id}" style="top:${top}px;height:${height}px;left:${left};width:${width};z-index:${1 + depth}">
       ${tight ? '' : `<div class="cal-block-time">${escapeHtml(timeTxt)}</div>`}
       <div class="cal-block-head">
@@ -2215,6 +2218,7 @@ function renderCalendarDay() {
       ${addr}
       ${note && noteLines ? `<div class="cal-block-note" style="-webkit-line-clamp:${noteLines};line-clamp:${noteLines}">${escapeHtml(note)}</div>` : ''}
       ${canEdit ? '<div class="cal-resize" aria-hidden="true"></div>' : ''}
+      ${pin}
     </div>`;
   }).join('');
   timeline.style.height = `${24 * HOUR_PX}px`;
@@ -2223,6 +2227,11 @@ function renderCalendarDay() {
   const nowLine = calSelectedDate === ymd(new Date())
     ? `<div class="cal-now" data-now="day" style="top:${(nowMin / 60) * HOUR_PX}px"></div>` : '';
   timeline.innerHTML = hours + blocks + nowLine;
+  // The pin must not start a drag, open the job or count as a day swipe.
+  timeline.querySelectorAll('.cal-pin').forEach(a => {
+    ['pointerdown', 'pointerup', 'click', 'touchstart', 'touchend'].forEach(ev =>
+      a.addEventListener(ev, (e) => e.stopPropagation()));
+  });
 
   if (!jobs.length) {
     untimedWrap.hidden = false;
@@ -8390,6 +8399,13 @@ function extractContacts(text) {
   return { phones, emails };
 }
 
+// Directions link: Apple Maps on iPhone/iPad, Google Maps elsewhere (v2026.10.03-0725).
+function mapsUrl(address) {
+  const q = encodeURIComponent(String(address || ''));
+  const ios = /iP(hone|ad|od)/.test(navigator.userAgent)
+    || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  return ios ? `https://maps.apple.com/?daddr=${q}` : `https://www.google.com/maps/dir/?api=1&destination=${q}`;
+}
 function renderContactStrip(customerId) {
   if (!contactStripEl) return;
   const def = customerId ? Storage.getDefaultNoteForCustomer(customerId) : null;
@@ -8398,11 +8414,8 @@ function renderContactStrip(customerId) {
   const addrs = customerId ? addressCandidates(customerId) : [];
   if (!phones.length && !emails.length && !addrs.length) { contactStripEl.hidden = true; contactStripEl.innerHTML = ''; return; }
   const parts = [];
-  const ios = /iP(hone|ad|od)/.test(navigator.userAgent)
-    || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
   addrs.forEach(a => {
-    const q = encodeURIComponent(a);
-    const href = ios ? `https://maps.apple.com/?daddr=${q}` : `https://www.google.com/maps/dir/?api=1&destination=${q}`;
+    const href = mapsUrl(a);
     const street = a.split(',')[0].trim();
     const label = addrs.length > 1 ? `📍 ${street.length > 22 ? street.slice(0, 21) + '…' : street}` : '📍 Navigate';
     parts.push(`<a class="contact-btn" href="${escapeHtml(href)}" target="_blank" rel="noopener" title="${escapeHtml(a)}">${escapeHtml(label)}</a>`);
