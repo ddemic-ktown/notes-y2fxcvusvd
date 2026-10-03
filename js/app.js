@@ -20,6 +20,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 100, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.10.03-1010', 'Price table: the button that applies your ticks now reads Apply filter'],
   ['v2026.10.03-1004', 'Price history fills the whole screen on phones; computers keep the bottom sheet'],
   ['v2026.10.03-0945', 'Price table ⋯ → Reset table (admin): offers a full-history backup, then deletes every item and vendor'],
   ['v2026.10.03-0927', 'Price export asks Latest prices or Full history; the history file lists every entry with its date and imports straight back in'],
@@ -172,7 +173,6 @@ const CHANGELOG = [
   ['v2026.08.03-0142', 'Leave a note and come straight back — undo still remembers'],
   ['v2026.08.03-0053', 'Tap anything during a tutorial and it waits with a Resume button instead of getting in the way'],
   ['v2026.08.03-0021', 'One date option in the note menu instead of two: Insert a date'],
-  ['v2026.08.02-2214', 'Users list shows full email addresses instead of cutting them short'],
 ];
 const APP_VERSION = CHANGELOG[0][0];
 
@@ -3337,7 +3337,7 @@ function priceItemLastTouched(item) {
 // different jobs and the same button cannot mean both:
 //   'off'     — no filter, no button
 //   'picking' — checkboxes on every row and column, everything still visible,
-//               the header button reads "Filter" and applies the ticks
+//               the header button reads "Apply filter" and applies the ticks
 //   'on'      — only the ticked rows/columns, button reads "Turn filter off"
 // Remembered across sessions: a filtered table is a deliberate working set, so
 // it should survive closing the app and stay until switched off.
@@ -3449,7 +3449,7 @@ function renderPriceTable() {
   const filterBtn = document.getElementById('price-filter-btn');
   if (filterBtn) {
     filterBtn.hidden = priceFilterMode === 'off';
-    filterBtn.textContent = priceFilterMode === 'on' ? 'Turn filter off' : 'Filter';
+    filterBtn.textContent = priceFilterMode === 'on' ? 'Turn filter off' : 'Apply filter';
     filterBtn.classList.toggle('active', priceFilterMode === 'on');
   }
   // Hide the ⋯ button when every item inside it is hidden
@@ -11413,7 +11413,7 @@ function tutorialSteps(part) {
     {
       screen: 'price',
       target: () => document.getElementById('price-more-btn'),
-      text: 'Filter is for when the table has grown past what you need today. Tick the rows and columns you want, press Filter, and only those stay — on this device, until you press Turn filter off. Your prices are untouched either way.',
+      text: 'Filter is for when the table has grown past what you need today. Tick the rows and columns you want, press Apply filter, and only those stay — on this device, until you press Turn filter off. Your prices are untouched either way.',
     },
   ];
 
