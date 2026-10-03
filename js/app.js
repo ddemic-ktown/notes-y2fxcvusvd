@@ -20,6 +20,9 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 100, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.10.03-1044', 'Tour: fixed two out-of-date steps and the Install part (its target had gone); now covers Navigate, map pins, the lowest-price ✓, Layout ticks, weekly hours totals, Refresh, customer sort and What’s new'],
+  ['v2026.10.03-1039', 'Sample data: No work day, overnight job, hand-typed hours, non-billable and repeated crew lines with notes, hours history, 16 price items across trades; no more dead hour records'],
+  ['v2026.10.03-1029', 'Price table sort cycles Custom → A–Z → Latest; A–Z is view-only like Latest'],
   ['v2026.10.03-1020', 'An update shows Updating to vX… on the loading screen instead of a silent reload'],
   ['v2026.10.03-1010', 'Price table: the button that applies your ticks now reads Apply filter'],
   ['v2026.10.03-1004', 'Price history fills the whole screen on phones; computers keep the bottom sheet'],
@@ -170,9 +173,6 @@ const CHANGELOG = [
   ['v2026.08.16-1431', 'Photos: double-tap or pinch to zoom, drag to pan, and a share button while viewing'],
   ['v2026.08.14-0150', 'The app no longer flashes the sign-in screen while your session is loading'],
   ['v2026.08.08-2000', 'Finishing a new customer opens their file; finishing a new note returns home'],
-  ['v2026.08.03-2344', 'Home search finds customers too, listed above the matching notes'],
-  ['v2026.08.03-0142', 'Leave a note and come straight back — undo still remembers'],
-  ['v2026.08.03-0053', 'Tap anything during a tutorial and it waits with a Resume button instead of getting in the way'],
 ];
 const APP_VERSION = CHANGELOG[0][0];
 
@@ -3342,7 +3342,9 @@ function focusOpenPriceCell() {
 // Sort mode for the price rows. '' = the manual order you dragged them into;
 // 'latest' = whatever was priced most recently at the top. Per DEVICE, like
 // the zoom — a way of looking at the table, not a property of it.
-let priceSort = localStorage.getItem('na-price-sort') === 'latest' ? 'latest' : '';
+// '' = Custom (the saved order), 'az' = by name, 'latest' = most recently priced.
+// Both sorts are view-only and per device; neither touches the saved order.
+let priceSort = ['latest', 'az'].includes(localStorage.getItem('na-price-sort')) ? localStorage.getItem('na-price-sort') : '';
 // When a row was last given a price, across ALL vendors. `added` is the moment
 // it was typed; `date` (the day the price is FOR) is the fallback for rows
 // imported from CSV, which carry no `added`.
@@ -3405,7 +3407,12 @@ function applyPriceFilter(list, picks) {
   return list.filter(x => picks.has(x.id));
 }
 
+const PRICE_SORT_LABEL = { '': 'Sorted: Custom', az: 'Sorted: A–Z', latest: 'Sorted: Latest' };
 function sortPriceItems(items) {
+  if (priceSort === 'az') {
+    // Natural order, so "2G" sorts before "10G" and case doesn't matter
+    return items.slice().sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), undefined, { numeric: true, sensitivity: 'base' }));
+  }
   if (priceSort !== 'latest') return items;
   // Rows with no price at all sink: "latest first" has nothing to say about
   // them, and they'd otherwise sit at the top on an empty-string comparison.
@@ -3456,8 +3463,8 @@ function renderPriceTable() {
     // Reads as a STATE, not an instruction. "Sort: Latest" was taken as "press
     // me to sort by latest", so pressing it looked like it did the opposite.
     sortBtn.hidden = !Storage.canViewPriceTable();
-    sortBtn.textContent = priceSort === 'latest' ? 'Sorted: Latest' : 'Sorted: Custom';
-    sortBtn.classList.toggle('active', priceSort === 'latest');
+    sortBtn.textContent = PRICE_SORT_LABEL[priceSort] || PRICE_SORT_LABEL[''];
+    sortBtn.classList.toggle('active', !!priceSort);
   }
   if (importBtn) importBtn.hidden = !canEdit;
   if (exportBtn) exportBtn.hidden = !Storage.canViewPriceTable();
@@ -3646,7 +3653,7 @@ function wirePriceHeaderDrag(el, axis, id) {
       // Custom first makes the drag move what is on screen. Vendor columns
       // keep their own order and are never re-sorted, so a column drag (axis
       // 'x') needs none of this.
-      if (axis === 'y' && priceSort === 'latest') {
+      if (axis === 'y' && priceSort) {
         priceSort = '';
         localStorage.removeItem('na-price-sort');
         // Same buzz a real drag gives, so the press doesn't feel ignored — the
@@ -4355,12 +4362,13 @@ const priceSelItems = new Set();
 const priceSelVendors = new Set();
 const priceSortBtn = document.getElementById('price-sort');
 if (priceSortBtn) priceSortBtn.addEventListener('click', () => {
-  priceSort = priceSort === 'latest' ? '' : 'latest';
+  // Custom → A–Z → Latest → Custom
+  priceSort = priceSort === '' ? 'az' : (priceSort === 'az' ? 'latest' : '');
   if (priceSort) localStorage.setItem('na-price-sort', priceSort);
   else localStorage.removeItem('na-price-sort');
   // Leaving Layout mode on while the rows resort would show drag handles for
   // an order that isn't the one being displayed.
-  if (priceSort === 'latest' && priceReorderMode) exitPriceReorderMode();
+  if (priceSort && priceReorderMode) exitPriceReorderMode();
   renderPriceTable();
 });
 // Shared by the Layout button and the sort toggle, so the button's label,
@@ -4407,7 +4415,7 @@ const priceReorderBtn = document.getElementById('price-reorder');
 if (priceReorderBtn) priceReorderBtn.addEventListener('click', () => {
   // Dragging edits the MANUAL order, so entering Layout puts the table back
   // into it — otherwise you'd be rearranging rows you aren't looking at.
-  if (!priceReorderMode && priceSort === 'latest') {
+  if (!priceReorderMode && priceSort) {
     priceSort = '';
     localStorage.removeItem('na-price-sort');
   }
@@ -11290,6 +11298,12 @@ function tutorialSteps(part) {
       text: 'Tap + to add a customer.',
     },
     {
+      screen: 'customers',
+      setup: () => { if (!customersView.classList.contains('active')) showCustomers(); return true; },
+      target: () => document.getElementById('customers-more-btn'),
+      text: 'The ⋯ here sorts the list A–Z, or by the customers you worked on most recently.',
+    },
+    {
       screen: 'customer-notes',
       group: 'customer',
       requires: () => Storage.listCustomers().length > 0,
@@ -11331,6 +11345,15 @@ function tutorialSteps(part) {
         ? 'The ⋯ menu has See customer in calendar — the calendar showing only this customer’s jobs, until you tap the ✕ on its bar. It also deletes a customer: they and all their notes go to Trash, in Settings, where you can put them back for 30 days.'
         : 'The ⋯ menu has See customer in calendar — the calendar showing only this customer’s jobs, until you tap the ✕ on its bar.',
     },
+    {
+      // Hidden when the first note has no address, phone or email — and
+      // isTargetVisible() skips a hidden target, so no requires for that.
+      screen: 'customer-notes',
+      group: 'customer',
+      requires: () => Storage.listCustomers().length > 0,
+      target: () => document.getElementById('customer-contact-strip'),
+      text: 'An address, phone number or email in the customer’s first note becomes a button here: 📍 Navigate opens your maps app with directions, and 📞 Call, 💬 Text and ✉️ Email do what they say.',
+    },
   ];
 
   if (part === 2) {
@@ -11340,7 +11363,7 @@ function tutorialSteps(part) {
         {
           screen: 'home',
           target: () => document.querySelector('[data-section="notes"]'),
-          text: 'General notes aren’t tied to a customer — shopping lists, reminders, your hours. They live right here on the home screen.',
+          text: 'General notes aren’t tied to a customer — shopping lists, reminders, ideas. They live right here on the home screen.',
         },
         {
           screen: 'home',
@@ -11374,6 +11397,11 @@ function tutorialSteps(part) {
       screen: 'home',
       target: () => document.getElementById('home-search-input'),
       text: 'Search all your notes at once. Open a result and the word is already highlighted inside the note.',
+    });
+    ordered.push({
+      screen: 'home',
+      target: () => document.getElementById('home-more-btn'),
+      text: 'The ⋯ menu has Refresh — it fetches the latest from the server and picks up an app update if there is one — and Layout, below.',
     });
     ordered.push({
       screen: 'home',
@@ -11419,7 +11447,7 @@ function tutorialSteps(part) {
       requires: () => Storage.listPriceItems().length > 0 && Storage.getPriceConfig().vendors.length > 0,
       setup: () => { showPriceTable(); return true; },
       target: () => document.getElementById('price-more-btn'),
-      text: 'The dot shows availability: green now, amber 2–3 days, grey longer, red not available. A red dot with a dash means they had none and quoted no price. “What the colours mean” in this menu says the same thing whenever you need it.',
+      text: 'The dot shows availability: green now, amber 2–3 days, grey longer, red not available. A red dot with a dash means they had none and quoted no price. A ✓ marks the lowest price you can get today. “What the colours mean” in this menu says the same thing whenever you need it.',
     },
     {
       screen: 'price',
@@ -11433,7 +11461,7 @@ function tutorialSteps(part) {
       screen: 'price',
       setup: () => { showPriceTable(); return true; },
       target: () => document.getElementById('price-more-btn'),
-      text: 'The ⋯ menu holds the rest: sort by most recently priced, Layout to reorder rows and columns, Filter, export to a spreadsheet (latest prices, or the full price history), import prices from a file or a pasted table (repeats are skipped), share the table with an employee, and (admins) reset it to start over.',
+      text: 'The ⋯ menu holds the rest: sort A–Z or by most recently priced, Layout to reorder rows and columns (tick several to move them to the top together), Filter, export to a spreadsheet (latest prices, or the full price history), import prices from a file or a pasted table (repeats are skipped), share the table with an employee, and (admins) reset it to start over.',
     },
     {
       screen: 'price',
@@ -11445,7 +11473,9 @@ function tutorialSteps(part) {
   if (part === 5) {
     const iOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
     const android = /android/i.test(navigator.userAgent);
-    const homeTarget = () => document.querySelector('#list-view .home-header-top h1');
+    // Was '.home-header-top h1' — that title went in the v2026.10.02-2217 header
+    // rework, which left every part-5 bubble with nothing to point at.
+    const homeTarget = () => document.getElementById('home-nav');
     if (isStandaloneApp) return [
       {
         screen: 'home',
@@ -11500,7 +11530,7 @@ function tutorialSteps(part) {
         screen: 'home',
         setup: () => { goHome(); return true; },
         target: () => document.querySelector('#home-nav [data-nav="calendar"]'),
-        text: 'The calendar is who is working where, and when. It’s a plan — hours you actually worked are recorded separately.',
+        text: 'The calendar is who is working where, and when. Once the work is done, each person’s hours go on the job too — that is what the Hours chart and QuickBooks read.',
       },
       {
         screen: 'calendar',
@@ -11569,6 +11599,16 @@ function tutorialSteps(part) {
         setup: goDay,
         target: () => document.querySelector('#calendar-day-view .cal-block'),
         text: 'Press and hold a job to pick it up and drag it to a new time; drag the corner to change how long it runs. Both snap to quarter hours. A quick tap opens it for editing.',
+      },
+      {
+        // Only jobs with an address carry a 📍; with none on this day the
+        // target is missing and the step is skipped.
+        screen: 'calendar-day',
+        group: 'caljobs',
+        requires: () => Storage.listJobs().length > 0,
+        setup: goDay,
+        target: () => document.querySelector('#calendar-day-view .cal-pin'),
+        text: 'A 📍 on a job with an address opens directions to it in your maps app.',
       },
     ];
   }
@@ -11721,6 +11761,14 @@ function tutorialSteps(part) {
         group: 'hoursjobs',
         requires: hasJobs,
         setup: goHours,
+        target: () => document.getElementById('iif-totals'),
+        text: 'Under the chart, one table per week adds up each person’s hours by day. It counts ticked rows only, so it always agrees with what the download would send.',
+      },
+      {
+        screen: 'hours',
+        group: 'hoursjobs',
+        requires: hasJobs,
+        setup: goHours,
         target: () => document.getElementById('iif-download-btn'),
         text: 'Download .iif writes the ticked rows as a QuickBooks import file. Untick anything you’re not ready to send.',
       },
@@ -11777,6 +11825,8 @@ function tutorialSteps(part) {
         'Downloads everything — including jobs and hours — as one file you can keep. Worth doing before anything drastic. Photos and documents are NOT in it; those live on the device. Restore from backup adds back anything that has gone missing, and never changes or deletes what is already here.'),
       step(row('import-csv-btn'),
         'Already have your customers in a spreadsheet? Paste the rows here and each one becomes a customer with their details as their first note.'),
+      step(() => document.getElementById('changelog-toggle'),
+        'What’s new lists every change to the app, newest first. The version you are running is shown at the top of Settings, and an update says “Updating to …” on the loading screen.'),
     ];
   }
 

@@ -1540,118 +1540,91 @@ export const Storage = {
     //   · timed and untimed (an untimed job sits in the strip above the day
     //     timeline instead of on it)
     //   · one person and several, with DIFFERENT hours each
-    //   · two jobs on the same day for the same customer — that's the case the
-    //     Hours chart's pair-off-in-order matching exists for
+    //   · two jobs on the same day for the same customer
     //   · past jobs with hours, one past job WITHOUT (the "you still owe hours
     //     for this" dash), and upcoming jobs with none yet
+    //   · crew detail (v2026.10.03): the same person on two lines, one of them
+    //     not billable, crew notes, and an hours history on two jobs
+    //   · a No work day, an overnight shift, and Hours typed by hand that
+    //     differ from start → end
+    // `crew` lines are [employee index, hours, billable, note, hoursLog]; a
+    // hoursLog is [[hours, daysAgo], …] oldest first, ending at the current hours.
     const jobSpecs = [
       { d: -12, start: '08:00', end: '16:30', cust: 'Bill & Karen Eagle',
-        emps: [0, 1], hours: [8.5, 8.5], desc: 'Framing — kitchen wall opened up' },
+        crew: [[0, 8.5, true, '', [[8, 12], [8.5, 11]]], [1, 8.5]],
+        desc: 'Framing — kitchen wall opened up' },
       { d: -11, start: '08:00', end: '12:00', cust: 'Anne Bull',
-        emps: [2], hours: [4], desc: 'Rough-in inspection' },
+        crew: [[2, 4], [2, 1, false, 'Drive to the supplier for parts — not billed']],
+        desc: 'Rough-in inspection' },
       { d: -9, start: '', end: '', cust: 'Ridgeview Property Management',
-        emps: [1], hours: [2], desc: 'Unit 12 tap — no set time, fit in when passing' },
+        crew: [[1, 2, true, '', [[1.5, 9], [2, 8]]]],
+        desc: 'Unit 12 tap — no set time, fit in when passing' },
       { d: -6, start: '07:30', end: '15:00', cust: 'Bill & Karen Eagle',
-        emps: [0, 2], hours: [7.5, 7], desc: 'Drywall delivery and hang' },
+        crew: [[0, 7.5, true, 'Picked up the drywall from the yard first'], [2, 7]],
+        desc: 'Drywall delivery and hang' },
       { d: -5, start: '09:00', end: '11:00', cust: 'Sunrise Cafe',
-        emps: [0], hours: [2], desc: 'Site visit — measure for string lights' },
+        crew: [[0, 2]], desc: 'Site visit — measure for string lights' },
       { d: -5, start: '13:00', end: '16:00', cust: 'Sunrise Cafe',
-        emps: [0], hours: [3], desc: 'Second visit same day — ran the cable' },
+        crew: [[0, 3]], desc: 'Second visit same day — ran the cable' },
       { d: -3, start: '08:00', end: '16:00', cust: 'Ridgeview Property Management',
-        emps: [1, 2], hours: [null, null], desc: 'Common area punch list — hours not entered yet' },
+        crew: [[1, null], [2, null]], desc: 'Common area punch list — hours not entered yet' },
+      { d: -2, start: '09:00', end: '12:00', duration: 2.5, cust: 'Ridgeview Property Management',
+        crew: [[1, 2.5]], desc: 'Parkade lighting quote — booked 3 h, on site 2.5 h' },
+      { d: -1, start: '20:00', end: '02:00', cust: 'Sunrise Cafe',
+        crew: [[0, 6], [2, 6]], desc: 'After-hours panel swap — overnight while the cafe is closed' },
+      { d: 1, start: '', end: '', noWork: true,
+        crew: [], desc: 'Shop closed — stat holiday' },
       { d: 2, start: '08:00', end: '17:00', cust: 'Bill & Karen Eagle',
-        emps: [0, 1], hours: [null, null], desc: 'Cabinet install — booked' },
+        crew: [[0, null], [1, null]], desc: 'Cabinet install — booked' },
       { d: 4, start: '', end: '', cust: 'Anne Bull',
-        emps: [2], hours: [null], desc: 'Drop off the vanity' },
+        crew: [[2, null]], desc: 'Drop off the vanity' },
       { d: 6, start: '10:00', end: '14:00', cust: 'Sunrise Cafe',
-        emps: [0, 2], hours: [null, null], desc: 'Hang the lights before the weekend' },
+        crew: [[0, null], [2, null]], desc: 'Hang the lights before the weekend' },
     ];
-    const seededJobs = [];
+    const agoIso = (n) => new Date(Date.now() - n * 86400000).toISOString();
     for (const spec of jobSpecs) {
       const id = uid();
-      const names = spec.emps.map(i => emp(i));
-      const employeeHours = {};
-      names.forEach((n, i) => {
-        const h = spec.hours[i];
-        if (h != null) employeeHours[n] = h;
+      const crew = spec.crew.map(([i, hours, billable = true, note = '', log]) => {
+        const line = { name: emp(i), hours: hours == null ? null : hours, billable, note };
+        if (log) line.hoursLog = log.map(([h, ago]) => ({ hours: h, at: agoIso(ago), by: 'Sample data' }));
+        return line;
       });
+      // employeeNames / employeeHours are derived from the crew, exactly as the
+      // job editor does it (crewLegacyFields): unique names, each person's TOTAL.
+      const names = [];
+      const employeeHours = {};
+      crew.forEach(c => {
+        if (!names.includes(c.name)) names.push(c.name);
+        if (c.hours != null) employeeHours[c.name] = (employeeHours[c.name] || 0) + c.hours;
+      });
+      const cust = spec.noWork ? '' : spec.cust;
       const job = {
         id,
         date: day(spec.d),
         start: spec.start,
         end: spec.end,
+        duration: spec.duration || null,
         description: spec.desc,
         employeeNames: names,
         employeeHours,
+        crew,
         // Demo employees aren't linked to real accounts, so nothing to filter
         // on — the fields still have to EXIST for the read rules to evaluate.
         employeeUids: [],
         customerUids: [],
-        customerId: custIds[spec.cust] || null,
-        customerName: spec.cust,
-        address: custAddr[spec.cust] || '',
+        customerId: (cust && custIds[cust]) || null,
+        customerName: cust || '',
+        address: (cust && custAddr[cust]) || '',
+        noWork: !!spec.noWork,
         created: now, updated: now, demo: true,
       };
       _cache.jobs.push(job);
-      seededJobs.push({ job, names, hours: spec.hours });
       tracked(setDoc(doc(jobsCol(), id), stripId(job))).catch(err => console.warn("seed.job", err));
       counts.jobs++;
     }
-
-    // ---- recorded hours ----
-    // Deliberately NOT a clean copy of the jobs — the point is to show the
-    // three states the Hours chart distinguishes:
-    //   · a record that agrees with its job          → one green row
-    //   · a record that disagrees                    → green row + red row
-    //   · a record with no job behind it             → green "no job" row
-    // The disagreement lands on the FIRST person of the -6 job; the -5 pair and
-    // the -3 job are left unrecorded so there is something to save.
-    const disagreeOn = day(-6);
-    for (const { job, names } of seededJobs) {
-      if (job.date > day(-4)) continue;                 // upcoming work isn't recorded
-      for (const n of names) {
-        const h = job.employeeHours[n];
-        if (h == null) continue;                        // nothing entered on the job
-        if (job.date === day(-5)) continue;             // left for you to save
-        const recorded = (job.date === disagreeOn && n === names[0]) ? h - 1 : h;
-        const id = uid();
-        const log = {
-          id,
-          date: job.date,
-          employeeName: n,
-          employeeUids: [],
-          customerId: job.customerId,
-          customerName: job.customerName,
-          hours: recorded,
-          hoursFormatted: String(recorded),
-          note: job.description,
-          created: now, updated: now, demo: true,
-        };
-        _cache.timelogs.push(log);
-        tracked(setDoc(doc(timelogsCol(), id), stripId(log))).catch(err => console.warn("seed.timelog", err));
-        counts.timelogs++;
-      }
-    }
-    // One record with no job at all — a day someone worked that never made it
-    // onto the calendar. It still has to reach QuickBooks.
-    {
-      const id = uid();
-      const orphan = {
-        id,
-        date: day(-8),
-        employeeName: emp(1),
-        employeeUids: [],
-        customerId: custIds['Anne Bull'] || null,
-        customerName: 'Anne Bull',
-        hours: 5,
-        hoursFormatted: '5',
-        note: 'Called out — no job was booked for this',
-        created: now, updated: now, demo: true,
-      };
-      _cache.timelogs.push(orphan);
-      tracked(setDoc(doc(timelogsCol(), id), stripId(orphan))).catch(err => console.warn("seed.timelog", err));
-      counts.timelogs++;
-    }
+    // No `timelogs` any more (v2026.10.03): nothing has read them since the
+    // Hours chart moved onto jobs (v2026.08.19-0819). removeSampleData still
+    // sweeps any an older seed left behind.
 
     // ---- price table ----
     // Vendors are columns in one shared config doc, so like employees they are
@@ -1703,6 +1676,59 @@ export const Storage = {
         [[18.99, 25, 'yes']],
         [[17.49, 10, 'yes']],
         [[21.00, 3, 'no']],
+      ] },
+      // Other trades (v2026.10.03), so Filter, A–Z and Latest have enough rows
+      // to show what they do. A null price is a real entry: "asked, none to be
+      // had" — the red dot with a dash.
+      { name: '14/2 NMD cable (per m)', cells: [
+        [[1.42, 20, 'yes'], [1.55, 3, 'yes']],
+        [[1.49, 8, 'yes']],
+        [[1.39, 5, 'soon']],
+      ] },
+      { name: '15A Decora switch', cells: [
+        [[1.45, 12, 'yes']],
+        [[1.62, 4, 'yes']],
+        [[null, 2, 'no']],
+      ] },
+      { name: '15A single-pole breaker', cells: [
+        null,
+        [[12.60, 9, 'yes']],
+        [[14.07, 6, 'yes'], [13.20, 1, 'yes']],
+      ] },
+      { name: '1/2" PEX-B pipe (100 ft)', cells: [
+        [[42.90, 18, 'yes']],
+        [[39.99, 7, 'later']],
+        [[44.50, 3, 'yes']],
+      ] },
+      { name: '3/4" copper elbow', cells: [
+        [[2.35, 22, 'yes'], [2.59, 4, 'yes']],
+        [[2.49, 10, 'yes']],
+        null,
+      ] },
+      { name: 'Furnace filter 16x25x1', cells: [
+        [[11.98, 15, 'yes']],
+        null,
+        [[10.49, 5, 'yes']],
+      ] },
+      { name: '6" galvanized duct (5 ft)', cells: [
+        [[18.75, 26, 'yes']],
+        [[17.40, 6, 'soon']],
+        [[19.99, 2, 'yes']],
+      ] },
+      { name: 'Interior paint (gallon)', cells: [
+        [[54.99, 30, 'yes'], [49.99, 5, 'yes']],
+        [[52.00, 9, 'yes']],
+        null,
+      ] },
+      { name: 'Roofing nails 1-1/4" (5 lb)', cells: [
+        null,
+        [[24.50, 11, 'yes']],
+        [[22.95, 4, 'later']],
+      ] },
+      { name: 'Concrete mix 30 kg', cells: [
+        [[8.49, 14, 'yes']],
+        [[7.99, 3, 'yes']],
+        [[8.29, 7, 'no']],
       ] },
     ];
     priceSpecs.forEach((spec, row) => {
