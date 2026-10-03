@@ -20,6 +20,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 100, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.10.03-1020', 'An update shows Updating to vX… on the loading screen instead of a silent reload'],
   ['v2026.10.03-1010', 'Price table: the button that applies your ticks now reads Apply filter'],
   ['v2026.10.03-1004', 'Price history fills the whole screen on phones; computers keep the bottom sheet'],
   ['v2026.10.03-0945', 'Price table ⋯ → Reset table (admin): offers a full-history backup, then deletes every item and vendor'],
@@ -172,7 +173,6 @@ const CHANGELOG = [
   ['v2026.08.03-2344', 'Home search finds customers too, listed above the matching notes'],
   ['v2026.08.03-0142', 'Leave a note and come straight back — undo still remembers'],
   ['v2026.08.03-0053', 'Tap anything during a tutorial and it waits with a Resume button instead of getting in the way'],
-  ['v2026.08.03-0021', 'One date option in the note menu instead of two: Insert a date'],
 ];
 const APP_VERSION = CHANGELOG[0][0];
 
@@ -213,6 +213,31 @@ function showBoot() {
   hideAllScreens();
   bootView.classList.add('active');
 }
+// "Updating to vX…" on the loading screens. Set just before an update's
+// reload (showUpdatingScreen) and again by the NEW code on the way back up, so
+// the note covers the whole gap instead of the app silently blinking.
+const UPDATING_KEY = 'jp-updating-to';
+function setUpdateNote(text) {
+  document.querySelectorAll('.boot-update-note').forEach(el => {
+    el.textContent = text || '';
+    el.hidden = !text;
+  });
+}
+function showUpdatingScreen(version) {
+  try { localStorage.setItem(UPDATING_KEY, version || '1'); } catch (e) {}
+  showBoot();
+  setUpdateNote(version ? `Updating to ${version}…` : 'Updating to the latest version…');
+}
+// After the reload the new code is running, so APP_VERSION IS the version just
+// installed. Cleared at once; the note hides itself once the app is long up,
+// so a later sign-out doesn't show a stale "Updating".
+try {
+  if (localStorage.getItem(UPDATING_KEY)) {
+    localStorage.removeItem(UPDATING_KEY);
+    setUpdateNote(`Updating to ${APP_VERSION}…`);
+    setTimeout(() => setUpdateNote(''), 15000);
+  }
+} catch (e) {}
 const signinBtn = document.getElementById('signin-btn');
 const signinError = document.getElementById('signin-error');
 const signinMessage = document.getElementById('signin-message');
@@ -12303,6 +12328,7 @@ function armUpdatePill() {
 const updatePillBtn = document.getElementById('update-pill-btn');
 if (updatePillBtn) updatePillBtn.addEventListener('click', async () => {
   updatePillBtn.textContent = 'Updating\u2026';
+  showUpdatingScreen(pendingDeployedVersion);
   try { if (swReg) await swReg.update(); } catch (e) {}
   applyWaitingUpdate();
   // If a worker was waiting it takes over and controllerchange reloads us.
@@ -12323,6 +12349,7 @@ function parseSwVersion(text) {
   return m ? 'v' + m[1] : null;
 }
 let lastDeployCheck = 0;
+let pendingDeployedVersion = null;   // shown on the updating screen
 async function checkDeployedVersion() {
   if (!navigator.onLine) return;
   if (Date.now() - lastDeployCheck < 30000) return;   // don't spam on every visit
@@ -12334,6 +12361,7 @@ async function checkDeployedVersion() {
     const resp = await fetch('sw.js?ts=' + Date.now(), { cache: 'no-store' });
     if (!resp.ok) return;
     const deployed = parseSwVersion(await resp.text());
+    if (deployed && deployed !== APP_VERSION) pendingDeployedVersion = deployed;
     if (!deployed || deployed === APP_VERSION) {
       showUpdatePill(false);
       return;
@@ -12399,7 +12427,10 @@ if (refreshBtn) {
 
 if ('serviceWorker' in navigator) {
   // Reload as soon as the new SW takes control
+  // No controller at load = first install: that takeover isn't an update.
+  const hadSwController = !!navigator.serviceWorker.controller;
   navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (hadSwController) showUpdatingScreen(pendingDeployedVersion);
     window.location.reload();
   });
 

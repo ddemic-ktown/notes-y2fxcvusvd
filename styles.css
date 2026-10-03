@@ -136,6 +136,7 @@ body.hours-open {
 
 /* Boot splash — borrows .signin-card so it matches the "Signing you in…" card */
 #boot-view.active { display: flex; align-items: center; justify-content: center; padding: 20px; }
+.boot-update-note { margin-top: 10px !important; font-size: 13px; }
 
 /* Sign-in screen */
 #signin-view.active { display: flex; align-items: center; justify-content: center; padding: 20px; }
