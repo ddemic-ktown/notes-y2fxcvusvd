@@ -103,10 +103,15 @@
   <!-- LIST VIEW -->
   <section id="list-view" class="screen">
     <header class="app-header home-header">
-      <!-- One top line (v2026.10.02-1913): nav bar, then Done / ⋯ / ⚙. The JobPilot title
-           went; the version number lives in Settings › Help. -->
-      <div class="home-header-top nav-line">
-        <nav id="home-nav" class="home-nav" aria-label="Go to" hidden></nav>
+      <!-- Nav bar alone on top; search and Home's own buttons below (v2026.10.02-2217).
+           The version number lives in Settings › Help. -->
+      <nav id="home-nav" class="home-nav" aria-label="Go to" hidden></nav>
+      <div class="home-tools">
+        <div class="search-wrap">
+          <input id="home-search-input" class="search-input home-search-input" type="search" placeholder="Search customers and notes…" autocomplete="off" />
+          <button class="search-clear" type="button" aria-label="Clear search" hidden>✕</button>
+          <button class="search-open icon-btn" type="button" aria-label="Open search">🔍</button>
+        </div>
         <!-- Refresh and Layout live in ⋯ (v2026.10.01-1904). Done shows only while
              arranging, so you are never left in Layout mode with no way out. -->
         <button id="layout-done-btn" class="icon-btn date-btn" type="button" hidden>Done</button>
@@ -118,11 +123,6 @@
           </div>
         </div>
         <button id="settings-btn" class="icon-btn" aria-label="Settings">⚙</button>
-      </div>
-      <div class="search-wrap">
-        <input id="home-search-input" class="search-input home-search-input" type="search" placeholder="Search customers and notes…" autocomplete="off" />
-        <button class="search-clear" type="button" aria-label="Clear search" hidden>✕</button>
-        <button class="search-open icon-btn" type="button" aria-label="Open search">🔍</button>
       </div>
     </header>
     <main id="notes-list" class="notes-list">
@@ -275,7 +275,7 @@
       <!-- Admin/bookkeeper only; hidden for employees and customers by
            applyRoleVisibility. Searches the jobs the app has LOADED — the live
            window plus any month you have visited. -->
-      <div id="cal-search-wrap" class="customers-header-bottom" hidden>
+      <div id="cal-search-wrap" class="customers-header-bottom">
         <div class="search-wrap">
           <input id="cal-search" class="search-input" type="search" placeholder="Search jobs…" autocomplete="off" />
           <button class="search-clear" type="button" aria-label="Clear search" hidden>✕</button>

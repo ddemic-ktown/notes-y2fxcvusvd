@@ -1596,6 +1596,16 @@ body.vv-zoomed .sync-toast { display: none !important; }
 .home-header-top { display: flex; align-items: center; gap: 8px; }
 .home-header-top h1 { flex: 1; }
 .home-search-input { width: 100%; box-sizing: border-box; }
+/* Home tools row: search, then Done / ⋯ / ⚙ (2026.10.02-2217) */
+.home-tools { display: flex; align-items: center; gap: 6px; }
+.home-tools > .search-wrap { flex: 1 1 auto; min-width: 0; }
+.home-tools > *:not(.search-wrap) { flex-shrink: 0; }
+.customers-header-bottom > .search-wrap { flex: 1 1 auto; min-width: 0; }
+.customers-header-bottom > .app-back-btn, .customers-header-bottom > .price-zoom,
+.customers-header-bottom > .editor-more-wrap { flex-shrink: 0; }
+/* Day view and Settings keep a row only for Back — gone where Back isn't shown. */
+body:not(.show-app-back) #calendar-day-view .customers-header-top,
+body:not(.show-app-back) #settings-view .customers-header-top { display: none; }
 /* One top line: Back, nav bar, the screen's own buttons (v2026.10.02-1913) */
 .nav-line { display: flex; align-items: center; gap: 6px; width: 100%; min-width: 0; flex-basis: 100%; }
 .nav-line > .home-nav { flex: 1 1 auto; min-width: 0; }

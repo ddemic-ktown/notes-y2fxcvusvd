@@ -20,6 +20,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 100, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.10.02-2217', 'The nav bar has the top line to itself on every screen; each screen’s own buttons moved down beside its search'],
   ['v2026.10.02-2126', 'A Home button starts the nav bar on every screen, and the calendar’s Today and Week/Month moved into its ⋯ menu'],
   ['v2026.10.02-1936', 'A customer’s screen has a 📍 Navigate button for each address, opening Apple Maps on iPhone and Google Maps elsewhere'],
   ['v2026.10.02-1913', 'One top line on most screens (nav bar plus that screen’s buttons), Save and Cancel always visible at the bottom of the job editor, and a search box in Settings'],
@@ -5740,21 +5741,32 @@ function getScreenNavs() {
     // then the rest of the top row's buttons; the crumbs are hidden, not
     // removed, since code still renders into them. Customer and section
     // screens and the editor keep their crumbs: those name something.
+    // v2026.10.02-2217: the nav bar has the top line to itself. Each screen's own
+    // buttons move down onto its search/tools row (Back at its left end).
+    // Screens without one keep a slim row for Back.
     const MERGE = ['customers-view', 'calendar-view', 'calendar-day-view', 'price-view', 'hours-view', 'settings-view'];
     if (MERGE.includes(id)) {
-      const top = header.querySelector(':scope > .customers-header-top') || header;
-      const line = document.createElement('div');
-      line.className = 'nav-line';
-      const back = top.querySelector(':scope > .app-back-btn');
-      if (back) line.appendChild(back);
-      line.appendChild(n);
-      [...top.children].forEach(ch => {
-        if (ch === line) return;
-        if (ch.classList.contains('crumbs')) { ch.hidden = true; return; }
-        line.appendChild(ch);
-      });
-      header.prepend(line);
-      if (top !== header && ![...top.children].some(ch => !ch.hidden)) top.hidden = true;
+      const top = header.querySelector(':scope > .customers-header-top');
+      const tools = header.querySelector(':scope > .customers-header-bottom');
+      const from = top || header;
+      const crumbs = from.querySelector(':scope > .crumbs');
+      if (crumbs) crumbs.hidden = true;
+      if (tools) {
+        const back = from.querySelector(':scope > .app-back-btn');
+        [...from.children].forEach(ch => {
+          if (ch === n || ch === tools || ch === back || ch.classList.contains('crumbs')) return;
+          tools.appendChild(ch);
+        });
+        if (back) tools.prepend(back);
+        if (top) top.hidden = true;
+      } else if (!top) {
+        // Settings: header IS the row. Give Back a row under the nav.
+        const row = document.createElement('div');
+        row.className = 'customers-header-top';
+        const back = header.querySelector(':scope > .app-back-btn');
+        if (back) row.appendChild(back);
+        header.appendChild(row);
+      }
     }
     n.addEventListener('click', (e) => {
       const b = e.target.closest('[data-nav]');
@@ -8641,7 +8653,10 @@ function applyRoleUI(role) {
   const calSearchWrap = document.getElementById('cal-search-wrap');
   if (calSearchWrap) {
     const on = isAdminRole || role === 'bookkeeper';
-    calSearchWrap.hidden = !on;
+    // The row stays (it carries ⋯ now, v2026.10.02-2217); only the search box is staff-only.
+    const calSearchBox = calSearchWrap.querySelector('.search-wrap');
+    if (calSearchBox) calSearchBox.hidden = !on;
+    calSearchWrap.hidden = false;
     if (!on) clearCalSearch();
     const filterBtn = document.getElementById('cal-filter-btn');
     if (filterBtn) filterBtn.hidden = !on;
