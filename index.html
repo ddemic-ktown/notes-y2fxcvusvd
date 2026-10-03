@@ -420,6 +420,7 @@
             <button id="price-export" class="editor-more-item" type="button">Export CSV</button>
             <button id="price-import" class="editor-more-item" type="button">Import CSV</button>
             <button id="price-share" class="editor-more-item" type="button">Share with employees</button>
+            <button id="price-reset" class="editor-more-item danger-item" type="button" hidden>Reset table…</button>
             <!-- The tour for THIS screen, reachable from the screen itself.
                  ends it here instead of rolling into the
                  next part; data-tutorial-skip-home drops the opening step that
@@ -480,6 +481,22 @@
       <div class="setting-btn-col">
         <button id="price-export-latest" class="secondary setting-wide-btn" type="button">Latest prices</button>
         <button id="price-export-history" class="primary setting-wide-btn" type="button">Full history</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- PRICE TABLE RESET MODAL (admin) -->
+  <div id="price-reset-modal" class="modal-overlay" hidden>
+    <div class="modal-panel">
+      <div class="modal-header">
+        <h2 class="modal-title">Reset price table</h2>
+        <button id="price-reset-close" class="icon-btn" aria-label="Close">✕</button>
+      </div>
+      <p class="modal-hint">Deletes every item and every vendor column, with all their prices. Save a backup first — it's the full price history, and Import reads it straight back in.</p>
+      <p id="price-reset-status" class="muted setting-hint"></p>
+      <div class="setting-btn-col">
+        <button id="price-reset-backup" class="secondary setting-wide-btn" type="button">Save backup</button>
+        <button id="price-reset-delete" class="primary setting-wide-btn danger-item" type="button">Delete everything…</button>
       </div>
     </div>
   </div>

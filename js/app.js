@@ -20,6 +20,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 100, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.10.03-0945', 'Price table ⋯ → Reset table (admin): offers a full-history backup, then deletes every item and vendor'],
   ['v2026.10.03-0927', 'Price export asks Latest prices or Full history; the history file lists every entry with its date and imports straight back in'],
   ['v2026.10.03-0905', 'Price import: choose a file, accepts a one-price-per-row list (Item,Vendor,Price,Date), skips entries already in the table, counts each new item once'],
   ['v2026.10.03-0725', 'Day view: a 📍 on each job with an address opens directions; the version number sits at the top of Settings'],
@@ -172,7 +173,6 @@ const CHANGELOG = [
   ['v2026.08.03-0021', 'One date option in the note menu instead of two: Insert a date'],
   ['v2026.08.02-2214', 'Users list shows full email addresses instead of cutting them short'],
   ['v2026.08.02-2211', 'Employees in Settings are readable cards instead of a crowded, truncated row'],
-  ['v2026.08.02-2125', 'Each employee has their own calendar colour, set in Settings'],
 ];
 const APP_VERSION = CHANGELOG[0][0];
 
@@ -3420,6 +3420,8 @@ function renderPriceTable() {
   if (priceFabEl) priceFabEl.hidden = !fabAllowed;
   if (!fabAllowed) { const m = document.getElementById('price-fab-menu'); if (m) m.hidden = true; }
   if (shareBtn) shareBtn.hidden = !isAdminRole();
+  const resetBtn = document.getElementById('price-reset');
+  if (resetBtn) resetBtn.hidden = !isAdminRole();
   const reorderBtn = document.getElementById('price-reorder');
   const importBtn = document.getElementById('price-import');
   const exportBtn = document.getElementById('price-export');
@@ -4532,6 +4534,52 @@ if (priceExportModal) {
   document.getElementById('price-export-history').addEventListener('click', () => { closePriceExport(); exportPriceHistoryCsv(); });
   document.getElementById('price-export-close').addEventListener('click', closePriceExport);
   priceExportModal.addEventListener('click', (e) => { if (e.target === priceExportModal) closePriceExport(); });
+}
+// Reset: wipe every item AND every vendor column, admin only. The modal leads
+// with a full-history backup so a wipe is never one tap from losing data; the
+// final confirm states the exact counts. Sharing (priceMeta.sharedWith) stays.
+const priceResetBtn = document.getElementById('price-reset');
+const priceResetModal = document.getElementById('price-reset-modal');
+const priceResetStatus = document.getElementById('price-reset-status');
+const closePriceReset = () => { if (priceResetModal) priceResetModal.hidden = true; };
+async function resetPriceTable() {
+  const items = Storage.listPriceItems();
+  const vendors = Storage.getPriceConfig().vendors;
+  if (!items.length && !vendors.length) { priceResetStatus.textContent = 'The price table is already empty.'; return; }
+  const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+  const ok = await askConfirm(
+    `Delete all ${plural(items.length, 'item', 'items')} and ${plural(vendors.length, 'vendor', 'vendors')}, with every price in them? This can't be undone.`,
+    { title: 'Reset price table', okLabel: 'Delete everything' });
+  if (!ok) return;
+  const delBtn = document.getElementById('price-reset-delete');
+  delBtn.disabled = true;
+  let done = 0;
+  for (const item of items) {
+    await Storage.removePriceItem(item.id);
+    done++;
+    if (done % 10 === 0) priceResetStatus.textContent = `Deleting… ${done} of ${items.length} items`;
+  }
+  // One write for every column — removePriceVendor would also rewrite each row
+  await Storage.savePriceConfig({ vendors: [] });
+  delBtn.disabled = false;
+  exitPriceReorderMode();
+  clearPriceFilter();
+  clearPriceSearchBox();
+  closePriceReset();
+  renderPriceTable();
+}
+if (priceResetBtn && priceResetModal) {
+  priceResetBtn.addEventListener('click', () => {
+    priceResetStatus.textContent = '';
+    priceResetModal.hidden = false;
+  });
+  document.getElementById('price-reset-backup').addEventListener('click', () => {
+    exportPriceHistoryCsv();
+    priceResetStatus.textContent = 'Backup saved to your downloads.';
+  });
+  document.getElementById('price-reset-delete').addEventListener('click', resetPriceTable);
+  document.getElementById('price-reset-close').addEventListener('click', closePriceReset);
+  priceResetModal.addEventListener('click', (e) => { if (e.target === priceResetModal) closePriceReset(); });
 }
 
 // Split a pasted table: real CSV (quoted commas) or tab-separated from a sheet
@@ -11360,7 +11408,7 @@ function tutorialSteps(part) {
       screen: 'price',
       setup: () => { showPriceTable(); return true; },
       target: () => document.getElementById('price-more-btn'),
-      text: 'The ⋯ menu holds the rest: sort by most recently priced, Layout to reorder rows and columns, Filter, export to a spreadsheet (latest prices, or the full price history), import prices from a file or a pasted table (repeats are skipped), and share the table with an employee.',
+      text: 'The ⋯ menu holds the rest: sort by most recently priced, Layout to reorder rows and columns, Filter, export to a spreadsheet (latest prices, or the full price history), import prices from a file or a pasted table (repeats are skipped), share the table with an employee, and (admins) reset it to start over.',
     },
     {
       screen: 'price',
