@@ -20,6 +20,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 100, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.10.03-1004', 'Price history fills the whole screen on phones; computers keep the bottom sheet'],
   ['v2026.10.03-0945', 'Price table ⋯ → Reset table (admin): offers a full-history backup, then deletes every item and vendor'],
   ['v2026.10.03-0927', 'Price export asks Latest prices or Full history; the history file lists every entry with its date and imports straight back in'],
   ['v2026.10.03-0905', 'Price import: choose a file, accepts a one-price-per-row list (Item,Vendor,Price,Date), skips entries already in the table, counts each new item once'],
@@ -172,7 +173,6 @@ const CHANGELOG = [
   ['v2026.08.03-0053', 'Tap anything during a tutorial and it waits with a Resume button instead of getting in the way'],
   ['v2026.08.03-0021', 'One date option in the note menu instead of two: Insert a date'],
   ['v2026.08.02-2214', 'Users list shows full email addresses instead of cutting them short'],
-  ['v2026.08.02-2211', 'Employees in Settings are readable cards instead of a crowded, truncated row'],
 ];
 const APP_VERSION = CHANGELOG[0][0];
 

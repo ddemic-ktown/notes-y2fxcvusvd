@@ -1283,6 +1283,25 @@ body.dark-mode .price-best-badge { color: #4ade80; }
   -webkit-touch-callout: none;
 }
 .price-history-list { list-style: none; margin: 0; padding: 0; max-height: 50vh; overflow-y: auto; }
+/* Phones (portrait, or landscape where height is the short side): the sheet
+   takes the whole screen and the list fills everything under the title — at
+   50vh a long history scrolled inside a box two-thirds of the way up.
+   Computers keep the bottom sheet. (v2026.10.03-1004) */
+@media (max-width: 430px), (max-height: 500px) {
+  #price-history-modal { align-items: stretch; }
+  #price-history-modal .modal-panel {
+    max-width: none;
+    height: var(--app-vh, 100vh);
+    max-height: none;
+    border-radius: 0;
+    padding-top: calc(20px + env(safe-area-inset-top, 0px));
+    padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  #price-history-modal .price-history-list { max-height: none; flex: 1; min-height: 0; }
+}
 .price-history-item {
   display: flex; align-items: center; gap: 8px; padding: 10px 4px;
   border-bottom: 1px solid var(--line); font-size: 14px;
