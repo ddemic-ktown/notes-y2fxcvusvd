@@ -20,6 +20,8 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 100, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.10.03-0927', 'Price export asks Latest prices or Full history; the history file lists every entry with its date and imports straight back in'],
+  ['v2026.10.03-0905', 'Price import: choose a file, accepts a one-price-per-row list (Item,Vendor,Price,Date), skips entries already in the table, counts each new item once'],
   ['v2026.10.03-0725', 'Day view: a 📍 on each job with an address opens directions; the version number sits at the top of Settings'],
   ['v2026.10.02-2217', 'The nav bar has the top line to itself on every screen; each screen’s own buttons moved down beside its search'],
   ['v2026.10.02-2126', 'A Home button starts the nav bar on every screen, and the calendar’s Today and Week/Month moved into its ⋯ menu'],
@@ -171,8 +173,6 @@ const CHANGELOG = [
   ['v2026.08.02-2214', 'Users list shows full email addresses instead of cutting them short'],
   ['v2026.08.02-2211', 'Employees in Settings are readable cards instead of a crowded, truncated row'],
   ['v2026.08.02-2125', 'Each employee has their own calendar colour, set in Settings'],
-  ['v2026.08.02-1920', 'Ticking a checkbox no longer wakes the keyboard after you have put it away'],
-  ['v2026.08.02-1800', 'Each screen’s ⋯ menu now explains that screen; new tours for the Calendar and Hours'],
 ];
 const APP_VERSION = CHANGELOG[0][0];
 
@@ -4482,27 +4482,57 @@ function csvEscape(v) {
   const s = String(v == null ? '' : v);
   return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
-function exportPriceCsv() {
-  const cfg = Storage.getPriceConfig();
-  const vendors = cfg.vendors.slice().sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
-  const items = Storage.listPriceItems();
-  const rows = [['Item', ...vendors.map(v => v.name)]];
-  for (const item of items) {
-    rows.push([item.name, ...vendors.map(v => priceCsvCell(Storage.latestPriceEntry(item, v.id)))]);
-  }
+function downloadCsv(rows, filename) {
   const csv = rows.map(r => r.map(csvEscape).join(',')).join('\n');
   const blob = new Blob([csv], { type: 'text/csv' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `price-table-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.download = filename;
   document.body.appendChild(a);
   a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
+function priceExportVendors() {
+  return Storage.getPriceConfig().vendors.slice().sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+}
+// Latest prices: the grid, newest entry per cell
+function exportPriceCsv() {
+  const vendors = priceExportVendors();
+  const rows = [['Item', ...vendors.map(v => v.name)]];
+  for (const item of Storage.listPriceItems()) {
+    rows.push([item.name, ...vendors.map(v => priceCsvCell(Storage.latestPriceEntry(item, v.id)))]);
+  }
+  downloadCsv(rows, `price-table-${new Date().toISOString().slice(0, 10)}.csv`);
+}
+// Full history: one row per entry, in the LIST layout the import reads
+// (Item,Vendor,Price,Date,Availability), so it round-trips without loss.
+// Oldest first within each cell, which is the order they happened in.
+function exportPriceHistoryCsv() {
+  const vendors = priceExportVendors();
+  const rows = [['Item', 'Vendor', 'Price', 'Date', 'Availability']];
+  for (const item of Storage.listPriceItems()) {
+    for (const v of vendors) {
+      for (const e of Storage.priceHistory(item, v.id).slice().reverse()) {
+        rows.push([item.name, v.name, e.price == null ? '' : Number(e.price).toFixed(2), e.date || '', e.avail || 'yes']);
+      }
+    }
+  }
+  downloadCsv(rows, `price-history-${new Date().toISOString().slice(0, 10)}.csv`);
+}
 const priceExportBtn = document.getElementById('price-export');
-if (priceExportBtn) priceExportBtn.addEventListener('click', exportPriceCsv);
+const priceExportModal = document.getElementById('price-export-modal');
+const closePriceExport = () => { if (priceExportModal) priceExportModal.hidden = true; };
+if (priceExportBtn) priceExportBtn.addEventListener('click', () => {
+  if (priceExportModal) priceExportModal.hidden = false; else exportPriceCsv();
+});
+if (priceExportModal) {
+  document.getElementById('price-export-latest').addEventListener('click', () => { closePriceExport(); exportPriceCsv(); });
+  document.getElementById('price-export-history').addEventListener('click', () => { closePriceExport(); exportPriceHistoryCsv(); });
+  document.getElementById('price-export-close').addEventListener('click', closePriceExport);
+  priceExportModal.addEventListener('click', (e) => { if (e.target === priceExportModal) closePriceExport(); });
+}
 
 // Split a pasted table: real CSV (quoted commas) or tab-separated from a sheet
 function parseDelimited(text) {
@@ -4543,46 +4573,112 @@ function parsePriceCell(raw) {
     date: /^\d{4}-\d{2}-\d{2}$/.test(d || '') ? d : new Date().toISOString().slice(0, 10),
   };
 }
+// Two layouts are accepted, told apart by the header row:
+//   GRID  — Item,Vendor A,Vendor B…  one row per item, a cell per vendor
+//   LIST  — Item,Vendor,Price,Date[,Availability]  one row per price entry
+// The same item may appear on many rows in either; every row adds history.
+function isPriceListHeader(header) {
+  const h = header.map(x => (x || '').trim().toLowerCase());
+  return h[0] === 'item' && (h[1] === 'vendor' || h[1] === 'supplier') && h[2] === 'price';
+}
 function analysePriceImport(text) {
   const rows = parseDelimited(text);
-  if (rows.length < 2) return { error: 'Need a header row of vendors and at least one item row.' };
+  if (rows.length < 2) return { error: 'Need a header row and at least one item row.' };
   const cfg = Storage.getPriceConfig();
   const existingVendors = cfg.vendors;
   const existingItems = Storage.listPriceItems();
-  const header = rows[0].slice(1);
-  const newVendors = header.filter(h => h && !existingVendors.some(v => v.name.toLowerCase() === h.toLowerCase()));
-  let newItems = 0, entries = 0, skipped = 0;
-  const plan = [];
-  for (const r of rows.slice(1)) {
-    const name = (r[0] || '').trim();
-    if (!name) continue;
-    const known = existingItems.some(i => i.name.toLowerCase() === name.toLowerCase());
-    if (!known) newItems++;
-    const cells = [];
-    header.forEach((vName, idx) => {
-      const parsed = parsePriceCell(r[idx + 1]);
-      if (!vName) return;
-      if (parsed) { cells.push({ vendorName: vName, entry: parsed }); entries++; }
-      else if ((r[idx + 1] || '').trim()) skipped++;
-    });
-    plan.push({ itemName: name, cells });
+  const vendorIdByName = new Map(existingVendors.map(v => [v.name.toLowerCase(), v.id]));
+  const itemByName = new Map(existingItems.map(i => [i.name.toLowerCase(), i]));
+  // Flatten either layout to { itemName, vendorName, entry }
+  const flat = [];
+  let skipped = 0;
+  const list = isPriceListHeader(rows[0]);
+  if (list) {
+    for (const r of rows.slice(1)) {
+      const name = (r[0] || '').trim(), vName = (r[1] || '').trim();
+      if (!name || !vName) { skipped++; continue; }
+      const cell = [r[2] || '', (r[4] || '').trim().toLowerCase(), (r[3] || '').trim()].join('|');
+      const parsed = (r[2] || '').trim() || (r[3] || '').trim() ? parsePriceCell(cell) : null;
+      if (parsed) flat.push({ itemName: name, vendorName: vName, entry: parsed });
+      else skipped++;
+    }
+  } else {
+    const header = rows[0].slice(1);
+    for (const r of rows.slice(1)) {
+      const name = (r[0] || '').trim();
+      if (!name) continue;
+      header.forEach((vName, idx) => {
+        if (!vName) return;
+        const parsed = parsePriceCell(r[idx + 1]);
+        if (parsed) flat.push({ itemName: name, vendorName: vName.trim(), entry: parsed });
+        else if ((r[idx + 1] || '').trim()) skipped++;
+      });
+      // An item row with no prices still creates the item
+      if (!header.some((v, idx) => v && (r[idx + 1] || '').trim())) flat.push({ itemName: name });
+    }
   }
-  return { plan, newVendors: [...new Set(newVendors)], newItems, entries, skipped };
+  // Skip entries already in the table, or repeated in this file: same item,
+  // vendor, date and price. Importing the same file twice adds nothing.
+  const seen = new Set();
+  const keyOf = (itemName, vendorName, e) =>
+    [itemName.toLowerCase(), vendorName.toLowerCase(), e.date, e.price == null ? '' : Number(e.price).toFixed(2)].join('\u0001');
+  for (const item of existingItems) {
+    for (const v of existingVendors) {
+      for (const e of ((item.cells || {})[v.id] || [])) seen.add(keyOf(item.name, v.name, e));
+    }
+  }
+  const planByItem = new Map();
+  const newVendors = new Map();
+  let entries = 0, duplicates = 0;
+  for (const f of flat) {
+    const k = f.itemName.toLowerCase();
+    if (!planByItem.has(k)) planByItem.set(k, { itemName: f.itemName, cells: [] });
+    if (!f.entry) continue;
+    const key = keyOf(f.itemName, f.vendorName, f.entry);
+    if (seen.has(key)) { duplicates++; continue; }
+    seen.add(key);
+    if (!vendorIdByName.has(f.vendorName.toLowerCase()) && !newVendors.has(f.vendorName.toLowerCase())) {
+      newVendors.set(f.vendorName.toLowerCase(), f.vendorName);
+    }
+    planByItem.get(k).cells.push({ vendorName: f.vendorName, entry: f.entry });
+    entries++;
+  }
+  const plan = [...planByItem.values()];
+  // Counted once per item, however many rows it appears on
+  const newItemNames = plan.filter(p => !itemByName.has(p.itemName.toLowerCase())).map(p => p.itemName);
+  return { plan, list, newVendors: [...newVendors.values()], newItems: newItemNames.length, newItemNames, entries, duplicates, skipped };
 }
-async function applyPriceImport(analysis) {
-  // Create any missing vendors first, then rows, then entries
+async function applyPriceImport(analysis, onProgress) {
+  // Create any missing vendors first, then rows, then entries — ONE write per
+  // item rather than one per entry, so a few thousand entries stay quick.
   for (const name of analysis.newVendors) await Storage.addPriceVendor(name);
   const vendors = Storage.getPriceConfig().vendors;
   const vendorByName = new Map(vendors.map(v => [v.name.toLowerCase(), v]));
-  for (const row of analysis.plan) {
+  // `added` must be unique per entry: deleting from the history sheet matches on it
+  let stamp = Date.now();
+  let done = 0;
+  // Reversed because each new item lands at the TOP, so the file's order is kept
+  for (const row of [...analysis.plan].reverse()) {
     let item = Storage.listPriceItems().find(i => i.name.toLowerCase() === row.itemName.toLowerCase());
     if (!item) item = await Storage.addPriceItem(row.itemName);
     if (!item) continue;
-    for (const c of row.cells) {
-      const v = vendorByName.get(c.vendorName.toLowerCase());
-      if (!v) continue;
-      await Storage.addPriceEntry(item.id, v.id, c.entry);
+    if (row.cells.length) {
+      const cells = { ...(item.cells || {}) };
+      for (const c of row.cells) {
+        const v = vendorByName.get(c.vendorName.toLowerCase());
+        if (!v) continue;
+        const e = c.entry;
+        cells[v.id] = [...(cells[v.id] || []), {
+          price: (e.price === '' || e.price == null) ? null : Number(e.price),
+          date: e.date,
+          avail: e.avail,
+          added: new Date(stamp++).toISOString(),
+        }];
+      }
+      await Storage.savePriceItem(item.id, { cells });
     }
+    done++;
+    if (onProgress) onProgress(done, analysis.plan.length);
   }
 }
 const priceImportBtn = document.getElementById('price-import');
@@ -4612,22 +4708,39 @@ if (priceImportCheck) priceImportCheck.addEventListener('click', () => {
   }
   pendingPriceImport = res;
   priceImportApply.disabled = res.entries === 0 && res.newItems === 0 && res.newVendors.length === 0;
+  const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
   priceImportPreview.textContent =
-    `Will add ${res.newVendors.length} vendor${res.newVendors.length === 1 ? '' : 's'}, `
-    + `${res.newItems} item${res.newItems === 1 ? '' : 's'} and ${res.entries} price entr${res.entries === 1 ? 'y' : 'ies'}.`
-    + (res.skipped ? ` ${res.skipped} cell${res.skipped === 1 ? '' : 's'} couldn't be read and will be skipped.` : '')
+    `Will add ${plural(res.newVendors.length, 'vendor', 'vendors')}, `
+    + `${plural(res.newItems, 'item', 'items')} and ${plural(res.entries, 'price entry', 'price entries')}.`
+    + (res.duplicates ? ` ${plural(res.duplicates, 'entry is', 'entries are')} already in the table and will be skipped.` : '')
+    + (res.skipped ? ` ${plural(res.skipped, 'cell', 'cells')} couldn't be read and will be skipped.` : '')
     + ' Nothing is overwritten — entries are added to each cell\'s history.';
 });
 if (priceImportApply) priceImportApply.addEventListener('click', async () => {
   if (!pendingPriceImport) return;
   priceImportApply.disabled = true;
   priceImportPreview.textContent = 'Importing…';
-  await applyPriceImport(pendingPriceImport);
+  await applyPriceImport(pendingPriceImport, (done, total) => {
+    priceImportPreview.textContent = `Importing… ${done} of ${total} items`;
+  });
   priceImportModal.hidden = true;
   pendingPriceImport = null;
   renderPriceTable();
 });
 if (priceImportClose) priceImportClose.addEventListener('click', () => { priceImportModal.hidden = true; });
+// Choose a .csv/.tsv instead of pasting: the text lands in the box and the
+// preview runs at once, so a long file never has to be scrolled through.
+const priceImportFile = document.getElementById('price-import-file');
+const priceImportFileBtn = document.getElementById('price-import-file-btn');
+if (priceImportFileBtn && priceImportFile) {
+  priceImportFileBtn.addEventListener('click', () => { priceImportFile.value = ''; priceImportFile.click(); });
+  priceImportFile.addEventListener('change', async () => {
+    const f = priceImportFile.files && priceImportFile.files[0];
+    if (!f) return;
+    priceImportText.value = (await f.text()).replace(/^\uFEFF/, '');
+    priceImportCheck.click();
+  });
+}
 if (priceImportModal) priceImportModal.addEventListener('click', (e) => { if (e.target === priceImportModal) priceImportModal.hidden = true; });
 
 // ---------- breadcrumbs ----------
@@ -11247,7 +11360,7 @@ function tutorialSteps(part) {
       screen: 'price',
       setup: () => { showPriceTable(); return true; },
       target: () => document.getElementById('price-more-btn'),
-      text: 'The ⋯ menu holds the rest: sort by most recently priced, Layout to reorder rows and columns, Filter, export to a spreadsheet, import prices back in, and share the table with an employee.',
+      text: 'The ⋯ menu holds the rest: sort by most recently priced, Layout to reorder rows and columns, Filter, export to a spreadsheet (latest prices, or the full price history), import prices from a file or a pasted table (repeats are skipped), and share the table with an employee.',
     },
     {
       screen: 'price',

@@ -469,6 +469,21 @@
     </div>
   </div>
 
+  <!-- PRICE TABLE CSV EXPORT MODAL -->
+  <div id="price-export-modal" class="modal-overlay" hidden>
+    <div class="modal-panel">
+      <div class="modal-header">
+        <h2 class="modal-title">Export prices</h2>
+        <button id="price-export-close" class="icon-btn" aria-label="Close">✕</button>
+      </div>
+      <p class="modal-hint"><strong>Latest prices:</strong> one row per item, one column per vendor, newest price in each cell. <strong>Full history:</strong> every price ever entered, one per row, with its date — Import reads it straight back in.</p>
+      <div class="setting-btn-col">
+        <button id="price-export-latest" class="secondary setting-wide-btn" type="button">Latest prices</button>
+        <button id="price-export-history" class="primary setting-wide-btn" type="button">Full history</button>
+      </div>
+    </div>
+  </div>
+
   <!-- PRICE TABLE CSV IMPORT MODAL -->
   <div id="price-import-modal" class="modal-overlay" hidden>
     <div class="modal-panel">
@@ -476,7 +491,11 @@
         <h2 class="modal-title">Import prices</h2>
         <button id="price-import-close" class="icon-btn" aria-label="Close">✕</button>
       </div>
-      <p class="modal-hint">Paste a table: first row = vendor names, first column = item names. A cell can be just a price, or <code>price|availability|date</code> (availability: yes / no / soon / later).</p>
+      <p class="modal-hint">Choose a file or paste a table, in either layout. <strong>Grid:</strong> first row = vendor names, first column = item names; a cell can be just a price, or <code>price|availability|date</code>. <strong>List:</strong> header <code>Item,Vendor,Price,Date</code> (optional 5th column Availability: yes / no / soon / later), one price per row. Entries already in the table are skipped.</p>
+      <input id="price-import-file" type="file" accept=".csv,.tsv,.txt,text/csv,text/plain" hidden />
+      <div class="setting-btn-col">
+        <button id="price-import-file-btn" class="secondary setting-wide-btn" type="button">Choose file…</button>
+      </div>
       <textarea id="price-import-text" class="csv-textarea" rows="7" placeholder="Item,Home Depot,Rona&#10;2x4 studs,4.25,4.60|soon|2026-07-20&#10;Deck screws,18.99,|no|2026-07-22"></textarea>
       <p id="price-import-preview" class="muted setting-hint"></p>
       <div class="setting-btn-col">
