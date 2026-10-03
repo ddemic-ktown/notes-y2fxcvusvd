@@ -103,12 +103,10 @@
   <!-- LIST VIEW -->
   <section id="list-view" class="screen">
     <header class="app-header home-header">
-      <!-- Nav bar — first line of every header (v2026.10.01-1756). Filled by
-           renderHomeNav per role. -->
-      <nav id="home-nav" class="home-nav" aria-label="Go to" hidden></nav>
-      <div class="home-header-top">
-        <h1>JobPilot</h1>
-        <span id="app-version" class="app-version"></span>
+      <!-- One top line (v2026.10.02-1913): nav bar, then Done / ⋯ / ⚙. The JobPilot title
+           went; the version number lives in Settings › Help. -->
+      <div class="home-header-top nav-line">
+        <nav id="home-nav" class="home-nav" aria-label="Go to" hidden></nav>
         <!-- Refresh and Layout live in ⋯ (v2026.10.01-1904). Done shows only while
              arranging, so you are never left in Layout mode with no way out. -->
         <button id="layout-done-btn" class="icon-btn date-btn" type="button" hidden>Done</button>
@@ -387,10 +385,13 @@
         <input id="job-address" class="signin-input" type="text" placeholder="Optional" />
         <div id="job-address-choices" class="job-address-choices" hidden></div>
       </div>
-      <div class="setting-btn-col">
-        <button id="job-save" class="primary setting-wide-btn" type="button">Save</button>
+      <!-- Save / Cancel stick to the bottom of the sheet (v2026.10.02-1913). -->
+      <div class="job-action-bar">
+        <button id="job-save" class="primary" type="button">Save</button>
         <!-- Same as the ✕ — closes without saving. (v2026.09.30-2059) -->
-        <button id="job-cancel" class="secondary setting-wide-btn" type="button">Cancel</button>
+        <button id="job-cancel" class="secondary" type="button">Cancel</button>
+      </div>
+      <div class="setting-btn-col">
         <button id="job-duplicate" class="secondary setting-wide-btn" type="button" hidden>Duplicate to next day</button>
         <button id="job-delete" class="secondary setting-wide-btn danger-item" type="button" hidden>Delete job</button>
       </div>
@@ -605,6 +606,10 @@
         <nav class="crumbs" id="crumbs-settings" aria-label="Breadcrumb"></nav>
     </header>
     <main class="settings-main">
+      <!-- Search (v2026.10.02-1913): shows only matching sections, opened. -->
+      <div class="search-wrap settings-search-wrap">
+        <input id="settings-search" class="search-input" type="search" placeholder="Search settings…" autocomplete="off" />
+      </div>
       <!-- Every section collapses; all start closed. (v2026.09.30-2105) -->
       <div class="setting-btn-row settings-fold-all">
         <button id="settings-expand-all" class="secondary" type="button">Expand all</button>
@@ -828,6 +833,7 @@
 
       <div class="setting-row setting-list-row">
         <h3 class="setting-list-title">Help</h3>
+        <p class="muted setting-hint">JobPilot <span id="app-version" class="app-version"></span></p>
         <div class="setting-btn-col">
           <button id="tutorial-btn-1" class="secondary" data-tutorial-part="1">Tutorial 1 — The basics</button>
           <button id="tutorial-btn-2" class="secondary" data-tutorial-part="2">Tutorial 2 — Home screen &amp; search</button>

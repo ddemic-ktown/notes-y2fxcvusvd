@@ -20,6 +20,10 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 100, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.10.02-1936', 'A customer’s screen has a 📍 Navigate button for each address, opening Apple Maps on iPhone and Google Maps elsewhere'],
+  ['v2026.10.02-1913', 'One top line on most screens (nav bar plus that screen’s buttons), Save and Cancel always visible at the bottom of the job editor, and a search box in Settings'],
+  ['v2026.10.02-1840', 'Customers, Calendar and Price Table can each be switched off in Settings › Features'],
+  ['v2026.10.02-1817', 'A small dot marks hours that have been changed, on the Hours sheet and in the job editor — long-press for the history'],
   ['v2026.10.01-2326', 'Hours history: every change to someone’s hours on a job is kept with when and by whom — long-press the hours on the Hours sheet or in the job editor to see it'],
   ['v2026.10.01-2321', 'The .iif file is named after the date range and the time you exported, in local time'],
   ['v2026.10.01-2313', 'Hours › Who is a checklist with Everyone and Nobody at the top; jobs with nobody on them no longer appear on the hours sheet'],
@@ -666,6 +670,15 @@ const FEATURE_TOGGLES = [
     hint: 'The keyword sections on the home screen and the Aggregator Keywords list in Settings.' },
   { key: 'hours', label: 'Hours & QuickBooks export',
     hint: 'The hours chart and the QuickBooks .iif export, including the service item names in Settings. Employees and customer accounts stay — the calendar needs them.' },
+  // Screens (v2026.10.02-1840). Off = no nav button and the screen won't open; nothing
+  // is deleted. Customers off keeps customer NOTES on Home and in search, and
+  // the job editor's customer picker — the calendar needs customers.
+  { key: 'customers', label: 'Customers',
+    hint: 'The Customers button and the customer list. Customer notes still show on Home and in search, and jobs can still pick a customer.' },
+  { key: 'calendar', label: 'Calendar',
+    hint: 'The Calendar button, the calendar and its tutorials. Hours keeps working from Settings.' },
+  { key: 'price', label: 'Price Table',
+    hint: 'The Price Table button, the table and its tutorial.' },
   // 'hoursCard' (Hours button on the home screen) removed v2026.10.01-1646: Home no
   // longer has an Hours button — it lives in Settings › QuickBooks only.
 ];
@@ -732,6 +745,12 @@ function applyFeatureVisibility() {
     tlTitle.textContent = hoursOn ? 'Time Logger — QuickBooks' : 'Employees & customer accounts';
     if (caret) tlTitle.append(' ', caret);
   }
+  // Screen switches (v2026.10.02-1840)
+  const show = (id, on) => { const el = document.getElementById(id); if (el) el.hidden = !on; };
+  show('tutorial-btn-4', isFeatureOn('price'));
+  show('tutorial-btn-6', isFeatureOn('calendar'));
+  show('tutorial-btn-7', isFeatureOn('calendar'));
+  show('customer-cal-btn', isFeatureOn('calendar'));
 }
 // The home shortcut needs BOTH: hiding the feature outright must not leave a
 // card pointing at a screen that now sends you straight back home.
@@ -1366,6 +1385,7 @@ function monthGridDays(cursor) {
 }
 
 function showCalendar() {
+  if (!isFeatureOn('calendar')) { goHome(); return; }   // switched off in Features (v2026.10.02-1840)
   hideAllScreens();
   calendarView.classList.add('active');
   renderCalendar();
@@ -1909,6 +1929,7 @@ function renderCalendar() {
 }
 
 function showCalendarDay(dateStr) {
+  if (!isFeatureOn('calendar')) { goHome(); return; }   // switched off in Features (v2026.10.02-1840)
   Storage.ensureJobMonth(dateStr);
   calSelectedDate = dateStr;
   hideAllScreens();
@@ -2645,6 +2666,7 @@ function renderJobEmployees(crew) {
             <input type="number" class="job-emp-hours" data-crew-hours="${i}"
                    min="0" step="0.25" inputmode="decimal" placeholder="hrs"
                    value="${c.hours != null ? c.hours : ''}" aria-label="Hours for ${escapeHtml(c.name || 'this line')}" />
+            ${hoursWereChanged(jobEditingId, i, c.name) ? '<span class="hours-dot hours-dot-inline" title="Changed — long-press the hours for history"></span>' : ''}
             <label class="job-crew-bill" title="Billable to the customer">
               <input type="checkbox" data-crew-bill="${i}" ${c.billable ? 'checked' : ''} />
               <span>Billable</span>
@@ -3117,6 +3139,7 @@ let priceZoom = parseFloat(localStorage.getItem('na-price-zoom') || '1') || 1;
 let openCellKey = null; // "itemId|vendorId" currently in edit mode
 
 function showPriceTable() {
+  if (!isFeatureOn('price')) { goHome(); return; }   // switched off in Features (v2026.10.02-1840)
   hideAllScreens();
   priceView.classList.add('active');
   renderCrumbs('crumbs-price', [{ label: 'Home', go: 'home' }, { label: 'Price Table' }]);
@@ -3877,6 +3900,15 @@ function openHoursHistory(jobId, crewIndex, crewName) {
   try { window.getSelection()?.removeAllRanges(); } catch {}
   priceHistoryModal.hidden = false;
   priceHistoryOpenedAt = Date.now();
+}
+// Dot rule (v2026.10.02-1817): the line's hours were CHANGED — two or more log entries.
+// Entered once and left alone is not worth a dot.
+function hoursWereChanged(jobId, crewIndex, name) {
+  const job = jobId ? Storage.getJob(jobId) : null;
+  if (!job || !Array.isArray(job.crew)) return false;
+  let line = job.crew[crewIndex];
+  if (!line || (name && line.name !== name)) line = job.crew.find(c => c.name === name);
+  return !!(line && Array.isArray(line.hoursLog) && line.hoursLog.length >= 2);
 }
 // Long-press helper: 500ms, cancelled by 8px of movement. Returns a function
 // that says whether a click right now is the long-press's own release.
@@ -5177,6 +5209,36 @@ function setChangelogFold(open) {
   const t = document.getElementById('changelog-toggle');
   if (t && (t.getAttribute('aria-expanded') === 'true') !== open) t.click();
 }
+// Settings search (v2026.10.02-1913). Matching sections show, opened; the rest hide.
+// The fold state from before the search is put back when it is cleared.
+let settingsFoldBeforeSearch = null;
+function applySettingsSearch(term) {
+  const q = String(term || '').trim().toLowerCase();
+  const rows = [...document.querySelectorAll('.settings-main > .setting-list-row')];
+  if (!q) {
+    rows.forEach(r => r.classList.remove('settings-search-miss'));
+    if (settingsFoldBeforeSearch) {
+      settingsFoldRows.forEach(r => setSettingFold(r, settingsFoldBeforeSearch.has(r)));
+      settingsFoldBeforeSearch = null;
+    }
+    return;
+  }
+  if (!settingsFoldBeforeSearch) {
+    settingsFoldBeforeSearch = new Set(settingsFoldRows.filter(r => !r.classList.contains('setting-collapsed')));
+  }
+  rows.forEach(r => {
+    const hit = r.textContent.toLowerCase().includes(q)
+      || [...r.querySelectorAll('input, select, button')].some(el =>
+        String(el.placeholder || el.value || el.getAttribute('aria-label') || '').toLowerCase().includes(q));
+    r.classList.toggle('settings-search-miss', !hit);
+    if (hit && settingsFoldRows.includes(r)) setSettingFold(r, true);
+    if (hit && r.querySelector('#changelog-toggle')) setChangelogFold(true);
+  });
+}
+(() => {
+  const inp = document.getElementById('settings-search');
+  if (inp) inp.addEventListener('input', () => applySettingsSearch(inp.value));
+})();
 function setAllSettingFolds(open) {
   settingsFoldRows.forEach(r => setSettingFold(r, open));
   setChangelogFold(open);
@@ -5207,6 +5269,8 @@ function openSettingFoldFor(el) {
 
 function showSettings() {
   hideAllScreens();
+  const sInp = document.getElementById('settings-search');   // v2026.10.02-1913
+  if (sInp && sInp.value) { sInp.value = ''; applySettingsSearch(''); }
   setAllSettingFolds(false);
   renderCrumbs('crumbs-settings', [{ label: 'Home', go: 'home' }, { label: 'Settings' }]);
   window.scrollTo(0, 0);
@@ -5255,6 +5319,7 @@ function showNotes() {
 const isDesktop = window.matchMedia('(hover: hover) and (pointer: fine)').matches;
 
 function showCustomers() {
+  if (!isFeatureOn('customers')) { goHome(); return; }   // switched off in Features (v2026.10.02-1840)
   returnScreen = 'customers';
   activeCustomerId = null;
   hideAllScreens();
@@ -5267,6 +5332,7 @@ function showCustomers() {
 }
 
 function showCustomerNotes(customerId, returnTo) {
+  if (!isFeatureOn('customers')) { goHome(); return; }   // switched off in Features (v2026.10.02-1840)
   customerNotesSearchTerm = '';
   if (customerNotesSearchInput) customerNotesSearchInput.value = '';
   const customer = Storage.getCustomer(customerId);
@@ -5635,11 +5701,14 @@ function renderHomeNav() {
   if (!nav) return;
   const ready = Storage.isReady();
   const items = [];
-  if (ready && canViewAllRole()) items.push(['customers', 'Customers']);
-  if (ready) items.push(['calendar', 'Calendar']);
-  if (ready && !isCustomerRole() && Storage.canViewPriceTable()) items.push(['price', 'Price Table']);
+  if (ready && canViewAllRole() && isFeatureOn('customers')) items.push(['customers', 'Customers']);
+  if (ready && isFeatureOn('calendar')) items.push(['calendar', 'Calendar']);
+  if (ready && !isCustomerRole() && Storage.canViewPriceTable() && isFeatureOn('price')) items.push(['price', 'Price Table']);
+  // Short labels for a crowded line (v2026.10.02-1913) — fitNavLabels swaps
+  // them in only where the long ones would be cut off.
+  const SHORT = { customers: 'Cust.', calendar: 'Cal.', price: 'Prices' };
   const html = items.map(([k, label]) =>
-    `<button type="button" class="home-nav-btn" data-nav="${k}">${label}</button>`).join('');
+    `<button type="button" class="home-nav-btn" data-nav="${k}" title="${label}"><span class="nav-long">${label}</span><span class="nav-short">${SHORT[k] || label}</span></button>`).join('');
   // Same row on every screen (v2026.10.01-1710).
   [nav, ...getScreenNavs()].forEach(n => { n.innerHTML = html; n.hidden = !items.length; });
   markActiveNav();
@@ -5662,6 +5731,27 @@ function getScreenNavs() {
     // The very first line of the header (v2026.10.01-1756): nav, then the breadcrumb row,
     // then search.
     header.prepend(n);
+    // ONE LINE (v2026.10.02-1913) on screens whose breadcrumb only said "Home › <this
+    // screen>" — the highlighted nav button says that already. Back, the nav,
+    // then the rest of the top row's buttons; the crumbs are hidden, not
+    // removed, since code still renders into them. Customer and section
+    // screens and the editor keep their crumbs: those name something.
+    const MERGE = ['customers-view', 'calendar-view', 'calendar-day-view', 'price-view', 'hours-view', 'settings-view'];
+    if (MERGE.includes(id)) {
+      const top = header.querySelector(':scope > .customers-header-top') || header;
+      const line = document.createElement('div');
+      line.className = 'nav-line';
+      const back = top.querySelector(':scope > .app-back-btn');
+      if (back) line.appendChild(back);
+      line.appendChild(n);
+      [...top.children].forEach(ch => {
+        if (ch === line) return;
+        if (ch.classList.contains('crumbs')) { ch.hidden = true; return; }
+        line.appendChild(ch);
+      });
+      header.prepend(line);
+      if (top !== header && ![...top.children].some(ch => !ch.hidden)) top.hidden = true;
+    }
     n.addEventListener('click', (e) => {
       const b = e.target.closest('[data-nav]');
       if (!b || b.classList.contains('active')) return;
@@ -5673,7 +5763,17 @@ function getScreenNavs() {
   }).filter(Boolean);
   return getScreenNavs.cache;
 }
+function fitNavLabels() {
+  document.querySelectorAll('.home-nav').forEach(nav => {
+    if (nav.hidden || !nav.offsetParent) return;
+    nav.classList.remove('nav-compact');
+    const cut = [...nav.querySelectorAll('.home-nav-btn')].some(b => b.scrollWidth > b.clientWidth + 1);
+    nav.classList.toggle('nav-compact', cut);
+  });
+}
+window.addEventListener('resize', () => requestAnimationFrame(fitNavLabels));
 function markActiveNav() {
+  requestAnimationFrame(fitNavLabels);
   const active = {
     'customers-view': 'customers', 'customer-notes-view': 'customers',
     'calendar-view': 'calendar', 'calendar-day-view': 'calendar', 'price-view': 'price',
@@ -8276,8 +8376,19 @@ function renderContactStrip(customerId) {
   if (!contactStripEl) return;
   const def = customerId ? Storage.getDefaultNoteForCustomer(customerId) : null;
   const { phones, emails } = extractContacts(def ? def.body : '');
-  if (!phones.length && !emails.length) { contactStripEl.hidden = true; contactStripEl.innerHTML = ''; return; }
+  // Navigate (v2026.10.02-1936): one button per address line the job editor would offer.
+  const addrs = customerId ? addressCandidates(customerId) : [];
+  if (!phones.length && !emails.length && !addrs.length) { contactStripEl.hidden = true; contactStripEl.innerHTML = ''; return; }
   const parts = [];
+  const ios = /iP(hone|ad|od)/.test(navigator.userAgent)
+    || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  addrs.forEach(a => {
+    const q = encodeURIComponent(a);
+    const href = ios ? `https://maps.apple.com/?daddr=${q}` : `https://www.google.com/maps/dir/?api=1&destination=${q}`;
+    const street = a.split(',')[0].trim();
+    const label = addrs.length > 1 ? `📍 ${street.length > 22 ? street.slice(0, 21) + '…' : street}` : '📍 Navigate';
+    parts.push(`<a class="contact-btn" href="${escapeHtml(href)}" target="_blank" rel="noopener" title="${escapeHtml(a)}">${escapeHtml(label)}</a>`);
+  });
   phones.forEach(p => {
     const tel = p.replace(/[^\d+]/g, '');
     parts.push(`<a class="contact-btn" href="tel:${escapeHtml(tel)}">📞 Call</a>`);
@@ -10112,7 +10223,9 @@ function iifCellHtml(row, col) {
         <button type="button" class="iif-edit-done" aria-label="Save hours and close">✓</button>
       </div></td>`;
   }
-  return `<td class="price-cell iif-hours-col" ${cellAttrs}>${escapeHtml(v.hoursText || '—')}</td>`;
+  const dot = hoursWereChanged(row.e && row.e.jobId, row.e && row.e.crewIndex, (row.e && row.e.employeeName) || row.emp)
+    ? '<span class="hours-dot" title="Changed — long-press for history"></span>' : '';
+  return `<td class="price-cell iif-hours-col" ${cellAttrs}>${escapeHtml(v.hoursText || '—')}${dot}</td>`;
 }
 
 function renderIIFEntries(entries) {
@@ -11259,7 +11372,7 @@ function tutorialSteps(part) {
         // being skipped for a non-admin.
         screen: 'calendar',
         setup: goMonth,
-        target: () => document.getElementById('crumbs-calendar'),
+        target: () => document.querySelector('#calendar-view .screen-nav [data-nav="calendar"]'),
         text: 'You’re on the Calendar. To get here yourself, tap Calendar on the Home screen.',
       },
       {
@@ -11419,7 +11532,7 @@ function tutorialSteps(part) {
     const step = (target, text) => ({ screen: 'settings', setup: goSettings, target, text });
     return [
       step(() => document.querySelector('.settings-fold-all'),
-        'This is Settings — the ⚙ at the top of the Home screen. Every section starts closed. Tap a heading to open it, or open and close the lot with these two buttons.'),
+        'This is Settings — the ⚙ at the top of the Home screen. Type in the search box to find a setting, or browse: every section starts closed. Tap a heading to open it, or open and close the lot with these two buttons.'),
       step(() => document.getElementById('members-list'),
         'Everyone with access to this company, and what each can do. Admin does everything. Bookkeeper sees everything but changes nothing. Employee sees only the notes and jobs given to them. Customer sees only their own. You can change your own role too, as long as somebody else is an admin — the last admin is locked so the company can never be left without one.'),
       step(() => document.getElementById('invite-email'),

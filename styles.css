@@ -904,6 +904,10 @@ select.iif-date-input { appearance: none; -webkit-appearance: none; padding-righ
    is the only way back to it once a name is chosen. */
 .job-crew-name { flex: 0 1 auto; min-width: 0; border: 0; cursor: pointer; font: inherit; }
 .job-crew-pick { flex: 1 1 140px; min-width: 0; }
+.iif-hours-col { position: relative; }
+/* Hours changed at least once (v2026.10.02-1817) */
+.hours-dot { position: absolute; top: 3px; right: 3px; width: 7px; height: 7px; border-radius: 50%; background: #f59e0b; pointer-events: none; }
+.hours-dot-inline { position: static; display: inline-block; margin-left: -4px; flex: 0 0 auto; }
 .job-crew-line .job-emp-hours { width: 74px; flex: 0 0 auto; -webkit-touch-callout: none; }   /* long-press = history (v2026.10.01-2326) */
 .job-crew-bill { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--ink-soft); cursor: pointer; }
 .job-crew-del { background: none; border: none; color: var(--danger); cursor: pointer; font-size: 15px; padding: 4px 6px; margin-left: auto; }
@@ -1592,6 +1596,25 @@ body.vv-zoomed .sync-toast { display: none !important; }
 .home-header-top { display: flex; align-items: center; gap: 8px; }
 .home-header-top h1 { flex: 1; }
 .home-search-input { width: 100%; box-sizing: border-box; }
+/* One top line: Back, nav bar, the screen's own buttons (v2026.10.02-1913) */
+.nav-line { display: flex; align-items: center; gap: 6px; width: 100%; min-width: 0; flex-basis: 100%; }
+.nav-line > .home-nav { flex: 1 1 auto; min-width: 0; }
+.nav-line > *:not(.home-nav) { flex-shrink: 0; }
+.nav-line .home-nav-btn { font-size: 12px; padding: 4px 4px; }
+.home-nav-btn .nav-short { display: none; }
+.home-nav.nav-compact .nav-long { display: none; }
+.home-nav.nav-compact .nav-short { display: inline; }
+@media (min-width: 600px) { .nav-line .home-nav-btn { font-size: 13px; padding: 4px 8px; } }
+/* Settings search (v2026.10.02-1913) */
+.settings-search-wrap { margin-bottom: 8px; }
+.settings-main > .setting-list-row.settings-search-miss { display: none; }
+/* Job editor: Save / Cancel stuck to the bottom of the sheet (v2026.10.02-1913) */
+.job-action-bar {
+  position: sticky; bottom: -20px; z-index: 5;
+  display: flex; gap: 8px; margin: 10px -16px -20px; padding: 10px 16px calc(10px + env(safe-area-inset-bottom, 0));
+  background: var(--surface); border-top: 1px solid var(--line);
+}
+.job-action-bar > button { flex: 1 1 0; }
 /* Home toolbar (v2026.10.01-1646) */
 .home-nav { display: flex; gap: 6px; }
 .home-nav[hidden] { display: none; }
