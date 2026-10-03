@@ -1602,6 +1602,7 @@ body.vv-zoomed .sync-toast { display: none !important; }
 .nav-line > *:not(.home-nav) { flex-shrink: 0; }
 .nav-line .home-nav-btn { font-size: 12px; padding: 4px 4px; }
 .home-nav-btn .nav-short { display: none; }
+.nav-house { vertical-align: -3px; }
 .home-nav.nav-compact .nav-long { display: none; }
 .home-nav.nav-compact .nav-short { display: inline; }
 @media (min-width: 600px) { .nav-line .home-nav-btn { font-size: 13px; padding: 4px 8px; } }

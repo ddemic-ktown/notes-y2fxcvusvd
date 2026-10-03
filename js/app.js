@@ -20,6 +20,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 100, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.10.02-2126', 'A Home button starts the nav bar on every screen, and the calendar’s Today and Week/Month moved into its ⋯ menu'],
   ['v2026.10.02-1936', 'A customer’s screen has a 📍 Navigate button for each address, opening Apple Maps on iPhone and Google Maps elsewhere'],
   ['v2026.10.02-1913', 'One top line on most screens (nav bar plus that screen’s buttons), Save and Cancel always visible at the bottom of the job editor, and a search box in Settings'],
   ['v2026.10.02-1840', 'Customers, Calendar and Price Table can each be switched off in Settings › Features'],
@@ -1911,7 +1912,7 @@ function renderCalendar() {
   if (modeBtn) {
     // Labelled with where it GOES, not where you are — a button that says
     // "Month" while showing a month reads as a state nobody can act on.
-    modeBtn.textContent = calMode === 'week' ? 'Month' : 'Week';
+    modeBtn.textContent = calMode === 'week' ? 'Month view' : 'Week view';   // ⋯ menu item (v2026.10.02-2126)
     modeBtn.setAttribute('aria-label', calMode === 'week' ? 'Switch to month view' : 'Switch to week view');
   }
   calGrid.querySelectorAll('.cal-cue').forEach(btn => {
@@ -5701,14 +5702,17 @@ function renderHomeNav() {
   if (!nav) return;
   const ready = Storage.isReady();
   const items = [];
+  // Home first (v2026.10.02-2126) — on desktop there was no other way back once the
+  // breadcrumbs went.
+  if (ready) items.push(['home', 'Home']);
   if (ready && canViewAllRole() && isFeatureOn('customers')) items.push(['customers', 'Customers']);
   if (ready && isFeatureOn('calendar')) items.push(['calendar', 'Calendar']);
   if (ready && !isCustomerRole() && Storage.canViewPriceTable() && isFeatureOn('price')) items.push(['price', 'Price Table']);
   // Short labels for a crowded line (v2026.10.02-1913) — fitNavLabels swaps
   // them in only where the long ones would be cut off.
-  const SHORT = { customers: 'Cust.', calendar: 'Cal.', price: 'Prices' };
+  const SHORT = { home: '<svg class="nav-house" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M3 11.5 12 4l9 7.5M6 10v9h12v-9" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>', customers: 'Cust.', calendar: 'Cal.', price: 'Prices' };
   const html = items.map(([k, label]) =>
-    `<button type="button" class="home-nav-btn" data-nav="${k}" title="${label}"><span class="nav-long">${label}</span><span class="nav-short">${SHORT[k] || label}</span></button>`).join('');
+    `<button type="button" class="home-nav-btn" data-nav="${k}" title="${label}" aria-label="${label}"><span class="nav-long">${label}</span><span class="nav-short">${SHORT[k] || label}</span></button>`).join('');
   // Same row on every screen (v2026.10.01-1710).
   [nav, ...getScreenNavs()].forEach(n => { n.innerHTML = html; n.hidden = !items.length; });
   markActiveNav();
@@ -5755,6 +5759,7 @@ function getScreenNavs() {
     n.addEventListener('click', (e) => {
       const b = e.target.closest('[data-nav]');
       if (!b || b.classList.contains('active')) return;
+      if (b.dataset.nav === 'home') { if (editorView.classList.contains('active')) commitAndCleanupEditor(); goHome(); return; }
       if (b.dataset.nav === 'customers') setTimeout(showCustomers, 0);
       else if (b.dataset.nav === 'calendar') showCalendar();
       else if (b.dataset.nav === 'price') showPriceTable();
@@ -5775,7 +5780,7 @@ window.addEventListener('resize', () => requestAnimationFrame(fitNavLabels));
 function markActiveNav() {
   requestAnimationFrame(fitNavLabels);
   const active = {
-    'customers-view': 'customers', 'customer-notes-view': 'customers',
+    'list-view': 'home', 'customers-view': 'customers', 'customer-notes-view': 'customers',
     'calendar-view': 'calendar', 'calendar-day-view': 'calendar', 'price-view': 'price',
   };
   const cur = document.querySelector('.screen.active');
@@ -5793,6 +5798,7 @@ document.querySelectorAll('.screen').forEach(sec => {
   if (nav) nav.addEventListener('click', (e) => {
     const b = e.target.closest('[data-nav]');
     if (!b) return;
+    if (b.dataset.nav === 'home') return;   // already Home
     if (b.dataset.nav === 'customers') setTimeout(showCustomers, 0);
     else if (b.dataset.nav === 'calendar') showCalendar();
     else if (b.dataset.nav === 'price') showPriceTable();
@@ -11300,13 +11306,13 @@ function tutorialSteps(part) {
       {
         screen: 'calendar',
         setup: goMonth,
-        target: () => document.getElementById('cal-today'),
-        text: 'Jump to today brings you back from wherever you’ve wandered — to this month, or to this week if you’re in week view.',
+        target: () => document.getElementById('cal-more-btn'),
+        text: 'This ⋯ menu has Jump to today, which brings you back from wherever you’ve wandered — to this month, or to this week if you’re in week view.',
       },
       {
         screen: 'calendar',
-        target: () => document.getElementById('cal-mode'),
-        text: 'Switch between a month and a single week. The button says where it GOES, not where you are. The week shows each day divided into hours, from the earliest start that week to the latest finish, with every job drawn as a block at its time.',
+        target: () => document.getElementById('cal-more-btn'),
+        text: 'Week view and Month view are in the same ⋯ menu — the item says where it GOES, not where you are. The week shows each day divided into hours, from the earliest start that week to the latest finish, with every job drawn as a block at its time.',
       },
       {
         // Admin/bookkeeper only — isTargetVisible skips it for anyone else,
