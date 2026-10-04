@@ -103,7 +103,9 @@ service cloud.firestore {
 
       // Members subcollection
       match /members/{memberId} {
-        allow read: if isMember() || request.auth.uid == memberId;
+        // Privacy pass (v2026.10.03-2042): the member list carries every account's email,
+        // so only admins and bookkeepers read it whole; anyone else, their own.
+        allow read: if isAdmin() || isBookkeeper() || request.auth.uid == memberId;
         // Admins manage members freely
         allow write: if isAdmin();
         // A user may create ONLY their own member doc, ONLY with a pending invite
@@ -139,7 +141,11 @@ service cloud.firestore {
 
       // Settings — members can read, only admins can write
       match /settings/{doc} {
-        allow read: if isMember();
+        // settings/private (v2026.10.03-2042): customer & employee account links, payroll
+        // and classification, QuickBooks items, customer hours access —
+        // admin and bookkeeper only. Everything else (preferences) is readable
+        // by any member, so nothing sensitive may live there.
+        allow read: if isMember() && (doc != 'private' || isAdmin() || isBookkeeper());
         allow write: if isAdmin();
       }
 
@@ -157,10 +163,23 @@ service cloud.firestore {
         allow read: if isEmployee() &&
           ('employeeUids' in resource.data) &&
           request.auth.uid in resource.data.employeeUids;
+        // Customers no longer read jobs (v2026.10.03-2042) — they read custJobs below.
+        allow create, update, delete: if isAdmin();
+      }
+
+      // Customer-safe copy of a job (v2026.10.03-2042): dates, address, who's coming and,
+      // only when allowed, billable hours. Written by the admin's app.
+      match /custJobs/{jobId} {
+        allow read: if isAdmin() || isBookkeeper();
         allow read: if isCustomer() &&
           ('customerUids' in resource.data) &&
           request.auth.uid in resource.data.customerUids;
-        allow create, update, delete: if isAdmin();
+        allow write: if isAdmin();
+      }
+      // One customer account's own flags: can see hours, job started.
+      match /custAccess/{uid} {
+        allow read: if isAdmin() || isBookkeeper() || request.auth.uid == uid;
+        allow write: if isAdmin();
       }
 
       // ---- Time logs (hours actually worked) ----
@@ -194,7 +213,8 @@ service cloud.firestore {
           request.auth.uid in priceSharedWith();
       }
       match /priceMeta/{doc} {
-        allow read: if isAdmin() || isBookkeeper() || isEmployee();
+        // Unshared employees no longer read the supplier names / share list (v2026.10.03-2042)
+        allow read: if isAdmin() || isBookkeeper() || isPriceSharedEmployee();
         // Only an admin may change who the table is shared with
         allow write: if isAdmin();
       }

@@ -3,7 +3,7 @@
 import { db } from "./firebase-init.js";
 import {
   collection, doc, onSnapshot, setDoc, deleteDoc, getDocs,
-  writeBatch, getDoc, query, where, disableNetwork, enableNetwork,
+  writeBatch, getDoc, query, where, disableNetwork, enableNetwork, deleteField,
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
 
 const DEFAULT_SETTINGS = {
@@ -16,7 +16,7 @@ const DEFAULT_SETTINGS = {
 
 const _cache = {
   notes: [], customers: [], settings: { ...DEFAULT_SETTINGS },
-  members: [], invites: [],
+  members: [], invites: [], custAccess: {},
   // Price table: one small config doc (vendor columns + share list) and one
   // doc per ITEM (row). Split by row so a price edit rewrites only that row,
   // two people on different rows can't clobber each other, and the 1 MiB
@@ -76,6 +76,162 @@ function priceConfigDoc(){ return doc(db, `orgs/${_orgId}/priceMeta/config`); }
 function priceItemsCol() { return collection(db, `orgs/${_orgId}/priceItems`); }
 function jobsCol()       { return collection(db, `orgs/${_orgId}/jobs`); }
 function timelogsCol()   { return collection(db, `orgs/${_orgId}/timelogs`); }
+// ---- Privacy pass (v2026.10.03-2042) ----
+// settings/private: admin + bookkeeper only. settings/preferences stays
+// readable by every member, so nothing a customer or employee shouldn't see
+// may live there. custJobs/{jobId}: the customer-safe copy of a job — dates,
+// address, who's coming, and billable hours only when that customer may see
+// hours. custAccess/{uid}: one customer's own flags (can see hours, job started).
+function privateSettingsDoc() { return doc(db, `orgs/${_orgId}/settings/private`); }
+function custJobsCol()   { return collection(db, `orgs/${_orgId}/custJobs`); }
+function custAccessDoc(u){ return doc(db, `orgs/${_orgId}/custAccess/${u}`); }
+const PRIVATE_SETTING_KEYS = ['customerLinks', 'employeeLinks', 'iifItemApprentice', 'iifItemJourneyman', 'customerHours', 'custJobsBuilt'];
+let _custBackfill = false;
+let _privLoaded = false;
+// First run on this company: build the customer-safe copies and access docs
+// once, after the private doc has loaded and any migration has finished.
+function maybeBackfillCustJobs() {
+  if (_role !== 'admin' || !_privLoaded || _privSettings.custJobsBuilt || _custBackfill || _settingsMigrating) return;
+  if (PRIVATE_SETTING_KEYS.some(k => k !== 'custJobsBuilt' && k in _pubSettings)) return;
+  _custBackfill = true;
+  Storage.resyncCustJobs()
+    .then(async (r) => {
+      if (r.failed) return;                       // try again next sign-in
+      await Storage.syncCustAccess();
+      await setDoc(privateSettingsDoc(), { custJobsBuilt: nowIso() }, { merge: true });
+    })
+    .catch(err => console.warn('custJobs backfill', err))
+    .finally(() => { _custBackfill = false; });
+}
+function isStaffRole() { return _role === 'admin' || _role === 'bookkeeper'; }
+let _pubSettings = {};
+let _privSettings = {};
+function recomputeSettings() {
+  _cache.settings = { ...DEFAULT_SETTINGS, ..._pubSettings, ..._privSettings };
+}
+// Public copy of the crew: name and colour only (chips on the calendar).
+// Type, payroll and overtime items stay in settings/private.
+function publicEmployees(list) {
+  return (Array.isArray(list) ? list : []).map(e => typeof e === 'string'
+    ? { name: e }
+    : { name: e.name, ...(e.colour ? { colour: e.colour } : {}) });
+}
+function splitSettings(all) {
+  const pub = {}, priv = {};
+  for (const [k, v] of Object.entries(all || {})) {
+    if (PRIVATE_SETTING_KEYS.includes(k)) priv[k] = v;
+    else if (k === 'employees') { priv.employees = v; pub.employees = publicEmployees(v); }
+    else pub[k] = v;
+  }
+  return { pub, priv };
+}
+// Every settings write goes through here so private keys never land in the
+// public doc. Admin only (rules).
+function persistSettings(label) {
+  const { pub, priv } = splitSettings(_cache.settings);
+  const a = tracked(setDoc(settingsDoc(), pub, { merge: true })).catch(err => console.warn(label + '.pub', err));
+  const b = tracked(setDoc(privateSettingsDoc(), priv, { merge: true })).catch(err => console.warn(label + '.priv', err));
+  return Promise.all([a, b]);
+}
+// One-time move of private keys out of the public doc. The private copy is
+// written and CONFIRMED before anything is stripped, so a failure loses nothing.
+let _settingsMigrating = false;
+async function migratePrivateSettings() {
+  if (_role !== 'admin' || _settingsMigrating) return;
+  const leaked = PRIVATE_SETTING_KEYS.filter(k => k in _pubSettings);
+  const empLeak = Array.isArray(_pubSettings.employees) && _pubSettings.employees.some(e =>
+    e && typeof e === 'object' && ('type' in e || 'payrollItem' in e || 'otItem' in e));
+  if (!leaked.length && !empLeak) return;
+  _settingsMigrating = true;
+  try {
+    const priv = {};
+    leaked.forEach(k => { if (!(k in _privSettings)) priv[k] = _pubSettings[k]; });
+    if (empLeak && !Array.isArray(_privSettings.employees)) priv.employees = _pubSettings.employees;
+    if (Object.keys(priv).length) await setDoc(privateSettingsDoc(), priv, { merge: true });
+    const strip = {};
+    leaked.forEach(k => { strip[k] = deleteField(); });
+    if (empLeak) strip.employees = publicEmployees(_privSettings.employees || _pubSettings.employees);
+    await setDoc(settingsDoc(), strip, { merge: true });
+  } catch (err) {
+    console.warn('migratePrivateSettings', err);
+  } finally {
+    _settingsMigrating = false;
+  }
+}
+
+// ---- customer-safe job copies (v2026.10.03-2042) ----
+// A customer's account reads custJobs, never jobs. The copy carries what they
+// may see: date, times, address, who's coming, and — only when this customer
+// "Can see hours" — the hours on BILLABLE lines. No descriptions, crew notes,
+// billable flags or hours history.
+function custHoursFor(customerId) {
+  const m = (_cache.settings && _cache.settings.customerHours) || {};
+  return (customerId && m[customerId]) || {};
+}
+function custSafeCopy(job) {
+  if (!job || job.deletedAt || job.noWork) return null;
+  const uids = Array.isArray(job.customerUids) ? job.customerUids : [];
+  if (!uids.length) return null;
+  const canSee = !!custHoursFor(job.customerId).canSee;
+  const crewIn = Array.isArray(job.crew) && job.crew.length
+    ? job.crew
+    : (job.employeeNames || []).map(n => ({ name: n, hours: (job.employeeHours || {})[n], billable: true }));
+  const crew = crewIn.filter(c => c && c.name).map(c => {
+    const h = Number(c.hours);
+    return { name: c.name, hours: (canSee && c.billable !== false && Number.isFinite(h) && h > 0) ? h : null };
+  });
+  return {
+    date: job.date || '', start: job.start || '', end: job.end || '',
+    duration: job.duration || null,
+    address: job.address || '',
+    customerId: job.customerId || null,
+    customerName: job.customerName || '',
+    customerUids: uids,
+    employeeNames: [...new Set(crew.map(c => c.name))],
+    crew,
+    noWork: false,
+    updated: nowIso(),
+  };
+}
+// prev: the job as it was before this write (null for new). Only touches
+// custJobs when the job has, or had, a linked customer.
+function syncCustJob(id, next, prev) {
+  if (_role !== 'admin' || !id) return;
+  const copy = custSafeCopy(next);
+  const had = prev && Array.isArray(prev.customerUids) && prev.customerUids.length;
+  if (copy) tracked(setDoc(doc(custJobsCol(), id), copy)).catch(err => console.warn('custJob.set', err));
+  else if (had) tracked(deleteDoc(doc(custJobsCol(), id))).catch(err => console.warn('custJob.del', err));
+}
+// Price listeners on their own handles, so an employee the table is not
+// shared with can retry them alone (v2026.10.03-2042).
+let _priceUnsubs = [];
+let _priceRetry = null;
+function attachPriceListeners() {
+  _priceUnsubs.forEach(u => { try { u(); } catch (e) {} });
+  _priceUnsubs = [];
+  if (_priceRetry) { clearTimeout(_priceRetry); _priceRetry = null; }
+  if (!_role || _role === 'customer') return;
+  const retry = () => {
+    if (_role !== 'employee' || _priceRetry) return;
+    _priceRetry = setTimeout(() => { _priceRetry = null; if (_role === 'employee' && _orgId) attachPriceListeners(); }, 120000);
+  };
+  _priceUnsubs.push(onSnapshot(priceConfigDoc(), (snap) => {
+    _cache.priceConfig = snap.exists()
+      ? { vendors: [], sharedWith: [], ...snap.data() }
+      : { vendors: [], sharedWith: [] };
+    emit();
+  }, (err) => {
+    // Not shared with this employee: no read (v2026.10.03-2042). Empty config = no access.
+    console.warn('priceConfig listener', err);
+    _cache.priceConfig = { vendors: [], sharedWith: [] };
+    emit();
+    retry();
+  }));
+  _priceUnsubs.push(onSnapshot(priceItemsCol(), (snap) => {
+    _cache.priceItems = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    emit();
+  }, (err) => { console.warn('priceItems listener', err); retry(); }));
+}
 
 // ---------- listeners ----------
 function attachListeners() {
@@ -110,11 +266,37 @@ function attachListeners() {
     }));
   }
   _unsubs.push(onSnapshot(settingsDoc(), (snap) => {
-    _cache.settings = snap.exists() ? { ...DEFAULT_SETTINGS, ...snap.data() } : { ...DEFAULT_SETTINGS };
+    _pubSettings = snap.exists() ? snap.data() : {};
+    recomputeSettings();
     emit();
+    migratePrivateSettings();
+    maybeBackfillCustJobs();
   }));
-  _unsubs.push(onSnapshot(membersCol(), (snap) => {
-    _cache.members = snap.docs.map(d => ({ uid: d.id, ...d.data() }));
+  if (isStaffRole()) {
+    _unsubs.push(onSnapshot(privateSettingsDoc(), (snap) => {
+      _privSettings = snap.exists() ? snap.data() : {};
+      _privLoaded = true;
+      recomputeSettings();
+      emit();
+      maybeBackfillCustJobs();
+    }, (err) => { console.warn('private settings listener', err); }));
+  } else {
+    _privSettings = {};
+  }
+  // A customer's own flags (v2026.10.03-2042): can they see hours, and from when.
+  if (_role === 'customer') {
+    _unsubs.push(onSnapshot(custAccessDoc(_uid), (snap) => {
+      _cache.custAccess = snap.exists() ? snap.data() : {};
+      emit();
+    }, (err) => { console.warn('custAccess listener', err); _cache.custAccess = {}; }));
+  }
+  // Staff read the whole member list; everyone else may read only their OWN
+  // member doc (v2026.10.03-2042) — the list carries every account's email address.
+  const membersSource = isStaffRole() ? membersCol() : doc(membersCol(), _uid);
+  _unsubs.push(onSnapshot(membersSource, (snap) => {
+    _cache.members = isStaffRole()
+      ? snap.docs.map(d => ({ uid: d.id, ...d.data() }))
+      : (snap.exists() ? [{ uid: snap.id, ...snap.data() }] : []);
     // An admin can change our role (or remove us) while the app is open.
     // Firestore rules apply the new role instantly, so the UI and the data
     // listeners must follow — otherwise the screen shows powers the server
@@ -143,20 +325,8 @@ function attachListeners() {
     emit();
   }));
   // Price table: admins and bookkeepers always; employees only when the table
-  // has been shared with them (rules enforce it — a denied listener would just
-  // error, so employees attach and tolerate the error until shared).
-  if (_role !== 'customer') {
-    _unsubs.push(onSnapshot(priceConfigDoc(), (snap) => {
-      _cache.priceConfig = snap.exists()
-        ? { vendors: [], sharedWith: [], ...snap.data() }
-        : { vendors: [], sharedWith: [] };
-      emit();
-    }, (err) => { console.warn('priceConfig listener', err); }));
-    _unsubs.push(onSnapshot(priceItemsCol(), (snap) => {
-      _cache.priceItems = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      emit();
-    }, (err) => { console.warn('priceItems listener', err); }));
-  }
+  // has been shared with them — see attachPriceListeners (v2026.10.03-2042).
+  attachPriceListeners();
   // Calendar jobs. Admin/bookkeeper see everything; an employee's query must be
   // scoped to their own uid to match the rules (same reasoning as notes —
   // Firestore rejects an unscoped listener when the rule depends on a
@@ -183,6 +353,9 @@ function detachListeners() {
   for (const u of _unsubs) { try { u(); } catch (e) {} }
   _unsubs = [];
   if (_jobsUnsub) { try { _jobsUnsub(); } catch (e) {} _jobsUnsub = null; }
+  _priceUnsubs.forEach(u => { try { u(); } catch (e) {} });
+  _priceUnsubs = [];
+  if (_priceRetry) { clearTimeout(_priceRetry); _priceRetry = null; }
   _fetchedMonths.clear();
   _fetchedLogRanges.clear();
 }
@@ -219,7 +392,7 @@ function attachJobsListener() {
   const q = (_role === 'admin' || _role === 'bookkeeper')
     ? query(jobsCol(), where('date', '>=', _hotFrom), where('date', '<=', _hotTo))
     : _role === 'customer'
-      ? query(jobsCol(), where('customerUids', 'array-contains', _uid))
+      ? query(custJobsCol(), where('customerUids', 'array-contains', _uid))   // safe copies (v2026.10.03-2042)
       : query(jobsCol(), where('employeeUids', 'array-contains', _uid));
   _jobsUnsub = onSnapshot(q, (snap) => {
     const docs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
@@ -424,6 +597,7 @@ export const Storage = {
     _cache.notes = [];
     _cache.customers = [];
     _cache.settings = { ...DEFAULT_SETTINGS };
+    _pubSettings = {}; _privSettings = {}; _privLoaded = false; _cache.custAccess = {};
     _cache.members = [];
     _cache.invites = [];
     _cache.priceConfig = { vendors: [], sharedWith: [] };
@@ -503,6 +677,7 @@ export const Storage = {
     _notesError = null;
     _cache.notes = []; _cache.customers = [];
     _cache.settings = { ...DEFAULT_SETTINGS };
+    _pubSettings = {}; _privSettings = {}; _privLoaded = false; _cache.custAccess = {};
     _cache.members = []; _cache.invites = [];
     _cache.priceConfig = { vendors: [], sharedWith: [] };
     _cache.priceItems = [];
@@ -927,6 +1102,35 @@ export const Storage = {
     await this.savePriceItem(itemId, { cells });
     return entry;
   },
+  // ---- Undo for price deletes (v2026.10.03-1909) — see "Don't stop the workflow" in
+  // CLAUDE.md. Each puts back EXACTLY what was removed (same ids, same
+  // `added` stamps), so history, sorting and later deletes all line up.
+  async restorePriceItem(item) {
+    if (!item || _cache.priceItems.some(i => i.id === item.id)) return;
+    const copy = JSON.parse(JSON.stringify(item));
+    _cache.priceItems.push(copy);
+    emit();
+    await setDoc(doc(priceItemsCol(), copy.id), stripId(copy)).catch(err => console.warn("restorePriceItem", err));
+  },
+  // cellsByItem: { itemId: [entries] } — that column's data as it was.
+  async restorePriceVendor(vendor, cellsByItem) {
+    const cfg = this.getPriceConfig();
+    if (!vendor || cfg.vendors.some(v => v.id === vendor.id)) return;
+    const vendors = [...cfg.vendors, { ...vendor }].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+    await this.savePriceConfig({ vendors });
+    for (const [itemId, entries] of Object.entries(cellsByItem || {})) {
+      const item = _cache.priceItems.find(i => i.id === itemId);
+      if (!item || !Array.isArray(entries) || !entries.length) continue;
+      await this.savePriceItem(itemId, { cells: { ...(item.cells || {}), [vendor.id]: JSON.parse(JSON.stringify(entries)) } });
+    }
+  },
+  async restorePriceEntry(itemId, vendorId, entry) {
+    const item = _cache.priceItems.find(n => n.id === itemId);
+    if (!item || !entry) return;
+    const cur = (item.cells && item.cells[vendorId]) || [];
+    if (cur.some(e => e.added === entry.added)) return;
+    await this.savePriceItem(itemId, { cells: { ...(item.cells || {}), [vendorId]: [...cur, { ...entry }] } });
+  },
   async removePriceEntry(itemId, vendorId, added) {
     const item = _cache.priceItems.find(n => n.id === itemId);
     if (!item || !item.cells || !item.cells[vendorId]) return;
@@ -968,9 +1172,90 @@ export const Storage = {
       console.warn('ensureJobMonth', err);
     }
   },
+  // Every job for ONE customer, whatever its age (v2026.10.03-2017) — for Customer ⋯ →
+  // See hours, which needs the oldest hours ever recorded. One equality query,
+  // merged into the cache like ensureJobMonth, so no month-by-month cap applies.
+  async fetchCustomerJobs(customerId) {
+    if (!_orgId || !customerId) return;
+    if (_role !== 'admin' && _role !== 'bookkeeper') return;
+    try {
+      const snap = await getDocs(query(jobsCol(), where('customerId', '==', customerId)));
+      const have = new Set(_cache.jobs.map(j => j.id));
+      const added = snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(d => !have.has(d.id));
+      if (added.length) { _cache.jobs = _cache.jobs.concat(added); emit(); }
+    } catch (err) { console.warn('fetchCustomerJobs', err); }
+  },
   listJobs() {
     return _cache.jobs.filter(j => !j.deletedAt);
   },
+  // ---- customer-safe copies & access (v2026.10.03-2042) ----
+  // Rebuild every custJobs doc from the jobs on the server: writes a copy for
+  // each job with a linked customer, deletes copies that no longer belong.
+  // Run after relinking, a restore, a rename sweep, a hours-visibility change,
+  // and once per company as the first backfill.
+  async resyncCustJobs() {
+    if (_role !== 'admin') return { written: 0, removed: 0, failed: 1 };
+    try {
+      const [jSnap, cSnap] = await Promise.all([getDocs(jobsCol()), getDocs(custJobsCol())]);
+      const want = new Set();
+      const ops = [];
+      for (const d of jSnap.docs) {
+        const copy = custSafeCopy({ id: d.id, ...d.data() });
+        if (!copy) continue;
+        want.add(d.id);
+        ops.push(tracked(setDoc(doc(custJobsCol(), d.id), copy)));
+      }
+      let removed = 0;
+      for (const d of cSnap.docs) {
+        if (want.has(d.id)) continue;
+        ops.push(tracked(deleteDoc(doc(custJobsCol(), d.id))));
+        removed++;
+      }
+      // Awaited, so a backfill only counts as done when every write landed —
+      // e.g. not when the new rules haven't been deployed yet.
+      const res = await Promise.allSettled(ops);
+      const failed = res.filter(r => r.status === 'rejected').length;
+      if (failed) console.warn('resyncCustJobs: writes failed', failed);
+      return { written: want.size, removed, failed };
+    } catch (err) {
+      console.warn('resyncCustJobs', err);
+      return { written: 0, removed: 0, failed: 1 };
+    }
+  },
+  // custAccess/{uid} mirrors each linked customer's flags so their own account
+  // can read them; unlinked accounts lose theirs. prevLinks: links before the change.
+  async syncCustAccess(prevLinks = {}) {
+    if (_role !== 'admin') return;
+    const links = _cache.settings.customerLinks || {};
+    const live = new Set();
+    for (const [cid, u] of Object.entries(links)) {
+      if (!u) continue;
+      live.add(u);
+      const h = custHoursFor(cid);
+      tracked(setDoc(custAccessDoc(u), { customerId: cid, canSeeHours: !!h.canSee, started: h.started || '' }))
+        .catch(err => console.warn('custAccess.set', err));
+    }
+    for (const u of Object.values(prevLinks || {})) {
+      if (u && !live.has(u)) tracked(deleteDoc(custAccessDoc(u))).catch(err => console.warn('custAccess.del', err));
+    }
+  },
+  getCustomerHours(customerId) { return { ...custHoursFor(customerId) }; },
+  // patch: { canSee?, started? }. Visibility changes rebuild the copies, since
+  // the hours are either in them or not.
+  async setCustomerHours(customerId, patch) {
+    if (_role !== 'admin' || !customerId) return;
+    const all = { ...((_cache.settings && _cache.settings.customerHours) || {}) };
+    const before = all[customerId] || {};
+    const next = { ...before, ...patch };
+    if (!next.started) delete next.started;
+    all[customerId] = next;
+    await this.setSetting('customerHours', all);
+    await this.syncCustAccess();
+    if (!!before.canSee !== !!next.canSee) await this.resyncCustJobs();
+  },
+  // A customer's own flags (their account only).
+  getMyCustAccess() { return { ...(_cache.custAccess || {}) }; },
+
   // Who you're most likely to be booking next. Ranked by how many jobs you
   // scheduled for them inside the window, then by how recently — a customer you
   // book every week should outrank a one-off from yesterday. The window is
@@ -1066,6 +1351,7 @@ export const Storage = {
 // tracked(), which keeps counting it for the sync toast and retries it on
 // reconnect. Do not put an await back in front of these.
     tracked(setDoc(doc(jobsCol(), id), stripId(next))).catch(err => console.warn("saveJob", err));
+    syncCustJob(id, next, existing);
     return next;
   },
   // HOURS HISTORY (v2026.10.01-2326). Each crew line carries hoursLog: [{ hours, at, by }],
@@ -1147,8 +1433,7 @@ export const Storage = {
     _cache.settings = { ..._cache.settings, employees: nextEmps, employeeLinks: links };
     emit();
     // Not awaited — see the note in saveJob.
-    tracked(setDoc(settingsDoc(), _cache.settings, { merge: true }))
-      .catch(err => console.warn('renameEmployee.settings', err));
+    persistSettings('renameEmployee.settings');
 
     // ---- every job, from the server ----
     let jobs = 0;
@@ -1187,6 +1472,7 @@ export const Storage = {
       return { ok: false, partial: true, jobs, msg: 'Renamed in Settings, but the jobs could not be updated. Try again.' };
     }
     emit();
+    if (jobs) this.resyncCustJobs();
     return { ok: true, jobs };
   },
 
@@ -1215,9 +1501,12 @@ export const Storage = {
       updated++;
     }
     if (updated) emit();
+    await this.resyncCustJobs();
     return { scanned: snap.size, updated };
   },
   async deleteJob(id) {
+    const gone = _cache.jobs.find(j => j.id === id) || null;
+    syncCustJob(id, null, gone);
     _cache.jobs = _cache.jobs.filter(j => j.id !== id);
     emit();
     // Not awaited — see the note in saveJob.
@@ -1397,6 +1686,7 @@ export const Storage = {
     add('customers', plan.customers); add('notes', plan.notes); add('priceItems', plan.priceItems);
     add('jobs', plan.jobs); add('timelogs', plan.timelogs);
     emit();
+    if (plan.jobs.length) this.resyncCustJobs();
   },
 
   async seedSampleData() {
@@ -1757,7 +2047,7 @@ export const Storage = {
       _cache.settings = { ..._cache.settings, demoSeed };
     }
     if (counts.employees || counts.keywords || demoSeed.vendorIds.length) {
-      setDoc(settingsDoc(), _cache.settings, { merge: true }).catch(err => console.warn("seed.settings", err));
+      persistSettings('seed.settings');
     }
     emit();
     return counts;
@@ -1863,7 +2153,7 @@ export const Storage = {
       settingsChanged = true;
     }
     if (settingsChanged) {
-      tracked(setDoc(settingsDoc(), _cache.settings, { merge: true })).catch(err => console.warn("unseed.settings", err));
+      persistSettings('unseed.settings');
     }
     // Vendor columns live in the price config, and dropping a column has to
     // drop its cells from every REMAINING row too, or the deleted vendor's
@@ -1955,16 +2245,14 @@ export const Storage = {
   },
   async writeSettings() {
     // Not awaited — see the note in saveJob.
-    tracked(setDoc(settingsDoc(), _cache.settings, { merge: true }))
-      .catch(err => console.warn("writeSettings", err));
+    persistSettings('writeSettings');
   },
 
   async setSetting(key, value) {
     _cache.settings = { ...DEFAULT_SETTINGS, ..._cache.settings, [key]: value };
     emit();
     // Not awaited — see the note in saveJob.
-    tracked(setDoc(settingsDoc(), _cache.settings, { merge: true }))
-      .catch(err => console.warn("setSetting", err));
+    persistSettings('setSetting');
   },
 
   // ---------- Members ----------

@@ -86,6 +86,17 @@ export const LocalFiles = {
     });
   },
 
+  // Undo for a delete (v2026.10.03-1909): put the exact record back, blob and all.
+  async restore(rec) {
+    if (!rec) return;
+    const db = await openDB();
+    await new Promise((resolve, reject) => {
+      const req = txStore(db, 'readwrite').put(rec);
+      req.onsuccess = resolve;
+      req.onerror = () => reject(req.error);
+    });
+  },
+
   async remove(id) {
     const db = await openDB();
     return new Promise((resolve, reject) => {

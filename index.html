@@ -133,6 +133,7 @@
     <div id="fab-menu" class="fab-menu" hidden>
       <button id="fab-new-note" class="fab-menu-item" type="button">New general note</button>
       <button id="fab-new-customer" class="fab-menu-item" type="button">New customer</button>
+      <button id="fab-new-job" class="fab-menu-item" type="button">New job</button>
     </div>
     <button id="fab" class="fab" aria-label="New note">+</button>
   </section>
@@ -183,6 +184,8 @@
           <div id="customer-more-dropdown" class="editor-more-dropdown" hidden>
             <!-- Admin + bookkeeper; Delete is admin-only. (v2026.09.30-2044) -->
             <button id="customer-cal-btn" class="editor-more-item" type="button">See customer in calendar</button>
+            <button id="customer-hours-btn" class="editor-more-item" type="button">See hours</button>
+            <button id="customer-jobstart-btn" class="editor-more-item" type="button">Job started…</button>
             <button id="customer-delete-btn" class="editor-more-item editor-more-danger" type="button">Delete customer</button>
           </div>
         </div>
@@ -402,6 +405,41 @@
     </div>
   </div>
 
+  <!-- MY HOURS (customer accounts allowed to see hours) — v2026.10.03-2042.
+       Built from the customer-safe job copies; billable hours only. -->
+  <section id="myhours-view" class="screen">
+    <header class="app-header customers-header">
+      <div class="customers-header-top">
+        <button class="icon-btn date-btn app-back-btn" aria-label="Back">‹ Back</button>
+        <nav class="crumbs" id="crumbs-myhours" aria-label="Breadcrumb"></nav>
+      </div>
+      <div class="customers-header-bottom hours-actions">
+        <label class="iif-range-label">From <input id="myh-from" type="date" class="iif-date-input myh-date" /></label>
+        <label class="iif-range-label">To <input id="myh-to" type="date" class="iif-date-input myh-date" /></label>
+      </div>
+    </header>
+    <main class="myh-main">
+      <p id="myh-note" class="muted setting-hint"></p>
+      <table id="myh-table" class="iif-totals-table myh-table"></table>
+    </main>
+  </section>
+
+  <!-- JOB STARTED (per customer; admin) — v2026.10.03-2042 -->
+  <div id="job-start-modal" class="modal-overlay" hidden>
+    <div class="modal-panel">
+      <div class="modal-header">
+        <h2 class="modal-title" id="job-start-title">Job started</h2>
+        <button id="job-start-close" class="icon-btn" aria-label="Close">✕</button>
+      </div>
+      <p class="modal-hint">Hours this customer can see — and See hours — start from this date.</p>
+      <input id="job-start-date" class="signin-input" type="date" />
+      <div class="setting-btn-col">
+        <button id="job-start-save" class="primary setting-wide-btn" type="button">Save</button>
+        <button id="job-start-clear" class="secondary setting-wide-btn" type="button">Clear date</button>
+      </div>
+    </div>
+  </div>
+
   <!-- PRICE TABLE VIEW -->
   <section id="price-view" class="screen">
     <header class="app-header customers-header">
@@ -579,6 +617,10 @@
           <button id="iif-emp-btn" type="button" class="iif-date-input iif-who-btn" aria-haspopup="true">Everyone</button>
           <div id="iif-emp-panel" class="iif-who-panel" hidden></div>
         </div>
+        <!-- One customer or All (v2026.10.03-2013); narrows rows, totals and the .iif like Who. -->
+        <label class="iif-range-label">Customer
+          <select id="iif-cust-sel" class="iif-date-input iif-cust-sel"><option value="">All</option></select>
+        </label>
       </div>
       <!-- (#iif-src-bar, which pinned the note line the open row was read
            from, was removed in v2026.08.18-2325 — rows come from calendar jobs

@@ -3410,3 +3410,23 @@ body.vv-zoomed-pinch .cal-cells { overflow-y: visible; }
   padding: 12px 18px; border-radius: 999px; cursor: pointer;
   box-shadow: 0 6px 18px rgba(0,0,0,0.3);
 }
+
+/* Hours: customer picker + totals switch (v2026.10.03-2013) */
+.iif-cust-sel { font-size: 16px; max-width: 46vw; }   /* 16px: iOS focus zoom */
+.iif-tot-switch { display: flex; gap: 0; align-self: flex-start; border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
+.iif-tot-mode { font: inherit; font-size: 13px; padding: 6px 12px; border: 0; background: var(--surface); color: var(--ink); cursor: pointer; }
+.iif-tot-mode + .iif-tot-mode { border-left: 1px solid var(--line); }
+.iif-tot-mode.active { background: var(--accent); color: var(--accent-ink); font-weight: 600; }
+.iif-cust-row { cursor: pointer; }
+.iif-cust-caret { display: inline-block; width: 1em; color: var(--ink-soft); }
+.iif-cust-sub th.iif-tot-name { padding-left: 22px; }
+.iif-cust-sub td, .iif-cust-sub th { background: var(--bg); font-size: 0.95em; }
+
+/* My hours (customer) + customer link hours controls (v2026.10.03-2042) */
+.myh-date { font-size: 16px; }   /* iOS focus zoom */
+.myh-main { padding: 12px; }
+.myh-table td.myh-who { text-align: left; white-space: normal; }
+.cust-link-hours { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; margin-top: 6px; }
+.cust-link-hours .setting-check { padding: 0; align-items: center; font-size: 14px; }
+.cust-link-hours .setting-check input[type="checkbox"] { margin-top: 0; }
+.cust-link-hours input[type="date"] { font-size: 16px; padding: 4px 6px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg); color: var(--ink); }

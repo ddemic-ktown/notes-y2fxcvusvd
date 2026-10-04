@@ -20,6 +20,11 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 100, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.10.03-2042', 'Privacy pass: customers and employees no longer see other accounts’ emails, payroll details or account links; customers read a safe copy of their jobs; customers can be allowed to see their own billable hours (My hours) from a Job started date'],
+  ['v2026.10.03-2017', 'Customer ⋯ → See hours opens the Hours chart for that customer, from their first recorded hours to today'],
+  ['v2026.10.03-2013', 'Hours: pick one customer, and switch the totals between By person and By customer (billable, not billable, total; tap for who)'],
+  ['v2026.10.03-2008', 'Home + menu has New job — opens the job editor over Home; after saving, a bubble offers the calendar'],
+  ['v2026.10.03-1909', 'Deleting a note, customer, price item, supplier, price or file no longer asks — it happens at once with a tap to undo'],
   ['v2026.10.03-1749', 'Job editor: closing with unsaved changes or deleting no longer asks — a bubble offers tap to go back / tap to undo'],
   ['v2026.10.03-1734', 'Job editor: full screen on phones, customer first as a chip, times stacked, slimmer sections, + note per crew line, title shows customer and date, asks before discarding changes, Save/Cancel pinned to the bottom'],
   ['v2026.10.03-1636', 'The calendar’s blue current-time line now shows the time'],
@@ -168,11 +173,6 @@ const CHANGELOG = [
   ['v2026.08.17-1714', 'The scrollbar in a note stays visible instead of fading out'],
   ['v2026.08.17-1712', 'Editing a job has a Duplicate button — same job, next day, change the date before saving'],
   ['v2026.08.17-1706', 'Accepting a keyboard suggestion mid-paragraph no longer pulls the next line up into it'],
-  ['v2026.08.17-1701', 'The vendor row in the price table now stays put while you scroll, like the item column'],
-  ['v2026.08.17-1651', 'Day view shows who is on each job and the job note on the block itself; the crew legend is gone'],
-  ['v2026.08.16-1951', 'The hours note now understands Aug 14, Thu Aug 14, 8/14 and 2026-08-14 as date lines, not just August 14'],
-  ['v2026.08.16-1929', 'Fixed double-tap zoom snapping straight back out on phones'],
-  ['v2026.08.16-1923', 'The Files card now fills its full width — tap the left side to open, + Add on the right'],
 ];
 const APP_VERSION = CHANGELOG[0][0];
 
@@ -779,6 +779,7 @@ function applyFeatureVisibility() {
   show('tutorial-btn-6', isFeatureOn('calendar'));
   show('tutorial-btn-7', isFeatureOn('calendar'));
   show('customer-cal-btn', isFeatureOn('calendar'));
+  show('customer-hours-btn', isFeatureOn('hours'));
 }
 // The home shortcut needs BOTH: hiding the feature outright must not leave a
 // card pointing at a screen that now sends you straight back home.
@@ -2581,6 +2582,7 @@ let jobEditingId = null;
 let jobChosenCustomer = null; // { id, name, addresses: [] }
 // Job editor rework (v2026.10.03-1734) — title, unsaved-changes check.
 let jobTitlePrefix = '';      // 'Copy · ' after Duplicate
+let jobOpenedFromHome = false; // Home + → New job: stay home on save, offer the calendar (v2026.10.03-2008)
 let jobSnapshot = '';         // the form as it opened, to tell if anything changed
 function updateJobTitle() {
   const el = document.getElementById('job-modal-title');
@@ -2612,7 +2614,7 @@ function jobFormState() {
 function captureJobDraft() {
   const v = (id) => ((document.getElementById(id) || {}).value || '');
   return {
-    id: jobEditingId, prefix: jobTitlePrefix, snapshot: jobSnapshot,
+    id: jobEditingId, prefix: jobTitlePrefix, snapshot: jobSnapshot, fromHome: jobOpenedFromHome,
     chosen: jobChosenCustomer ? { ...jobChosenCustomer } : null,
     crew: jobCrewDraft.map(c => ({ ...c })),
     date: v('job-date'), start: v('job-start'), end: v('job-end'), dur: getJobDuration(),
@@ -2638,6 +2640,7 @@ function restoreJobDraft(d) {
   jobTitlePrefix = id ? d.prefix : (d.id ? '' : d.prefix);
   // Keep the ORIGINAL snapshot, so closing again still knows it is unsaved
   jobSnapshot = d.snapshot;
+  jobOpenedFromHome = !!d.fromHome;
   updateJobTitle();
   requestAnimationFrame(() => {
     document.querySelectorAll('#job-employees [data-crew-note]').forEach(autoGrowNote);
@@ -2680,6 +2683,7 @@ function openJobModal(jobId, dateStr) {
   if (!jobModal || !isAdminRole()) return;
   jobEditingId = jobId || null;
   jobTitlePrefix = '';
+  jobOpenedFromHome = false;
   const job = jobId ? Storage.getJob(jobId) : null;
   document.getElementById('job-date').value = (job && job.date) || dateStr || ymd(new Date());
   document.getElementById('job-start').value = (job && job.start) || '';
@@ -3227,6 +3231,12 @@ if (jobSave) jobSave.addEventListener('click', async () => {
   calCursor = parseYmd(date);
   if (calendarDayView.classList.contains('active')) { calSelectedDate = date; renderCalendarDay(); }
   else renderCalendar();
+  // Made from Home: stay there, and offer the way to it rather than dragging
+  // you off to the calendar (v2026.10.03-2008).
+  if (jobOpenedFromHome) {
+    jobOpenedFromHome = false;
+    showActionToast('Job saved — tap to see it in the calendar', () => showCalendarDay(date));
+  }
 });
 // Duplicate: keep everything on screen, drop the id so Save writes a NEW job,
 // and move the date on a day. Nothing is written until Save, so the original is
@@ -3968,8 +3978,13 @@ function wirePriceTable(canEdit) {
         }).then(async name => {
           if (name === null) return;
           if (!name) {
-            if (!await askConfirm(`Delete “${item.name}” and every price recorded against it?`, { title: 'Delete item' })) return;
+            // No question (v2026.10.03-1909) — gone at once, and the bubble puts it back.
+            const kept = JSON.parse(JSON.stringify(item));
             await Storage.removePriceItem(item.id);
+            showActionToast(`“${kept.name}” deleted — tap to undo`, async () => {
+              await Storage.restorePriceItem(kept);
+              renderPriceTable();
+            });
           } else {
             await Storage.savePriceItem(item.id, { name });
           }
@@ -3987,8 +4002,17 @@ function wirePriceTable(canEdit) {
         }).then(async name => {
           if (name === null) return;
           if (!name) {
-            if (!await askConfirm(`Delete “${v.name}” and every price recorded against it?`, { title: 'Delete vendor' })) return;
+            const keptVendor = { ...v };
+            const keptCells = {};
+            Storage.listPriceItems().forEach(it => {
+              const arr = it.cells && it.cells[v.id];
+              if (arr && arr.length) keptCells[it.id] = JSON.parse(JSON.stringify(arr));
+            });
             await Storage.removePriceVendor(v.id);
+            showActionToast(`“${keptVendor.name}” deleted — tap to undo`, async () => {
+              await Storage.restorePriceVendor(keptVendor, keptCells);
+              renderPriceTable();
+            });
           } else {
             await Storage.renamePriceVendor(v.id, name);
           }
@@ -4027,9 +4051,17 @@ function openPriceHistory(key) {
   priceHistoryList.querySelectorAll('.price-history-del').forEach(btn => {
     btn.addEventListener('click', async () => {
       if (priceHistoryJustOpened()) return;   // the long-press release
+      const it = Storage.listPriceItems().find(i => i.id === itemId);
+      const entry = ((it && it.cells && it.cells[vendorId]) || []).find(e => (e.added || '') === btn.dataset.added);
       await Storage.removePriceEntry(itemId, vendorId, btn.dataset.added);
       openPriceHistory(key);
       renderPriceTable();
+      // It never asked, but it had no way back either (v2026.10.03-1909).
+      if (entry) showActionToast('Price deleted — tap to undo', async () => {
+        await Storage.restorePriceEntry(itemId, vendorId, entry);
+        if (priceHistoryModal && !priceHistoryModal.hidden) openPriceHistory(key);
+        renderPriceTable();
+      });
     });
   });
   // The sheet appears WHILE the finger is still down — the 500ms timer fires
@@ -5074,6 +5106,8 @@ function hideAllScreens() {
   }
   if (calendarView) calendarView.classList.remove('active');
   if (calendarDayView) calendarDayView.classList.remove('active');
+  const myhV = document.getElementById('myhours-view');
+  if (myhV) myhV.classList.remove('active');
   const jm = document.getElementById('job-modal');
   if (jm) jm.hidden = true;
   editorView.classList.remove('active');
@@ -6041,9 +6075,11 @@ function renderHomeNav() {
   if (ready && canViewAllRole() && isFeatureOn('customers')) items.push(['customers', 'Customers']);
   if (ready && isFeatureOn('calendar')) items.push(['calendar', 'Calendar']);
   if (ready && !isCustomerRole() && Storage.canViewPriceTable() && isFeatureOn('price')) items.push(['price', 'Price Table']);
+  // A customer allowed to see their hours (v2026.10.03-2042)
+  if (ready && isCustomerRole() && Storage.getMyCustAccess().canSeeHours) items.push(['myhours', 'My hours']);
   // Short labels for a crowded line (v2026.10.02-1913) — fitNavLabels swaps
   // them in only where the long ones would be cut off.
-  const SHORT = { home: '<svg class="nav-house" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M3 11.5 12 4l9 7.5M6 10v9h12v-9" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>', customers: 'Cust.', calendar: 'Cal.', price: 'Prices' };
+  const SHORT = { home: '<svg class="nav-house" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M3 11.5 12 4l9 7.5M6 10v9h12v-9" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>', customers: 'Cust.', calendar: 'Cal.', price: 'Prices', myhours: 'Hours' };
   const html = items.map(([k, label]) =>
     `<button type="button" class="home-nav-btn" data-nav="${k}" title="${label}" aria-label="${label}"><span class="nav-long">${label}</span><span class="nav-short">${SHORT[k] || label}</span></button>`).join('');
   // Same row on every screen (v2026.10.01-1710).
@@ -6057,7 +6093,7 @@ function renderHomeNav() {
 function getScreenNavs() {
   if (getScreenNavs.cache) return getScreenNavs.cache;
   const ids = ['customers-view', 'customer-notes-view', 'calendar-view', 'calendar-day-view',
-    'price-view', 'hours-view', 'section-view', 'orphan-view', 'settings-view', 'editor-view'];
+    'price-view', 'hours-view', 'section-view', 'orphan-view', 'settings-view', 'editor-view', 'myhours-view'];
   getScreenNavs.cache = ids.map(id => {
     const header = document.querySelector(`#${id} > header`);
     if (!header) return null;
@@ -6107,6 +6143,7 @@ function getScreenNavs() {
       if (b.dataset.nav === 'customers') setTimeout(showCustomers, 0);
       else if (b.dataset.nav === 'calendar') showCalendar();
       else if (b.dataset.nav === 'price') showPriceTable();
+      else if (b.dataset.nav === 'myhours') showMyHours();
     });
     return n;
   }).filter(Boolean);
@@ -6126,6 +6163,7 @@ function markActiveNav() {
   const active = {
     'list-view': 'home', 'customers-view': 'customers', 'customer-notes-view': 'customers',
     'calendar-view': 'calendar', 'calendar-day-view': 'calendar', 'price-view': 'price',
+    'myhours-view': 'myhours',
   };
   const cur = document.querySelector('.screen.active');
   const key = cur ? active[cur.id] : null;
@@ -6146,6 +6184,7 @@ document.querySelectorAll('.screen').forEach(sec => {
     if (b.dataset.nav === 'customers') setTimeout(showCustomers, 0);
     else if (b.dataset.nav === 'calendar') showCalendar();
     else if (b.dataset.nav === 'price') showPriceTable();
+    else if (b.dataset.nav === 'myhours') showMyHours();
   });
 })();
 
@@ -6761,7 +6800,17 @@ function focusNewTitle() {
 fab.addEventListener('click', (e) => {
   if (!isAdminRole() || !fabMenu) { newGeneralNote(); return; }
   e.stopPropagation();
+  // New job only while the Calendar feature is on (Settings → Features)
+  const nj = document.getElementById('fab-new-job');
+  if (nj) nj.hidden = !isFeatureOn('calendar');
   fabMenu.hidden = !fabMenu.hidden;
+});
+// Home + → New job (v2026.10.03-2008): the job editor straight over Home, dated today.
+const fabNewJob = document.getElementById('fab-new-job');
+if (fabNewJob) fabNewJob.addEventListener('click', () => {
+  closeFabMenu();
+  openJobModal(null, ymd(new Date()));
+  jobOpenedFromHome = true;
 });
 const fabNewNote = document.getElementById('fab-new-note');
 const fabNewCustomer = document.getElementById('fab-new-customer');
@@ -6963,6 +7012,57 @@ if (customerCalBtn) customerCalBtn.addEventListener('click', () => {
   showCalendar();
   rerenderCalendarScreens();
 });
+// Customer ⋯ → See hours (v2026.10.03-2017): the Hours chart for this customer, from the
+// oldest hours ever entered on one of their jobs to today, Who = Everyone.
+const customerHoursBtn = document.getElementById('customer-hours-btn');
+if (customerHoursBtn) customerHoursBtn.addEventListener('click', async () => {
+  const id = activeCustomerId;
+  if (!id || !(isAdminRole() || isBookkeeperRole())) return;
+  const name = customerCrumbLabel(id);
+  await Storage.fetchCustomerJobs(id);
+  const dates = Storage.listJobs()
+    .filter(j => j.customerId === id && !j.noWork && j.date && jobCrew(j).some(c => c.hours > 0))
+    .map(j => j.date).sort();
+  if (!dates.length) { showActionToast(`No hours recorded for ${name} yet`, null, 3500); return; }
+  // The customer's "job started" date wins when set (v2026.10.03-2042)
+  const started = Storage.getCustomerHours(id).started;
+  if (iifFromDate) iifFromDate.value = started || dates[0];
+  if (iifToDate) iifToDate.value = ymd(new Date());
+  setIifEmpSel(null);
+  setIifCustSel(name);
+  showHoursView();
+});
+// Customer ⋯ → Job started… (v2026.10.03-2042): the date this customer's hours count from —
+// for their own My hours and for See hours. Admin only.
+(() => {
+  const btn = document.getElementById('customer-jobstart-btn');
+  const modal = document.getElementById('job-start-modal');
+  if (!btn || !modal) return;
+  const input = document.getElementById('job-start-date');
+  let forId = null;
+  const close = () => { modal.hidden = true; };
+  btn.addEventListener('click', () => {
+    if (!activeCustomerId || !isAdminRole()) return;
+    forId = activeCustomerId;
+    document.getElementById('job-start-title').textContent = `Job started · ${customerCrumbLabel(forId)}`;
+    input.value = Storage.getCustomerHours(forId).started || '';
+    modal.hidden = false;
+  });
+  document.getElementById('job-start-save').addEventListener('click', async () => {
+    if (!forId) return;
+    close();
+    await Storage.setCustomerHours(forId, { started: input.value || '' });
+    if (typeof renderCustomerLinks === 'function') renderCustomerLinks();
+  });
+  document.getElementById('job-start-clear').addEventListener('click', async () => {
+    if (!forId) return;
+    close();
+    await Storage.setCustomerHours(forId, { started: '' });
+    if (typeof renderCustomerLinks === 'function') renderCustomerLinks();
+  });
+  document.getElementById('job-start-close').addEventListener('click', close);
+  modal.addEventListener('click', (e) => { if (e.target === modal) close(); });
+})();
 const customerDeleteBtn = document.getElementById('customer-delete-btn');
 if (customerDeleteBtn) customerDeleteBtn.addEventListener('click', async () => {
   const id = activeCustomerId;
@@ -6972,14 +7072,16 @@ if (customerDeleteBtn) customerDeleteBtn.addEventListener('click', async () => {
   // customer; only mention notes when there are extra ones to lose.
   const extra = Storage.listNotesByCustomer(id).filter(n => !n.isDefault && !n.deletedAt).length;
   const alsoNotes = extra === 1 ? ' and their 1 other note' : (extra ? ` and their ${extra} other notes` : '');
-  const ok = await askConfirm(
-    `“${name}”${alsoNotes} will move to Trash, where you can put them back for 30 days.`,
-    { title: 'Delete this customer?', okLabel: 'Delete' });
-  if (!ok) return;
+  // No question (v2026.10.03-1909): to Trash at once — with their notes — and an undo
+  // bubble. restoreFromTrash brings back exactly the notes trashed WITH them.
   Storage.deleteCustomer(id);
   activeCustomerId = null;
   refreshTrashUi();
   showCustomers();
+  showActionToast(`“${name}”${alsoNotes} moved to Trash — tap to undo`, async () => {
+    await Storage.restoreFromTrash('customer', id);
+    refreshTrashUi();
+  });
 });
 
 titleInput.addEventListener('input', scheduleSave);
@@ -7832,6 +7934,7 @@ window.addEventListener('popstate', (e) => {
   if (screen === 'orphans') { showOrphanNotes(); handlingPopstate = false; return; }
   if (screen === 'price') { showPriceTable(); handlingPopstate = false; return; }
   if (screen === 'hours') { showHoursView(); handlingPopstate = false; return; }
+  if (screen === 'myhours') { showMyHours(); handlingPopstate = false; return; }
   if (screen === 'calendar') { showCalendar(); handlingPopstate = false; return; }
   if (screen === 'calendar-day') { showCalendarDay(e.state.date); handlingPopstate = false; return; }
   if (screen === 'section') { showSection(e.state.key); handlingPopstate = false; return; }
@@ -7995,12 +8098,17 @@ deleteBtn.addEventListener('click', async () => {
   // the guard above returns on the same condition. The customer wording and
   // deleteCustomer call that used to sit here were unreachable both ways.
   // Removed v2026.09.21-2336.
-  const label = 'It goes to Settings → Trash, where you can restore it for 30 days.';
-  if (await askConfirm(label, { title: 'Delete this note?' })) {
-    Storage.deleteNote(currentId);
-    currentId = null; currentType = null; currentIsDefault = false;
-    returnFromEditor();
-  }
+  // No question (v2026.10.03-1909): to Trash at once, with an undo bubble. Trash still
+  // keeps it for 30 days if the bubble is missed.
+  const goneId = currentId;
+  Storage.deleteNote(goneId);
+  currentId = null; currentType = null; currentIsDefault = false;
+  returnFromEditor();
+  refreshTrashUi();
+  showActionToast('Note moved to Trash — tap to undo', async () => {
+    await Storage.restoreFromTrash('note', goneId);
+    refreshTrashUi();
+  });
 });
 
 // ---------- assign users ----------
@@ -9010,6 +9118,8 @@ function applyRoleUI(role) {
   if (restoreBtnEl) restoreBtnEl.style.display = isAdminRole ? '' : 'none';
   const custDel = document.getElementById('customer-delete-btn');
   if (custDel) custDel.hidden = !isAdminRole;
+  const custJobStart = document.getElementById('customer-jobstart-btn');
+  if (custJobStart) custJobStart.hidden = !isAdminRole;
   // Home + FAB: admins and employees can create general notes; read-only roles cannot
   const homeFab = document.getElementById('fab');
   if (homeFab) homeFab.style.display = (isCustomer || role === 'bookkeeper') ? 'none' : '';
@@ -9080,31 +9190,53 @@ function renderCustomerLinks() {
   listEl.innerHTML = entries.length
     ? entries.map(([cid, uid]) => {
         const acct = accounts.find(m => m.uid === uid);
+        const h = Storage.getCustomerHours(cid);
         return `<li class="employee-card">
           <div class="employee-card-top">
             <span class="employee-name">${escapeHtml(customerCrumbLabel(cid))} → ${escapeHtml(acct ? (acct.name || acct.email || uid) : uid)}</span>
             <button data-unlink="${escapeHtml(cid)}" class="employee-remove" aria-label="Remove link">×</button>
           </div>
+          <div class="cust-link-hours">
+            <label class="setting-check"><input type="checkbox" data-hours-see="${escapeHtml(cid)}" ${h.canSee ? 'checked' : ''} /><span>Can see hours</span></label>
+            <label class="setting-inline-label" style="margin:0">Job started <input type="date" data-hours-start="${escapeHtml(cid)}" value="${escapeHtml(h.started || '')}" /></label>
+          </div>
         </li>`;
       }).join('')
     : '<li class="keyword-empty">No customers linked yet.</li>';
 
+  // v2026.10.03-2042: changing a link re-stamps the jobs and the customer-safe copies at
+  // once (it used to wait for the Relink button), and keeps custAccess in step.
+  const afterLinkChange = async (prev) => {
+    await Storage.syncCustAccess(prev);
+    Storage.relinkJobEmployeeUids().catch(err => console.warn('relink after link change', err));
+  };
   listEl.querySelectorAll('[data-unlink]').forEach(btn => {
     btn.addEventListener('click', async () => {
-      const next = { ...(Storage.getSettings().customerLinks || {}) };
+      const prev = { ...(Storage.getSettings().customerLinks || {}) };
+      const next = { ...prev };
       delete next[btn.dataset.unlink];
       await Storage.setSetting('customerLinks', next);
       renderCustomerLinks();
+      afterLinkChange(prev);
     });
+  });
+  listEl.querySelectorAll('[data-hours-see]').forEach(box => {
+    box.addEventListener('change', () => Storage.setCustomerHours(box.dataset.hoursSee, { canSee: box.checked }));
+  });
+  listEl.querySelectorAll('[data-hours-start]').forEach(inp => {
+    inp.addEventListener('change', () => Storage.setCustomerHours(inp.dataset.hoursStart, { started: inp.value || '' }));
   });
   if (addBtn && !addBtn.dataset.wired) {
     addBtn.dataset.wired = '1';
     addBtn.addEventListener('click', async () => {
       if (!custSel.value || !acctSel.value) return;
-      const next = { ...(Storage.getSettings().customerLinks || {}) };
+      const prev = { ...(Storage.getSettings().customerLinks || {}) };
+      const next = { ...prev };
       next[custSel.value] = acctSel.value;
       await Storage.setSetting('customerLinks', next);
       renderCustomerLinks();
+      await Storage.syncCustAccess(prev);
+      Storage.relinkJobEmployeeUids().catch(err => console.warn('relink after link change', err));
     });
   }
 }
@@ -10092,9 +10224,15 @@ async function renderFileGallery(customerId) {
   galleryGrid.querySelectorAll('[data-del]').forEach(btn => {
     btn.addEventListener('click', async (ev) => {
       ev.stopPropagation();
-      if (!await askConfirm('It is stored on this device only, so this cannot be undone.', { title: 'Delete this file?' })) return;
+      // No question (v2026.10.03-1909): the record — blob included — is held for the
+      // bubble, and undo writes it straight back.
+      const rec = await LocalFiles.get(btn.dataset.del).catch(() => null);
       await LocalFiles.remove(btn.dataset.del);
       renderFileGallery(customerId);
+      if (rec) showActionToast('File deleted — tap to undo', async () => {
+        await LocalFiles.restore(rec);
+        renderFileGallery(customerId);
+      });
     });
   });
 }
@@ -10242,12 +10380,16 @@ if (fileLightboxDelete) {
   fileLightboxDelete.addEventListener('click', async (ev) => {
     ev.stopPropagation();
     if (!lightboxRecId) return;
-    if (!await askConfirm('It is stored on this device only, so this cannot be undone.', { title: 'Delete this file?' })) return;
     const customerId = activeCustomerId;
+    const rec = await LocalFiles.get(lightboxRecId).catch(() => null);
     await LocalFiles.remove(lightboxRecId);
     lightboxRecId = null;
     history.back();                       // closes the viewer via the popstate handler
     if (customerId) renderFileGallery(customerId);
+    if (rec) showActionToast('File deleted — tap to undo', async () => {
+      await LocalFiles.restore(rec);
+      if (customerId) renderFileGallery(customerId);
+    });
   });
 }
 
@@ -10480,6 +10622,26 @@ function renderIifEmpFilter() {
     + names.map(n => `<label class="iif-who-row"><input type="checkbox" data-who-emp="${escapeHtml(n)}" ${(!iifEmpSel || iifEmpSel.has(n)) ? 'checked' : ''} />`
       + `<span class="cal-chip" style="${chipStyle(n)}">${escapeHtml(n)}</span></label>`).join('');
 }
+// Customer filter (v2026.10.03-2013): ONE customer or all, per device like Who. Matched
+// on the customer label (customerMatched) — the same key the .iif writes.
+let iifCustSel = (() => { try { return localStorage.getItem('na-iif-cust') || ''; } catch (e) { return ''; } })();
+function setIifCustSel(v) {
+  iifCustSel = v || '';
+  try { if (iifCustSel) localStorage.setItem('na-iif-cust', iifCustSel); else localStorage.removeItem('na-iif-cust'); } catch (e) {}
+}
+function iifCustomersInRange() {
+  const set = new Set();
+  iifParsedEntries.forEach(e => { if (e.customerMatched) set.add(e.customerMatched); });
+  if (iifCustSel) set.add(iifCustSel);   // a pick never silently vanishes
+  return [...set].sort((a, b) => a.localeCompare(b));
+}
+function renderIifCustFilter() {
+  const sel = document.getElementById('iif-cust-sel');
+  if (!sel) return;
+  sel.innerHTML = '<option value="">All</option>'
+    + iifCustomersInRange().map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('');
+  sel.value = iifCustSel;
+}
 function iifGridRows() {
   const rows = [];
   iifParsedEntries.forEach((e, idx) => {
@@ -10490,6 +10652,7 @@ function iifGridRows() {
       // The filter narrows the rendered rows, and the totals and the .iif are
       // both built from those — so filtering exports exactly who is ticked.
       if (iifEmpSel && !iifEmpSel.has(emp)) return;
+      if (iifCustSel && (e.customerMatched || '') !== iifCustSel) return;
       rows.push({ e, idx, emp, empIdx, first: empIdx === 0, kind: 'note', editable: true });
     });
   });
@@ -10632,6 +10795,7 @@ function renderIIFEntries(entries) {
     if (iifScroll.scrollLeft !== keepLeft) iifScroll.scrollLeft = keepLeft;
   };
   renderIifEmpFilter();
+  renderIifCustFilter();
   // An empty chart with a filter set is not the same as an empty range — say
   // which, or the filter looks like a broken screen.
   const rowsNow = entries.length ? iifGridRows() : [];
@@ -10639,6 +10803,7 @@ function renderIIFEntries(entries) {
     const msg = !entries.length ? 'No entries found.'
       : (iifEmpSel && !iifEmpSel.size) ? 'Nobody is selected — tick someone under Who.'
       : iifEmpSel ? 'No jobs for the people selected between these dates.'
+      : iifCustSel ? 'No jobs for this customer between these dates.'
       : 'No entries found.';
     iifGrid.innerHTML = `<tbody><tr><td class="price-empty-state">${msg}</td></tr></tbody>`;
     const empty = document.getElementById('iif-totals');
@@ -10711,9 +10876,70 @@ function iifFmtHours(n) {
   const v = Math.round((Number(n) || 0) * 100) / 100;
   return v ? String(v) : '';
 }
+// Totals view (v2026.10.03-2013): 'person' = the weekly tables, 'customer' = one table
+// for the range. Per device. Tapping a customer row folds out who worked it.
+let iifTotMode = (() => { try { return localStorage.getItem('na-iif-tot') === 'customer' ? 'customer' : 'person'; } catch (e) { return 'person'; } })();
+const iifTotOpen = new Set();
+function iifTotSwitchHtml() {
+  const b = (m, label) => `<button type="button" class="iif-tot-mode${iifTotMode === m ? ' active' : ''}" data-tot-mode="${m}" aria-pressed="${iifTotMode === m}">${label}</button>`;
+  return `<div class="iif-tot-switch" role="group" aria-label="Totals">${b('person', 'By person')}${b('customer', 'By customer')}</div>`;
+}
+function renderIifCustomerTotals(box) {
+  const byCust = new Map();   // label → { bill, nb, emps: Map(name → { bill, nb }) }
+  for (const row of iifRenderedRows) {
+    if (!iifRowTicked(row)) continue;
+    const hours = Number(row.e && row.e.hours);
+    if (!(hours > 0)) continue;
+    const cust = (row.e.customerMatched || '').trim() || '(no customer)';
+    const emp = row.emp || '';
+    const billable = row.e.billable !== false;
+    if (!byCust.has(cust)) byCust.set(cust, { bill: 0, nb: 0, emps: new Map() });
+    const c = byCust.get(cust);
+    if (!c.emps.has(emp)) c.emps.set(emp, { bill: 0, nb: 0 });
+    const p = c.emps.get(emp);
+    if (billable) { c.bill += hours; p.bill += hours; } else { c.nb += hours; p.nb += hours; }
+  }
+  if (!byCust.size) { box.hidden = true; box.innerHTML = ''; return; }
+  box.hidden = false;
+  const fmt = (h) => iifFmtHours(h) || '·';
+  const custs = [...byCust.entries()].sort((a, b) => (b[1].bill + b[1].nb) - (a[1].bill + a[1].nb) || a[0].localeCompare(b[0]));
+  let gb = 0, gn = 0;
+  const body = custs.map(([name, c]) => {
+    gb += c.bill; gn += c.nb;
+    const open = iifTotOpen.has(name);
+    const subs = open ? [...c.emps.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([emp, p]) =>
+      `<tr class="iif-cust-sub"><th class="iif-tot-name"><span class="cal-chip iif-emp-chip" style="${chipStyle(emp)}">${escapeHtml(emp || '—')}</span></th>`
+      + `<td>${fmt(p.bill)}</td><td>${fmt(p.nb)}</td><td class="iif-tot-sum">${fmt(p.bill + p.nb)}</td></tr>`).join('') : '';
+    return `<tr class="iif-cust-row" data-cust="${escapeHtml(name)}" aria-expanded="${open}"><th class="iif-tot-name"><span class="iif-cust-caret">${open ? '▾' : '▸'}</span> ${escapeHtml(name)}</th>`
+      + `<td>${fmt(c.bill)}</td><td>${fmt(c.nb)}</td><td class="iif-tot-sum">${fmt(c.bill + c.nb)}</td></tr>` + subs;
+  }).join('');
+  const grand = custs.length > 1
+    ? `<tr class="iif-tot-all"><th class="iif-tot-name">All customers</th><td>${fmt(gb)}</td><td>${fmt(gn)}</td><td class="iif-tot-sum">${fmt(gb + gn)}</td></tr>` : '';
+  box.innerHTML = iifTotSwitchHtml()
+    + `<table class="iif-totals-table iif-cust-table"><thead><tr><th class="iif-tot-name">Customer</th><th>Billable</th><th>Not billable</th><th class="iif-tot-sum">Total</th></tr></thead><tbody>${body}${grand}</tbody></table>`;
+}
 function renderIifTotals() {
   const box = document.getElementById('iif-totals');
   if (!box) return;
+  if (!box.dataset.wired) {
+    box.dataset.wired = '1';
+    box.addEventListener('click', (e) => {
+      const m = e.target.closest('[data-tot-mode]');
+      if (m) {
+        iifTotMode = m.dataset.totMode === 'customer' ? 'customer' : 'person';
+        try { localStorage.setItem('na-iif-tot', iifTotMode); } catch (err) {}
+        renderIifTotals();
+        return;
+      }
+      const r = e.target.closest('.iif-cust-row');
+      if (r) {
+        const k = r.dataset.cust;
+        if (iifTotOpen.has(k)) iifTotOpen.delete(k); else iifTotOpen.add(k);
+        renderIifTotals();
+      }
+    });
+  }
+  if (iifTotMode === 'customer') { renderIifCustomerTotals(box); return; }
   // weekStartIso → employee → dateIso → hours
   const weeks = new Map();
   for (const row of iifRenderedRows) {
@@ -10751,7 +10977,7 @@ function renderIifTotals() {
     }).join('');
     return `<table class="iif-totals-table"><thead>${head}</thead><tbody>${rows}</tbody></table>`;
   }).join('');
-  box.innerHTML = tables;
+  box.innerHTML = iifTotSwitchHtml() + tables;
 }
 
 // (The pinned "Note line" bar was removed in v2026.08.18-2325 along with
@@ -11185,6 +11411,69 @@ function showHoursView() {
 }
 
 if (iifBtn) iifBtn.addEventListener('click', showHoursView);
+
+// ---------- My hours (customer accounts) — v2026.10.03-2042 ----------
+// Their own billable hours, from the customer-safe job copies (custJobs).
+// Never before the "job started" date the admin set, when there is one.
+function myHoursRows(from, to) {
+  return Storage.listJobs()
+    .filter(j => !j.noWork && j.date && (!from || j.date >= from) && (!to || j.date <= to))
+    .map(j => {
+      const lines = (Array.isArray(j.crew) ? j.crew : []).filter(c => c && c.name && Number(c.hours) > 0);
+      const total = lines.reduce((a, c) => a + Number(c.hours), 0);
+      return { date: j.date, lines, total };
+    })
+    .filter(r => r.total > 0)
+    .sort((a, b) => a.date.localeCompare(b.date));
+}
+function renderMyHours() {
+  const fromEl = document.getElementById('myh-from');
+  const toEl = document.getElementById('myh-to');
+  const table = document.getElementById('myh-table');
+  const note = document.getElementById('myh-note');
+  if (!table) return;
+  const started = Storage.getMyCustAccess().started || '';
+  if (started && fromEl.value && fromEl.value < started) fromEl.value = started;
+  const rows = myHoursRows(fromEl.value, toEl.value);
+  const fmt = (h) => iifFmtHours(h) || '·';
+  note.textContent = started ? `Showing hours from ${shortDate(started)}, when the job started.` : '';
+  if (!rows.length) {
+    table.innerHTML = '<tbody><tr><td class="price-empty-state">No hours recorded between these dates.</td></tr></tbody>';
+    return;
+  }
+  const grand = rows.reduce((a, r) => a + r.total, 0);
+  table.innerHTML = '<thead><tr><th class="iif-tot-name">Date</th><th class="iif-tot-name">Who</th><th class="iif-tot-sum">Hours</th></tr></thead><tbody>'
+    + rows.map(r => `<tr><th class="iif-tot-name">${escapeHtml(shortDate(r.date))}</th>`
+      + `<td class="myh-who">${r.lines.map(c => `${escapeHtml(c.name)} ${fmt(Number(c.hours))}`).join(', ')}</td>`
+      + `<td class="iif-tot-sum">${fmt(r.total)}</td></tr>`).join('')
+    + `<tr class="iif-tot-all"><th class="iif-tot-name" colspan="2">Total</th><td class="iif-tot-sum">${fmt(grand)}</td></tr></tbody>`;
+}
+function showMyHours() {
+  if (!isCustomerRole()) return;
+  const acc = Storage.getMyCustAccess();
+  if (!acc.canSeeHours) { goHome(); return; }
+  const view = document.getElementById('myhours-view');
+  if (!view) return;
+  hideAllScreens();
+  view.classList.add('active');
+  renderCrumbs('crumbs-myhours', [{ label: 'Home', go: 'home' }, { label: 'My hours' }]);
+  if (!handlingPopstate) history.pushState({ screen: 'myhours' }, '');
+  const fromEl = document.getElementById('myh-from');
+  const toEl = document.getElementById('myh-to');
+  const started = acc.started || '';
+  fromEl.min = started;
+  if (!fromEl.value) {
+    const first = myHoursRows('', '')[0];
+    fromEl.value = started || (first ? first.date : ymd(new Date()));
+  }
+  if (!toEl.value) toEl.value = ymd(new Date());
+  renderMyHours();
+}
+['myh-from', 'myh-to'].forEach(id => {
+  const el = document.getElementById(id);
+  if (el) el.addEventListener('change', renderMyHours);
+});
+
 // Calendar ⋯ › Hours (v2026.10.01-2308). Visibility is decided as the menu opens, so it
 // always follows the Features switch and the role without extra wiring.
 (() => {
@@ -11239,6 +11528,17 @@ if (iifToDate) iifToDate.addEventListener('change', iifRangeChanged);
   });
   document.addEventListener('click', (e) => {
     if (!panel.hidden && !panel.contains(e.target) && e.target !== btn) panel.hidden = true;
+  });
+})();
+
+// Customer: a redraw like Who, so the ticks survive switching back to All.
+(() => {
+  const sel = document.getElementById('iif-cust-sel');
+  if (!sel) return;
+  sel.addEventListener('change', () => {
+    closeIifCell(false);
+    setIifCustSel(sel.value);
+    renderIIFEntries(iifParsedEntries);
   });
 })();
 
@@ -11505,8 +11805,8 @@ function tutorialSteps(part) {
       requires: () => Storage.listCustomers().length > 0,
       target: () => document.getElementById('customer-more-btn'),
       text: isAdminRole()
-        ? 'The ⋯ menu has See customer in calendar — the calendar showing only this customer’s jobs, until you tap the ✕ on its bar. It also deletes a customer: they and all their notes go to Trash, in Settings, where you can put them back for 30 days.'
-        : 'The ⋯ menu has See customer in calendar — the calendar showing only this customer’s jobs, until you tap the ✕ on its bar.',
+        ? 'The ⋯ menu has See customer in calendar — the calendar showing only this customer’s jobs, until you tap the ✕ on its bar — and See hours, the Hours chart for just this customer from when their job started (or their first recorded hours) to today. Job started… sets that date. It also deletes a customer: they and all their notes go to Trash, in Settings, where you can put them back for 30 days.'
+        : 'The ⋯ menu has See customer in calendar — the calendar showing only this customer’s jobs, until you tap the ✕ on its bar — and See hours, the Hours chart for just this customer from their first recorded hours to today.',
     },
     {
       // Hidden when the first note has no address, phone or email — and
@@ -11531,7 +11831,7 @@ function tutorialSteps(part) {
         {
           screen: 'home',
           target: () => document.getElementById('fab'),
-          text: 'Tap + to start something new — a general note or a customer.',
+          text: 'Tap + to start something new — a general note, a customer, or a job on the calendar.',
         },
       ],
       aggregator: [
@@ -11932,7 +12232,7 @@ function tutorialSteps(part) {
         requires: hasJobs,
         setup: goHours,
         target: () => document.getElementById('iif-totals'),
-        text: 'Under the chart, one table per week adds up each person’s hours by day. It counts ticked rows only, so it always agrees with what the download would send.',
+        text: 'Under the chart are the totals. By person gives one table per week, each person’s hours by day. By customer gives each customer’s billable and non-billable hours for the whole range — tap a customer to see who worked them. Both count ticked rows only, so they agree with what the download would send.',
       },
       {
         screen: 'hours',
@@ -11986,7 +12286,7 @@ function tutorialSteps(part) {
       step(() => document.getElementById('feature-toggle-list'),
         'Switch off what you do not use and it disappears from the app — nothing is deleted, and turning it back on puts everything where it was. This is your account only; it follows you to your other devices and changes nothing for anyone else. If part of the app has vanished, look here first.'),
       step(() => document.getElementById('customer-link-list'),
-        'Link a customer to an app account and they can sign in to see the jobs you have booked for them — the date, the time and who is coming. Nothing else.'),
+        'Link a customer to an app account and they can sign in to see the jobs you have booked for them — the date, the time, the address and who is coming. Tick Can see hours to also show them their billable hours (never non-billable time or notes), and set Job started so those hours count from the start of their job.'),
       step(row('seed-btn'),
         'Fills the app with example customers, jobs, hours and prices so you can try anything without touching real work. Remove takes every bit of it back out and tells you exactly what it is deleting first.'),
       step(row('trash-open-btn'),
