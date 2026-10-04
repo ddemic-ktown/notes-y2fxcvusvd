@@ -20,6 +20,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 100, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.10.03-2159', 'Address, phone and email recognition is stricter and smarter: only lines that clearly are contact info count (suites before or after, city lines joined, extensions, labels), everything else in the note is ignored'],
   ['v2026.10.03-2145', 'Linking a customer account: search for the customer instead of scrolling a long list'],
   ['v2026.10.03-2135', 'The Settings tour now also covers QuickBooks export, Note keywords and Appearance & editing'],
   ['v2026.10.03-2132', 'The Settings tour now follows the new section order'],
@@ -172,7 +173,6 @@ const CHANGELOG = [
   ['v2026.08.19-0020', 'A new company sees two dismissible cards on the home screen — take the tour, add sample data — instead of a pop-up'],
   ['v2026.08.19-0007', 'A new-company invite is now tied to one company, expires after 14 days, and any admin can rename their own company'],
   ['v2026.08.18-2359', 'Invite someone to start their own company — a separate org with its own data, which they administer'],
-  ['v2026.08.18-2345', 'Sample data now covers everything — jobs, hours, price table, employees — and Remove says exactly what it will delete'],
 ];
 const APP_VERSION = CHANGELOG[0][0];
 
@@ -2661,19 +2661,105 @@ function requestCloseJobModal() {
 // street WORD instead of a number keeps the list tight: an ordinary note line
 // ("call before 9am", "gate code on the left") still doesn't qualify.
 // BC-centric; extend it as needed.
-const STREET_WORD_RE = /\b(st|street|rd|road|ave|avenue|dr|drive|way|ln|lane|ct|court|crt|pl|place|cres|crescent|blvd|boulevard|hwy|highway|tr|trail|terr|terrace|close|bay|row|park|gate|green|ridge|heights|hts|loop|mews|vista|point|pt)\b\.?$/i;
+// ---------- contact recognition (v2026.10.03-2159) ----------
+// The customer's FIRST note is read line by line, and a line counts only if it
+// clearly IS an address, a phone number or an email. Everything else in the
+// note — job notes, gate codes, "started framing Tuesday" — is ignored. Used by
+// the contact buttons (Navigate / Call / Text / Email), the job editor's
+// address choice and the customer search results, so they all agree.
+const CONTACT_LABEL_RE = /^(?:address|addr|home|work|office|cell|cellphone|mobile|mob|phone|ph|tel|telephone|fax|email|e-mail|mail|contact)\b\s*[:.\-–]?\s*|^[chwmef]\s*[:.]\s*/i;
+const STREET_TYPES = 'st|street|rd|road|ave|av|avenue|dr|drive|way|ln|lane|ct|court|crt|pl|place|cres|cr|crescent|blvd|boulevard|hwy|highway|tr|trl|trail|terr|terrace|close|bay|row|park|gate|green|ridge|heights|hts|loop|mews|vista|point|pt|cir|circle|pkwy|parkway|sq|square|landing|crossing|common|cmn|grove|hill|view|rise|walk|wynd|alley|line|sideroad|concession|estates|manor|glen|pass|run|woods?|meadows?|harbour|centre|cove|link|path|dale|field|plaza|gardens|gdns';
+const STREET_WORD_RE = new RegExp(`\\b(?:${STREET_TYPES})\\b\\.?`, 'i');
+const UNIT_WORD = '(?:unit|suite|ste|apt|apartment|#)';
+const UNIT_BEFORE_RE = new RegExp(`^${UNIT_WORD}\\s*[a-z0-9]+\\s*[,\\-–]?\\s*(?=\\d)`, 'i');   // "Unit 12, 123 …" / "#12-123 …"
+const UNIT_DASH_RE = /^\d+[a-z]?\s*-\s*(?=\d+\s+\S)/i;                                   // "12-123 Main St"
+const UNIT_AFTER_RE = new RegExp(`[\\s,]+${UNIT_WORD}\\s*[\\w-]+\\.?\\s*$`, 'i');          // "… Dr. Suite 12"
+const PO_BOX_RE = /\b(?:p\.?\s*o\.?\s*box|box\s+\d+)\b/i;
+const RURAL_RE = /^(?:r\.?\s?r\.?|rural\s+route)\s*#?\s*\d+/i;
+const PROVINCES = 'BC|AB|SK|MB|ON|QC|NB|NS|PE|PEI|NL|YT|NT|NU|British Columbia|Alberta|Saskatchewan|Manitoba|Ontario|Quebec|New Brunswick|Nova Scotia|Newfoundland|Yukon';
+const POSTAL_RE = /\b[ABCEGHJ-NPRSTVXY]\d[ABCEGHJ-NPRSTV-Z]\s?\d[ABCEGHJ-NPRSTV-Z]\d\b/i;
+const CITY_LINE_RE = new RegExp(`^[A-Za-z][A-Za-z .'’-]{1,40},?\\s*(?:${PROVINCES})\\b[\\s,]*(?:[A-Z]\\d[A-Z]\\s?\\d[A-Z]\\d)?\\s*$|^[A-Za-z][A-Za-z .'’-]{1,40},?\\s*[A-Z]\\d[A-Z]\\s?\\d[A-Z]\\d\\s*$|^[A-Z]\\d[A-Z]\\s?\\d[A-Z]\\d\\s*$`, 'i');
+const PHONE_FIND_RE = /(?:\+?1[\s.\-]?)?\(?\d{3}\)?[\s.\-]?\d{3}[\s.\-]?\d{4}(?:\s*(?:x|ext\.?|extension)\s*\d{1,5})?/gi;
+const EMAIL_FIND_RE = /[\w.+\-]+@[\w\-]+(?:\.[\w\-]+)+/g;
+
+function stripContactLabel(line) { return line.replace(CONTACT_LABEL_RE, '').trim(); }
+function wordCount(s) { return (s.match(/[A-Za-z]{2,}/g) || []).length; }
+
+// The bit a maps app can find: no unit/suite, before or after the street.
+function navAddress(addr) {
+  let a = String(addr || '').trim();
+  a = a.replace(UNIT_BEFORE_RE, '').replace(UNIT_DASH_RE, '');
+  // a unit after the street may sit before a ", City" part
+  a = a.replace(new RegExp(`[\\s,]+${UNIT_WORD}\\s*[\\w-]+\\.?(?=\\s*(,|$))`, 'i'), '');
+  return a.replace(/\s{2,}/g, ' ').replace(/\s+,/g, ',').trim();
+}
+
+function looksLikeAddress(line) {
+  const l = stripContactLabel(line);
+  if (!l || PO_BOX_RE.test(l)) return false;
+  if (wordCount(l) > 10) return false;                   // a sentence, not an address
+  if (EMAIL_FIND_RE.test(l)) { EMAIL_FIND_RE.lastIndex = 0; return false; }
+  EMAIL_FIND_RE.lastIndex = 0;
+  if (RURAL_RE.test(l)) return true;
+  const core = l.replace(UNIT_BEFORE_RE, '').replace(UNIT_DASH_RE, '');
+  if (!/^\d{1,6}[a-z]?\s+\S/i.test(core)) return false;  // must start with a house number
+  if (/^\d{1,6}[a-z]?\s+(?:x|by)\s+\d/i.test(core)) return false;  // "2 x 4", "12 by 8"
+  // Words an address doesn't contain but a to-do line does ("3 boxes screws on Main St")
+  if (/\b(?:on|at|for|to|of|with|from|need|needs|get|bring|buy|order|call|ask|pick|drop|boxes?|sheets?|pcs|pieces|bags?|rolls?)\b/i.test(core)) return false;
+  return STREET_WORD_RE.test(core.replace(/^\d{1,6}[a-z]?\s+/, ''));
+}
+
+function parseContactInfo(body) {
+  const out = { addresses: [], phones: [], emails: [] };
+  const lines = String(body || '').split('\n').slice(1).map(l => l.trim());
+  for (let i = 0; i < lines.length; i++) {
+    const raw = lines[i];
+    if (!raw) continue;
+    const isFax = /\bfax\b/i.test(raw);
+    const l = stripContactLabel(raw);
+    // Email: the line is an email, perhaps with a name or label beside it.
+    const emails = l.match(EMAIL_FIND_RE);
+    if (emails) {
+      const rest = l.replace(EMAIL_FIND_RE, ' ');
+      if (wordCount(rest) <= 3 && !/\d{3}/.test(rest)) {
+        emails.forEach(e => { if (!out.emails.includes(e)) out.emails.push(e); });
+        continue;
+      }
+    }
+    // Phone: the line is a number (or two), perhaps with a short label.
+    const phones = l.match(PHONE_FIND_RE);
+    if (phones) {
+      const rest = l.replace(PHONE_FIND_RE, ' ').replace(/[\/,;|&]|\band\b|\bor\b/gi, ' ');
+      if (wordCount(rest) <= 2 && !/\d/.test(rest)) {
+        if (!isFax) phones.forEach(p => {
+          const ext = (p.match(/(?:x|ext\.?|extension)\s*(\d{1,5})\s*$/i) || [])[1] || '';
+          let digits = p.replace(/(?:x|ext\.?|extension)\s*\d{1,5}\s*$/i, '').replace(/\D/g, '');
+          if (digits.length === 11 && digits[0] === '1') digits = digits.slice(1);
+          if (digits.length !== 10) return;
+          if (out.phones.some(x => x.digits === digits)) return;
+          out.phones.push({ display: p.trim(), digits, ext, tel: `+1${digits}${ext ? ',' + ext : ''}` });
+        });
+        continue;
+      }
+    }
+    // Address, with the next line joined on when it is the city / postal code.
+    if (looksLikeAddress(raw)) {
+      let full = stripContactLabel(raw);
+      const next = lines[i + 1] || '';
+      if (next && CITY_LINE_RE.test(next) && !POSTAL_RE.test(full) && !new RegExp(`\\b(?:${PROVINCES})\\b`).test(full)) {
+        full = `${full.replace(/[,\s]+$/, '')}, ${next.replace(/^[,\s]+/, '')}`;
+        i++;
+      }
+      if (!out.addresses.some(a => a.full === full)) out.addresses.push({ full, nav: navAddress(full) });
+    }
+  }
+  return out;
+}
+
+// The customer's addresses as typed (suite and all) — see parseContactInfo.
 function addressCandidates(customerId) {
   const def = customerId ? Storage.getDefaultNoteForCustomer(customerId) : null;
-  if (!def) return [];
-  const lines = (def.body || '').split('\n').slice(1);
-  return lines.map(l => l.trim()).filter(l => {
-    if (!l) return false;
-    if (EMAIL_RE.test(l)) { EMAIL_RE.lastIndex = 0; return false; }
-    const digits = l.replace(/\D/g, '');
-    if (digits.length >= 10 && !/[a-z]{3}/i.test(l.replace(/[^a-z]/gi, ''))) return false; // bare phone
-    if (!/[a-z]{3}/i.test(l)) return false;
-    return /\d/.test(l) || STREET_WORD_RE.test(l);
-  });
+  return def ? parseContactInfo(def.body).addresses.map(x => x.full) : [];
 }
 
 function openJobModal(jobId, dateStr) {
@@ -8864,21 +8950,17 @@ if (restoreBtn && restoreFile) {
 const contactStripEl = document.getElementById('customer-contact-strip');
 // Deliberately conservative: 10+ digits with common separators, so job numbers
 // and measurements ("2x4", "3.5") don't turn into phone links.
-const PHONE_RE = /(\+?\d[\d\s().-]{8,}\d)/g;
-const EMAIL_RE = /\b[\w.+-]+@[\w-]+\.[\w.-]{2,}\b/g;
-
+// Phones and emails come from parseContactInfo (v2026.10.03-2159) — line by line, and
+// only lines that clearly ARE a number or an address count.
 function extractContacts(text) {
-  const body = text || '';
-  const emails = [...new Set((body.match(EMAIL_RE) || []))];
-  const phones = [...new Set((body.match(PHONE_RE) || [])
-    .map(p => p.trim())
-    .filter(p => (p.replace(/\D/g, '').length >= 10 && p.replace(/\D/g, '').length <= 15)))];
-  return { phones, emails };
+  const info = parseContactInfo(text);
+  return { phones: info.phones, emails: info.emails, addresses: info.addresses };
 }
 
 // Directions link: Apple Maps on iPhone/iPad, Google Maps elsewhere (v2026.10.03-0725).
 function mapsUrl(address) {
-  const q = encodeURIComponent(String(address || ''));
+  // Without the unit/suite: maps apps often fail on "… Dr. Suite 12" (v2026.10.03-2159)
+  const q = encodeURIComponent(navAddress(address));
   const ios = /iP(hone|ad|od)/.test(navigator.userAgent)
     || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
   return ios ? `https://maps.apple.com/?daddr=${q}` : `https://www.google.com/maps/dir/?api=1&destination=${q}`;
@@ -8886,9 +8968,9 @@ function mapsUrl(address) {
 function renderContactStrip(customerId) {
   if (!contactStripEl) return;
   const def = customerId ? Storage.getDefaultNoteForCustomer(customerId) : null;
-  const { phones, emails } = extractContacts(def ? def.body : '');
+  const { phones, emails, addresses } = extractContacts(def ? def.body : '');
   // Navigate (v2026.10.02-1936): one button per address line the job editor would offer.
-  const addrs = customerId ? addressCandidates(customerId) : [];
+  const addrs = addresses.map(x => x.full);
   if (!phones.length && !emails.length && !addrs.length) { contactStripEl.hidden = true; contactStripEl.innerHTML = ''; return; }
   const parts = [];
   addrs.forEach(a => {
@@ -8898,10 +8980,10 @@ function renderContactStrip(customerId) {
     parts.push(`<a class="contact-btn" href="${escapeHtml(href)}" target="_blank" rel="noopener" title="${escapeHtml(a)}">${escapeHtml(label)}</a>`);
   });
   phones.forEach(p => {
-    const tel = p.replace(/[^\d+]/g, '');
-    parts.push(`<a class="contact-btn" href="tel:${escapeHtml(tel)}">📞 Call</a>`);
-    parts.push(`<a class="contact-btn" href="sms:${escapeHtml(tel)}">💬 Text</a>`);
-    parts.push(`<span class="contact-value">${escapeHtml(p)}</span>`);
+    // p.tel carries an extension as ",12" (dial, pause, 12); a text goes to the number alone
+    parts.push(`<a class="contact-btn" href="tel:${escapeHtml(p.tel)}">📞 Call</a>`);
+    parts.push(`<a class="contact-btn" href="sms:+1${escapeHtml(p.digits)}">💬 Text</a>`);
+    parts.push(`<span class="contact-value">${escapeHtml(p.display)}</span>`);
   });
   emails.forEach(e => {
     parts.push(`<a class="contact-btn" href="mailto:${escapeHtml(e)}">✉️ Email</a>`);
