@@ -20,6 +20,8 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 100, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.10.03-2119', 'First sign-in is smoother: it waits for the new membership and quietly retries instead of failing until the app is restarted'],
+  ['v2026.10.03-2117', 'Setting a password after an older sign-in sends a fresh link instead of an error; “couldn’t be loaded” now says which step failed'],
   ['v2026.10.03-2042', 'Privacy pass: customers and employees no longer see other accounts’ emails, payroll details or account links; customers read a safe copy of their jobs; customers can be allowed to see their own billable hours (My hours) from a Job started date'],
   ['v2026.10.03-2017', 'Customer ⋯ → See hours opens the Hours chart for that customer, from their first recorded hours to today'],
   ['v2026.10.03-2013', 'Hours: pick one customer, and switch the totals between By person and By customer (billable, not billable, total; tap for who)'],
@@ -171,8 +173,6 @@ const CHANGELOG = [
   ['v2026.08.17-2140', 'Customers linked to an app account can see their own scheduled jobs — date, time and who is coming'],
   ['v2026.08.17-2030', 'Employees can reach the Calendar (and a shared Price Table) from their home screen'],
   ['v2026.08.17-1714', 'The scrollbar in a note stays visible instead of fading out'],
-  ['v2026.08.17-1712', 'Editing a job has a Duplicate button — same job, next day, change the date before saving'],
-  ['v2026.08.17-1706', 'Accepting a keyboard suggestion mid-paragraph no longer pulls the next line up into it'],
 ];
 const APP_VERSION = CHANGELOG[0][0];
 
@@ -8484,6 +8484,21 @@ if (setPasswordSave) {
       setPasswordModal.hidden = true;
     } catch (err) {
       console.error(err);
+      // Firebase only allows a password change soon after signing in (v2026.10.03-2117).
+      // Send a fresh link instead of showing the raw error; opening it signs
+      // them in again and this box comes back.
+      if (err && err.code === 'auth/requires-recent-login' && auth.currentUser && auth.currentUser.email) {
+        const email = auth.currentUser.email;
+        try {
+          await sendSignInLinkToEmail(auth, email, { url: APP_URL, handleCodeInApp: true });
+          window.localStorage.setItem(EMAIL_FOR_SIGNIN_KEY, email);
+          setPasswordError.textContent = `For security, setting a password needs a fresh sign-in. We’ve emailed a new link to ${email} — open it and you’ll be asked to set your password again.`;
+        } catch (e2) {
+          console.error(e2);
+          setPasswordError.textContent = 'For security, setting a password needs a fresh sign-in. Sign out, sign in again with an emailed link, then set your password.';
+        }
+        return;
+      }
       setPasswordError.textContent = err && err.message ? err.message : 'Could not set password.';
     }
   });
@@ -9900,7 +9915,11 @@ onAuthStateChanged(auth, async (user) => {
     return;
   }
   // Signed in — resolve org (creates or joins), then migrate if needed
-  try {
+  // A refused read on a FIRST sign-in is usually the server catching up with
+  // a membership created a moment ago — a restart always fixed it. So retry
+  // quietly a few times before showing any error (v2026.10.03-2119). Only permission
+  // errors are retried; "no invite" and "expired" are real answers.
+  const loadAccount = async () => {
     await Storage.init(user.uid, user.email);
     // Wait for initial snapshots
     await new Promise((resolve) => {
@@ -9908,9 +9927,30 @@ onAuthStateChanged(auth, async (user) => {
         if (Storage.isReady()) { un(); resolve(); }
       });
     });
-    // Subscribe before migration so we catch the snapshot update
-    unsubStorage = Storage.onChange(rerenderCurrent);
     await Storage.maybeMigrateFromOldPath(user.uid);
+  };
+  const setLoadingText = (txt) => {
+    const msg = document.querySelector('#loading-card .signin-message');
+    if (msg) msg.innerHTML = '<span class="nav-spinner" style="width:18px;height:18px;border-width:3px;vertical-align:-3px;"></span> ' + escapeHtml(txt);
+  };
+  try {
+    const waits = [1000, 1500, 2500];
+    for (let attempt = 0; ; attempt++) {
+      try {
+        await loadAccount();
+        break;
+      } catch (e) {
+        const denied = e && (e.code === 'permission-denied' || /insufficient permissions/i.test(e.message || ''));
+        if (!denied || attempt >= waits.length) throw e;
+        console.warn('Account load refused — retrying', attempt + 1, e);
+        setLoadingText('Setting up your account…');
+        await new Promise(r => setTimeout(r, waits[attempt]));
+      }
+    }
+    setLoadingText('Signing you in — please wait…');
+    // Subscribe after a successful load (was before the migration check; the
+    // retry loop re-inits, so subscribing inside it would stack listeners)
+    unsubStorage = Storage.onChange(rerenderCurrent);
   } catch (err) {
     console.error('Account load failed:', err);
     showLoadingCard(false);
@@ -9984,8 +10024,10 @@ function showInitError(user, err) {
       `${user.email || 'This account'} doesn't have access to this app yet. Ask the administrator for an invite.`;
   } else {
     const detail = (err && (err.message || err.code)) ? (err.message || err.code) : String(err);
+    // err.step (v2026.10.03-2117) names what was being done, e.g. "reading your membership"
+    const where = err && err.step ? ` (while ${err.step})` : '';
     initErrorText.textContent =
-      `You're signed in as ${user.email || 'unknown'}, but your account couldn't be loaded: ${detail}`;
+      `You're signed in as ${user.email || 'unknown'}, but your account couldn't be loaded${where}: ${detail}`;
   }
   initErrorBanner.hidden = false;
 }

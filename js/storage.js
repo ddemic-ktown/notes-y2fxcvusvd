@@ -440,15 +440,20 @@ let _orgCreatedAt = null;
 const NEW_ORG_INVITE_DAYS = 14;
 
 // Returns orgId. Joins via invite, or (if self-signup enabled) creates a new org.
+// Tags a failure with the step it happened in (v2026.10.03-2117), so "couldn't be
+// loaded" can say WHAT was refused instead of a bare permission error.
+async function step(label, p) {
+  try { return await p; } catch (e) { if (e && typeof e === 'object' && !e.step) e.step = label; throw e; }
+}
 async function resolveOrg(userId, userEmail) {
   // 1. Check if user already has an org membership doc anywhere
   //    We store a pointer in a top-level user doc: users/{uid}/orgId
   const userDocRef = doc(db, `users/${userId}`);
-  const userSnap = await getDoc(userDocRef);
+  const userSnap = await step('reading your sign-in record', getDoc(userDocRef));
   if (userSnap.exists() && userSnap.data().orgId) {
     const existingOrgId = userSnap.data().orgId;
     // Confirm membership still exists
-    const memberSnap = await getDoc(doc(db, `orgs/${existingOrgId}/members/${userId}`));
+    const memberSnap = await step('reading your membership', getDoc(doc(db, `orgs/${existingOrgId}/members/${userId}`)));
     if (memberSnap.exists()) {
       return { orgId: existingOrgId, role: memberSnap.data().role };
     }
@@ -459,7 +464,7 @@ async function resolveOrg(userId, userEmail) {
     const emailKey = emailKeyOf(userEmail);
     // Search all orgs for an invite — we store invite lookup at top level
     const inviteLookupRef = doc(db, `inviteLookup/${emailKey}`);
-    const inviteLookup = await getDoc(inviteLookupRef);
+    const inviteLookup = await step('looking up your invitation', getDoc(inviteLookupRef));
     if (inviteLookup.exists()) {
       const invite = inviteLookup.data();
       // A FOUNDER INVITE: don't join anyone's org — start your own.
@@ -505,7 +510,7 @@ async function resolveOrg(userId, userEmail) {
           batch.delete(doc(db, `orgs/${invite.issuedByOrg}/invites/${emailKey}`));
         }
         batch.delete(inviteLookupRef);
-        await batch.commit();
+        await step('joining the company', batch.commit());
         // Same reason as the self-signup path below: give Firestore a moment to
         // propagate the membership, or the listeners attach before the rules can
         // see that this person is a member and every read is refused.
@@ -521,7 +526,11 @@ async function resolveOrg(userId, userEmail) {
       batch.set(userDocRef, { orgId });
       batch.delete(doc(db, `orgs/${orgId}/invites/${emailKey}`));
       batch.delete(inviteLookupRef);
-      await batch.commit();
+      await step('joining the company', batch.commit());
+      // Same pause the new-company path takes (v2026.10.03-2119): the membership was just
+      // created, and reads that check it can briefly lag behind on a first
+      // sign-in — which looked like a failed sign-in that a restart fixed.
+      await new Promise(r => setTimeout(r, 1000));
       return { orgId, role };
     }
   }
@@ -541,7 +550,7 @@ async function resolveOrg(userId, userEmail) {
     role: 'admin', email: userEmail || '', name: userEmail || '', joinedAt: nowIso(),
   });
   batch.set(userDocRef, { orgId: newOrgId });
-  await batch.commit();
+  await step('joining the company', batch.commit());
   // Small delay to let Firestore propagate membership before attaching listeners
   await new Promise(r => setTimeout(r, 1000));
   return { orgId: newOrgId, role: 'admin' };
@@ -2465,9 +2474,9 @@ export const Storage = {
     // Only migrate if org has no notes/customers yet
     if (_cache.notes.length > 0 || _cache.customers.length > 0) return false;
 
-    const oldNotesSnap = await getDocs(collection(db, `users/${userId}/notes`));
-    const oldCustomersSnap = await getDocs(collection(db, `users/${userId}/customers`));
-    const oldSettingsSnap = await getDoc(doc(db, `users/${userId}/settings/preferences`));
+    const oldNotesSnap = await step('checking for notes from an older version', getDocs(collection(db, `users/${userId}/notes`)));
+    const oldCustomersSnap = await step('checking for notes from an older version', getDocs(collection(db, `users/${userId}/customers`)));
+    const oldSettingsSnap = await step('checking for notes from an older version', getDoc(doc(db, `users/${userId}/settings/preferences`)));
 
     if (oldNotesSnap.empty && oldCustomersSnap.empty) {
       // Try localStorage migration as before
