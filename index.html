@@ -320,22 +320,43 @@
 
   <!-- JOB EDITOR MODAL -->
   <div id="job-modal" class="modal-overlay" hidden>
-    <div class="modal-panel">
+    <!-- Reworked v2026.10.03: full screen on phones, customer first, times
+         stacked, slim section rules, Save/Cancel pinned to the bottom (the bar
+         is the LAST child, so position:sticky never lets go of it). -->
+    <div class="modal-panel job-panel">
       <div class="modal-header">
         <h2 class="modal-title" id="job-modal-title">New job</h2>
         <button id="job-close" class="icon-btn" aria-label="Close">✕</button>
       </div>
-      <label class="setting-inline-label" for="job-date">Date</label>
-      <input id="job-date" class="signin-input" type="date" />
-      <!-- A day off. Times stay live so it can still be drawn as a block; the
-           customer and address are disabled, since it has neither. -->
-      <label class="setting-check" style="margin-top:8px;">
-        <input id="job-nowork" type="checkbox" />
-        <span>
-          No work
-          <em class="setting-check-hint">A day off rather than a job. Shows as <strong>No Work</strong> with a red outline, and is left out of the hours chart and the QuickBooks export.</em>
-        </span>
-      </label>
+      <div class="job-date-row">
+        <label class="setting-inline-label job-date-label" for="job-date">Date</label>
+        <input id="job-date" class="signin-input" type="date" />
+        <label class="setting-check job-nowork-check">
+          <input id="job-nowork" type="checkbox" />
+          <span>No work</span>
+        </label>
+      </div>
+      <!-- Hidden whole while No work is ticked: a day off has no customer. -->
+      <div id="job-customer-section">
+        <h4 class="setting-sub-title job-sec">Customer</h4>
+        <!-- Once chosen, the customer is a chip and the search goes away. -->
+        <div id="job-customer-chosen" class="job-cust-chosen" hidden></div>
+        <!-- column-reverse when there's more room above the field, so matches
+             aren't stuck behind the keyboard -->
+        <div id="job-customer-picker" class="job-customer-picker">
+          <div class="search-wrap">
+            <input id="job-customer-search" class="search-input" type="search" placeholder="Search customers…" autocomplete="off" />
+            <button class="search-clear" type="button" aria-label="Clear search" hidden>✕</button>
+          </div>
+          <ul id="job-customer-list" class="members-list job-customer-list"></ul>
+        </div>
+        <div id="job-address-wrap" hidden>
+          <label class="setting-inline-label" for="job-address">Address</label>
+          <input id="job-address" class="signin-input" type="text" placeholder="Optional" />
+          <div id="job-address-choices" class="job-address-choices" hidden></div>
+        </div>
+      </div>
+      <h4 class="setting-sub-title job-sec">When</h4>
       <div class="job-time-row">
         <label class="setting-inline-label">Start <input id="job-start" class="signin-input" type="time" /></label>
         <label class="setting-inline-label">End <input id="job-end" class="signin-input" type="time" /></label>
@@ -356,9 +377,7 @@
           </span>
         </label>
       </div>
-      <label class="setting-inline-label" for="job-desc">Description</label>
-      <textarea id="job-desc" class="csv-textarea" rows="2" placeholder="Optional"></textarea>
-      <h4 class="setting-sub-title">Who's working</h4>
+      <h4 class="setting-sub-title job-sec">Who's working</h4>
       <ul id="job-employees" class="members-list job-crew-list"></ul>
       <!-- One line per entry, so the same person can be added twice — once
            billable, once not. The picker is a plain <select> that resets to its
@@ -366,31 +385,17 @@
       <div class="job-crew-add">
         <button id="job-crew-add-btn" class="secondary setting-wide-btn" type="button">+ &nbsp;Add employee</button>
       </div>
-      <h4 class="setting-sub-title">Customer</h4>
-      <!-- column-reverse when there's more room above the field, so matches
-           aren't stuck behind the keyboard -->
-      <div id="job-customer-picker" class="job-customer-picker">
-        <div class="search-wrap">
-          <input id="job-customer-search" class="search-input" type="search" placeholder="Search customers…" autocomplete="off" />
-          <button class="search-clear" type="button" aria-label="Clear search" hidden>✕</button>
-        </div>
-        <ul id="job-customer-list" class="members-list job-customer-list"></ul>
-      </div>
-      <p id="job-customer-chosen" class="muted setting-hint"></p>
-      <div id="job-address-wrap" hidden>
-        <label class="setting-inline-label" for="job-address">Address</label>
-        <input id="job-address" class="signin-input" type="text" placeholder="Optional" />
-        <div id="job-address-choices" class="job-address-choices" hidden></div>
-      </div>
-      <!-- Save / Cancel stick to the bottom of the sheet (v2026.10.02-1913). -->
-      <div class="job-action-bar">
-        <button id="job-save" class="primary" type="button">Save</button>
-        <!-- Same as the ✕ — closes without saving. (v2026.09.30-2059) -->
-        <button id="job-cancel" class="secondary" type="button">Cancel</button>
-      </div>
-      <div class="setting-btn-col">
+      <h4 class="setting-sub-title job-sec"><label for="job-desc">Description</label></h4>
+      <textarea id="job-desc" class="csv-textarea" rows="2" placeholder="Optional"></textarea>
+      <div class="setting-btn-col job-extra-btns">
         <button id="job-duplicate" class="secondary setting-wide-btn" type="button" hidden>Duplicate to next day</button>
         <button id="job-delete" class="secondary setting-wide-btn danger-item" type="button" hidden>Delete job</button>
+      </div>
+      <!-- Save / Cancel: always the bottom of the visible sheet. -->
+      <div class="job-action-bar">
+        <button id="job-save" class="primary" type="button">Save</button>
+        <!-- Same as the ✕ — closes without saving, asking first if anything changed. -->
+        <button id="job-cancel" class="secondary" type="button">Cancel</button>
       </div>
     </div>
   </div>
@@ -421,7 +426,7 @@
             <button id="price-filter-start" class="editor-more-item" type="button">Filter rows &amp; columns</button>
             <button id="price-export" class="editor-more-item" type="button">Export CSV</button>
             <button id="price-import" class="editor-more-item" type="button">Import CSV</button>
-            <button id="price-share" class="editor-more-item" type="button">Share with employees</button>
+            <button id="price-share" class="editor-more-item" type="button">Share / unshare…</button>
             <button id="price-reset" class="editor-more-item danger-item" type="button" hidden>Reset table…</button>
             <!-- The tour for THIS screen, reachable from the screen itself.
                  ends it here instead of rolling into the
@@ -528,10 +533,10 @@
   <div id="price-share-modal" class="modal-overlay" hidden>
     <div class="modal-panel">
       <div class="modal-header">
-        <h2 class="modal-title">Share price table</h2>
+        <h2 class="modal-title">Share / unshare price table</h2>
         <button id="price-share-close" class="icon-btn" aria-label="Close">✕</button>
       </div>
-      <p class="modal-hint">Employees you pick can view and edit the whole table.</p>
+      <p class="modal-hint">Ticked employees can view and edit the whole table. Untick to stop sharing.</p>
       <ul id="price-share-list" class="members-list"></ul>
     </div>
   </div>
@@ -913,7 +918,7 @@
                  there — which is why the picker used to flash and close, and
                  a dismissed wheel commits today's date. -->
             <div id="date-picker-btn" class="editor-more-item date-picker-row"><span aria-hidden="true">Insert a date</span><input id="date-picker-input" class="date-picker-overlay" type="date" aria-label="Pick a date to insert" /></div>
-            <button id="assign-btn" class="editor-more-item" aria-label="Share with users" hidden>Share with users</button>
+            <button id="assign-btn" class="editor-more-item" aria-label="Share / unshare" hidden>Share / unshare…</button>
             <button id="assign-customer-btn" class="editor-more-item" aria-label="Assign to customer" hidden>Assign to customer</button>
             <button id="duplicate-note-btn" class="editor-more-item" aria-label="Duplicate note" hidden>Duplicate note</button>
             <button id="editor-iif-btn" class="editor-more-item" aria-label="Hours" hidden>Hours</button>
@@ -1003,10 +1008,10 @@
   <div id="assign-modal" class="modal-overlay" hidden>
     <div class="modal-panel">
       <div class="modal-header">
-        <h2 class="modal-title">Share with Users</h2>
+        <h2 class="modal-title">Share / unshare note</h2>
         <button id="assign-modal-close" class="icon-btn" aria-label="Close">✕</button>
       </div>
-      <p class="muted" style="font-size:13px; margin:0 0 12px;">Select who can see this note. Admins always have access.</p>
+      <p class="muted" style="font-size:13px; margin:0 0 12px;">Ticked people can see this note. Untick to stop sharing. Admins always have access.</p>
       <ul id="assign-members-list" class="members-list"></ul>
       <button id="assign-save-btn" class="primary setting-wide-btn" type="button" style="margin-top:14px;">Save</button>
     </div>

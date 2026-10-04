@@ -1245,6 +1245,7 @@ body.dark-mode .price-best-badge { color: #4ade80; }
   color: var(--ink);
 }
 .price-cell-actions { display: flex; gap: 6px; }
+.price-last { font-size: 12px; color: var(--ink-soft); margin-bottom: 4px; white-space: nowrap; }
 .price-cell-actions button {
   flex: 1; padding: 6px 8px; font-size: 13px; border-radius: 6px; cursor: pointer;
   border: 1px solid var(--line); background: var(--surface); color: var(--ink); font-family: inherit;
@@ -1680,6 +1681,14 @@ body.dark-mode input[type="date"], body.dark-mode input[type="time"] { color-sch
 /* Current time (v2026.10.01-1646) */
 .cal-now { position: absolute; left: 0; right: 0; height: 0; border-top: 2px solid #2563eb; z-index: 30; pointer-events: none; }
 .cal-now::before { content: ''; position: absolute; left: 0; top: -5px; width: 8px; height: 8px; border-radius: 50%; background: #2563eb; }
+/* The time, in the hour-label column (day) or at the column's left (week),
+   so it never sits on top of a job. Above the hour labels it would collide with. */
+.cal-now-label {
+  position: absolute; left: 4px; top: -9px; z-index: 1;
+  background: #2563eb; color: #fff; border-radius: 4px;
+  font-size: 10px; font-weight: 600; line-height: 16px; padding: 0 4px; white-space: nowrap;
+}
+.cal-now-label-wk { left: 0; font-size: 9px; line-height: 14px; top: -8px; padding: 0 3px; }
 .customers-header { flex-direction: column; align-items: stretch; gap: 4px; }
 .customers-header-top { display: flex; align-items: center; gap: 8px; }
 .customers-header-bottom { display: flex; align-items: center; gap: 8px; }
@@ -3339,3 +3348,54 @@ body.vv-zoomed-pinch .cal-cells { overflow-y: visible; }
    horizontally by dragging on the vendor row. Everywhere else is unaffected. */
 .price-item   { touch-action: pan-x; }   /* rows drag up/down */
 .price-vendor { touch-action: pan-y; }   /* columns drag left/right */
+
+/* ---- Job editor rework (v2026.10.03-1734) ------------------------------------------ */
+/* Date and No work share a row. */
+.job-date-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.job-date-row .job-date-label { flex: 0 0 100%; margin: 0; }
+.job-date-row #job-date { flex: 1 1 160px; width: auto; margin-bottom: 0; }
+.job-nowork-check { flex: 0 0 auto; padding: 0; align-items: center; }
+.job-nowork-check input[type="checkbox"] { margin-top: 0; }
+/* Section breaks: a hairline and a small heading instead of a big gap. */
+.job-panel .job-sec {
+  margin: 12px 0 6px; padding-top: 8px; border-top: 1px solid var(--line);
+  font-size: 11px; letter-spacing: 0.04em;
+}
+.job-panel .job-sec label { cursor: pointer; }
+/* Start, End and Hours stacked: label left, field right — they can no longer
+   overlap however narrow the phone. */
+.job-panel .job-time-row { flex-direction: column; gap: 6px; flex-wrap: nowrap; }
+.job-panel .job-time-row > label {
+  flex: none; min-width: 0; flex-direction: row; align-items: center; justify-content: space-between; gap: 10px; margin: 0;
+}
+.job-panel .job-time-row input[type="time"] { width: 62%; flex: 0 0 62%; margin-bottom: 0; }
+.job-panel .job-time-row .job-dur-picker { width: 62%; flex: 0 0 62%; min-width: 0; }
+.job-panel .job-dur-picker select, .job-panel .job-dur-sep { margin-bottom: 0; }
+/* Chosen customer as a chip with its own ✕. */
+.job-cust-chosen[hidden] { display: none; }
+.job-cust-chip {
+  display: inline-flex; align-items: center; gap: 6px; max-width: 100%;
+  padding: 6px 6px 6px 12px; border-radius: 999px;
+  background: var(--accent); color: var(--accent-ink); font-weight: 600; font-size: 15px;
+}
+.job-cust-chip-x {
+  background: rgba(255,255,255,0.25); color: inherit; border: 0; border-radius: 999px;
+  width: 28px; height: 28px; font-size: 14px; line-height: 1; cursor: pointer; flex: 0 0 auto;
+}
+#job-address-wrap { margin-top: 8px; }
+/* Tighter crew lines, and the note only once asked for. */
+.job-panel .job-crew-row { padding: 6px 8px; gap: 4px; align-items: stretch; }   /* .member-item centres; a line with no "+ note" floated mid-row */
+.job-crew-note-add {
+  background: none; border: 0; color: var(--accent); font: inherit; font-size: 12px;
+  cursor: pointer; padding: 4px 2px;
+}
+.job-extra-btns { margin-top: 10px; }
+/* Phones: the editor IS the screen. Height follows --app-vh, so with the
+   keyboard up the sheet shrinks and Save/Cancel stay just above it. */
+@media (max-width: 430px), (max-height: 500px) {
+  #job-modal { align-items: stretch; }
+  #job-modal .job-panel {
+    max-width: none; height: var(--app-vh, 100vh); max-height: none; border-radius: 0;
+    padding-top: calc(16px + env(safe-area-inset-top, 0px));
+  }
+}

@@ -20,6 +20,10 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 100, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.10.03-1734', 'Job editor: full screen on phones, customer first as a chip, times stacked, slimmer sections, + note per crew line, title shows customer and date, asks before discarding changes, Save/Cancel pinned to the bottom'],
+  ['v2026.10.03-1636', 'The calendar’s blue current-time line now shows the time'],
+  ['v2026.10.03-1634', 'Sharing a note or the price table now reads Share / unshare, with a count when shared; the boxes say untick to stop sharing'],
+  ['v2026.10.03-1548', 'Price cell: opening one adds a price — date starts at today, a Last: line shows the current entry, and the button reads Add price'],
   ['v2026.10.03-1044', 'Tour: fixed two out-of-date steps and the Install part (its target had gone); now covers Navigate, map pins, the lowest-price ✓, Layout ticks, weekly hours totals, Refresh, customer sort and What’s new'],
   ['v2026.10.03-1039', 'Sample data: No work day, overnight job, hand-typed hours, non-billable and repeated crew lines with notes, hours history, 16 price items across trades; no more dead hour records'],
   ['v2026.10.03-1029', 'Price table sort cycles Custom → A–Z → Latest; A–Z is view-only like Latest'],
@@ -169,10 +173,6 @@ const CHANGELOG = [
   ['v2026.08.16-1929', 'Fixed double-tap zoom snapping straight back out on phones'],
   ['v2026.08.16-1923', 'The Files card now fills its full width — tap the left side to open, + Add on the right'],
   ['v2026.08.16-1808', 'Photos close with an X in the corner, double-tap zoom is more reliable, and the Files card is easier to tap'],
-  ['v2026.08.16-1755', 'Photo viewer: share and delete buttons now sit at the bottom, with clearer icons'],
-  ['v2026.08.16-1431', 'Photos: double-tap or pinch to zoom, drag to pan, and a share button while viewing'],
-  ['v2026.08.14-0150', 'The app no longer flashes the sign-in screen while your session is loading'],
-  ['v2026.08.08-2000', 'Finishing a new customer opens their file; finishing a new note returns home'],
 ];
 const APP_VERSION = CHANGELOG[0][0];
 
@@ -1310,6 +1310,12 @@ const MAX_CHIPS = 3; // then "+N"
 let calCursor = new Date();      // any date inside the displayed month
 let calSelectedDate = null;      // 'YYYY-MM-DD' for the day view
 
+// The current-time line's label (v2026.10.03-1636). Follows the 12/24-hour setting;
+// compact drops AM/PM for the narrow week columns.
+function nowTimeLabel(compact) {
+  const t = new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: !getClock24() });
+  return compact ? t.replace(/\s?[AaPp]\.?\s?[Mm]\.?$/, '') : t;
+}
 function ymd(d) {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, '0');
@@ -1886,11 +1892,12 @@ function renderCalendar() {
     const clearMin = (shortPills ? 40 : 30) / (trackPx / range);
     const indentPx = shortPills ? 6 : 12;
     // Current time on today's column, when it falls inside the range (v2026.10.01-1646).
+    // Labelled with the time since v2026.10.03-1636 — compact, the columns are narrow.
     const nowLineWk = (s) => {
       if (s !== todayStr) return '';
       const n = new Date().getHours() * 60 + new Date().getMinutes();
       if (n < lo || n > hi) return '';
-      return `<div class="cal-now" data-now="week" data-lo="${lo}" data-range="${range}" style="top:${pct(n)}"></div>`;
+      return `<div class="cal-now" data-now="week" data-lo="${lo}" data-range="${range}" style="top:${pct(n)}"><span class="cal-now-label cal-now-label-wk" data-compact="1">${nowTimeLabel(true)}</span></div>`;
     };
     const cols = days.map((d, i) => {
       const s = ymd(d);
@@ -2250,7 +2257,7 @@ function renderCalendarDay() {
   // Current time (v2026.10.01-1646) — today only; moved each minute by tickNowLines.
   const nowMin = new Date().getHours() * 60 + new Date().getMinutes();
   const nowLine = calSelectedDate === ymd(new Date())
-    ? `<div class="cal-now" data-now="day" style="top:${(nowMin / 60) * HOUR_PX}px"></div>` : '';
+    ? `<div class="cal-now" data-now="day" style="top:${(nowMin / 60) * HOUR_PX}px"><span class="cal-now-label">${nowTimeLabel(false)}</span></div>` : '';
   timeline.innerHTML = hours + blocks + nowLine;
   // The pin must not start a drag, open the job or count as a day swipe.
   timeline.querySelectorAll('.cal-pin').forEach(a => {
@@ -2510,6 +2517,7 @@ if (calGrid) {
 // already drawn rather than re-rendering, so nothing scrolls or flickers.
 setInterval(() => {
   const n = new Date().getHours() * 60 + new Date().getMinutes();
+  document.querySelectorAll('.cal-now-label').forEach(el => { el.textContent = nowTimeLabel(el.dataset.compact === '1'); });
   document.querySelectorAll('.cal-now').forEach(el => {
     if (el.dataset.now === 'day') el.style.top = ((n / 60) * HOUR_PX) + 'px';
     else {
@@ -2571,6 +2579,39 @@ if (calDayMain) {
 const jobModal = document.getElementById('job-modal');
 let jobEditingId = null;
 let jobChosenCustomer = null; // { id, name, addresses: [] }
+// Job editor rework (v2026.10.03-1734) — title, unsaved-changes check.
+let jobTitlePrefix = '';      // 'Copy · ' after Duplicate
+let jobSnapshot = '';         // the form as it opened, to tell if anything changed
+function updateJobTitle() {
+  const el = document.getElementById('job-modal-title');
+  if (!el) return;
+  const date = (document.getElementById('job-date') || {}).value;
+  const noWork = !!(document.getElementById('job-nowork') || {}).checked;
+  let when = '';
+  if (date) {
+    const d = parseYmd(date);
+    if (!Number.isNaN(d.getTime())) when = d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
+  }
+  const who = noWork ? NO_WORK_LABEL : (jobChosenCustomer ? jobChosenCustomer.name : (jobEditingId ? 'Job' : 'New job'));
+  el.textContent = jobTitlePrefix + (when ? `${who} · ${when}` : who);
+}
+function jobFormState() {
+  const v = (id) => ((document.getElementById(id) || {}).value || '');
+  return JSON.stringify({
+    date: v('job-date'), start: v('job-start'), end: v('job-end'), dur: getJobDuration(),
+    desc: v('job-desc'), addr: v('job-address'),
+    noWork: !!(document.getElementById('job-nowork') || {}).checked,
+    cust: jobChosenCustomer ? jobChosenCustomer.id : null,
+    crew: jobCrewDraft.filter(c => c && c.name).map(c => [c.name, c.hours, c.billable, c.note || '']),
+  });
+}
+// ✕, Cancel and a tap outside all come here. Asks only when something changed.
+async function requestCloseJobModal() {
+  if (jobModal.hidden) return;
+  if (jobFormState() !== jobSnapshot
+      && !await askConfirm('Your changes to this job haven’t been saved.', { title: 'Discard changes?', okLabel: 'Discard' })) return;
+  jobModal.hidden = true;
+}
 
 // Address candidates from the customer's default note: skip the name line and
 // anything that looks like a phone or email; keep lines with both digits and
@@ -2599,8 +2640,8 @@ function addressCandidates(customerId) {
 function openJobModal(jobId, dateStr) {
   if (!jobModal || !isAdminRole()) return;
   jobEditingId = jobId || null;
+  jobTitlePrefix = '';
   const job = jobId ? Storage.getJob(jobId) : null;
-  document.getElementById('job-modal-title').textContent = job ? 'Edit job' : 'New job';
   document.getElementById('job-date').value = (job && job.date) || dateStr || ymd(new Date());
   document.getElementById('job-start').value = (job && job.start) || '';
   document.getElementById('job-end').value = (job && job.end) || '';
@@ -2627,6 +2668,8 @@ function openJobModal(jobId, dateStr) {
   const noWorkBox = document.getElementById('job-nowork');
   if (noWorkBox) noWorkBox.checked = !!(job && job.noWork);
   applyNoWorkState();
+  updateJobTitle();
+  jobSnapshot = jobFormState();
   jobModal.hidden = false;
   // Size the crew notes now that they can be measured (v2026.09.30-2250).
   requestAnimationFrame(() => {
@@ -2641,21 +2684,19 @@ function openJobModal(jobId, dateStr) {
 // clock instead of sitting in the "Any time" strip.
 function applyNoWorkState() {
   const on = !!(document.getElementById('job-nowork') || {}).checked;
-  const picker = document.getElementById('job-customer-picker');
-  const addrWrap = document.getElementById('job-address-wrap');
-  const chosen = document.getElementById('job-customer-chosen');
-  [picker, addrWrap, chosen].forEach(el => {
-    if (!el) return;
-    el.style.opacity = on ? '0.4' : '';
-    el.style.pointerEvents = on ? 'none' : '';
-  });
+  // Hidden rather than greyed out (v2026.10.03-1734) — a day off has no customer, so the
+  // section is just in the way. Save already drops customer and address.
+  const section = document.getElementById('job-customer-section');
+  if (section) section.hidden = on;
   ['job-customer-search', 'job-address'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.disabled = on;
   });
 }
 const jobNoWorkBox = document.getElementById('job-nowork');
-if (jobNoWorkBox) jobNoWorkBox.addEventListener('change', applyNoWorkState);
+if (jobNoWorkBox) jobNoWorkBox.addEventListener('change', () => { applyNoWorkState(); updateJobTitle(); });
+const jobDateInput = document.getElementById('job-date');
+if (jobDateInput) jobDateInput.addEventListener('change', updateJobTitle);
 
 // The crew being edited in the modal, as a working array. Rebuilt from the job
 // on open and read back on save — the DOM is never the source of truth, so
@@ -2707,11 +2748,12 @@ function renderJobEmployees(crew) {
               <input type="checkbox" data-crew-bill="${i}" ${c.billable ? 'checked' : ''} />
               <span>Billable</span>
             </label>
+            ${(c.note || c.showNote) ? '' : `<button type="button" class="job-crew-note-add" data-crew-note-add="${i}">+ note</button>`}
             <button type="button" class="job-crew-del" data-crew-del="${i}" aria-label="Remove this line">✕</button>
           </div>
-          <textarea class="signin-input job-crew-note" data-crew-note="${i}" rows="1"
+          ${(c.note || c.showNote) ? `<textarea class="signin-input job-crew-note" data-crew-note="${i}" rows="1"
                  placeholder="Note — travel, warranty, shop…" autocomplete="off"
-                 aria-label="Note for this line">${escapeHtml(c.note || '')}</textarea>
+                 aria-label="Note for this line">${escapeHtml(c.note || '')}</textarea>` : ''}
         </li>`;
       }).join('')
       : `<li class="member-item job-crew-empty">${names.length
@@ -2757,6 +2799,18 @@ function renderJobEmployees(crew) {
       inp.addEventListener('input', () => {
         jobCrewDraft[+inp.dataset.crewNote].note = inp.value;
         autoGrowNote(inp);
+      });
+    });
+    // "+ note" (v2026.10.03-1734): the box only appears once wanted. showNote lives on the
+    // draft only — saveJob keeps name/hours/billable/note and nothing else.
+    ul.querySelectorAll('[data-crew-note-add]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const i = +btn.dataset.crewNoteAdd;
+        jobCrewDraft[i].showNote = true;
+        openPicker = -1;
+        draw();
+        const box = ul.querySelector(`[data-crew-note="${i}"]`);
+        if (box) box.focus();
       });
     });
     ul.querySelectorAll('[data-crew-del]').forEach(btn => {
@@ -2862,7 +2916,23 @@ function renderJobCustomer(filter) {
   const ul = document.getElementById('job-customer-list');
   const chosen = document.getElementById('job-customer-chosen');
   if (!ul) return;
-  chosen.textContent = jobChosenCustomer ? `Selected: ${jobChosenCustomer.name}` : '';
+  // Chosen = a chip with ✕, and the search goes away (v2026.10.03-1734). ✕ brings the
+  // search back; the address is left as it is until another customer is picked.
+  const picker = document.getElementById('job-customer-picker');
+  if (picker) picker.hidden = !!jobChosenCustomer;
+  chosen.hidden = !jobChosenCustomer;
+  chosen.innerHTML = jobChosenCustomer
+    ? `<span class="job-cust-chip">${escapeHtml(jobChosenCustomer.name)}<button type="button" class="job-cust-chip-x" aria-label="Choose a different customer">✕</button></span>`
+    : '';
+  const chipX = chosen.querySelector('.job-cust-chip-x');
+  if (chipX) chipX.addEventListener('click', () => {
+    jobChosenCustomer = null;
+    renderJobCustomer('');
+    updateJobTitle();
+    const input = document.getElementById('job-customer-search');
+    if (input) input.focus();
+  });
+  updateJobTitle();
   const words = (filter || '').trim().toLowerCase().split(/\s+/).filter(Boolean);
   // Nothing typed yet: offer the customers you actually book, so the common
   // case needs no keyboard at all. Ranked by frequency-then-recency; a brand
@@ -3081,13 +3151,13 @@ if (jobCustomerSearch) {
   }
 }
 const jobClose = document.getElementById('job-close');
-if (jobClose) jobClose.addEventListener('click', () => { jobModal.hidden = true; });
+if (jobClose) jobClose.addEventListener('click', requestCloseJobModal);
 // Description grows with its text, capped by CSS (v2026.09.30-2316).
 const jobDescEl = document.getElementById('job-desc');
 if (jobDescEl) jobDescEl.addEventListener('input', () => autoGrowNote(jobDescEl));
 const jobCancel = document.getElementById('job-cancel');
-if (jobCancel) jobCancel.addEventListener('click', () => { jobModal.hidden = true; });
-if (jobModal) jobModal.addEventListener('click', (e) => { if (e.target === jobModal) jobModal.hidden = true; });
+if (jobCancel) jobCancel.addEventListener('click', requestCloseJobModal);
+if (jobModal) jobModal.addEventListener('click', (e) => { if (e.target === jobModal) requestCloseJobModal(); });
 
 const jobSave = document.getElementById('job-save');
 if (jobSave) jobSave.addEventListener('click', async () => {
@@ -3128,7 +3198,8 @@ if (jobDuplicate) jobDuplicate.addEventListener('click', () => {
   jobEditingId = null;
   const dateEl = document.getElementById('job-date');
   if (dateEl && dateEl.value) dateEl.value = shiftYmd(dateEl.value, 1);
-  document.getElementById('job-modal-title').textContent = 'New job (copy)';
+  jobTitlePrefix = 'Copy · ';
+  updateJobTitle();
   // Hours are what someone actually WORKED on that day — a copy is a new day
   // nobody has worked yet. Crew, notes and billable carry over. (v2026.10.01-1646)
   renderJobEmployees(jobCrewDraft.map(c => ({ ...c, hours: null })));
@@ -3212,16 +3283,24 @@ function priceCellHtml(item, vendor, canEdit, isCheapest) {
   const key = `${item.id}|${vendor.id}`;
   const latest = Storage.latestPriceEntry(item, vendor.id);
   if (openCellKey === key && canEdit) {
-    // PREFILLED with what is already recorded (v2026.09.21-2226). It opened
-    // blank before, which read as "tapping a cell wipes it" and made a small
-    // correction — a date, an availability — impossible without retyping the
-    // price. Saving still APPENDS an entry; the history is untouched.
-    const today = new Date().toISOString().slice(0, 10);
+    // Opening a cell ADDS a price (v2026.10.03-1548). Price and availability are
+    // prefilled from the newest entry (v2026.09.21-2226 — blank read as "tapping
+    // wipes it"), but the DATE is today's and the button says Add price: with
+    // the old date and a Save button it looked like editing the current price.
+    // The newest entry is spelled out on a "Last:" line instead. A wrong entry
+    // is fixed by deleting it in the long-press history.
+    // ymd() is LOCAL — toISOString() gave tomorrow's date in a Pacific evening.
+    const today = ymd(new Date());
     const curPrice = (latest && latest.price != null && latest.price !== '') ? String(latest.price) : '';
-    const curDate = (latest && latest.date) || today;
+    const curDate = today;
     const curAvail = (latest && latest.avail) || 'yes';
+    const AVAIL_WORD = { yes: 'Available', soon: '2–3 days', later: 'Longer', no: 'Not available' };
+    const lastLine = latest
+      ? `<div class="price-last">Last: ${escapeHtml(curPrice ? Number(latest.price).toFixed(2) : 'no price')} · ${escapeHtml(shortDate(latest.date))} · ${escapeHtml(AVAIL_WORD[latest.avail] || 'Available')}</div>`
+      : '';
     const sel = (v) => curAvail === v ? ' selected' : '';
     return `<td class="price-cell price-cell-editing" data-key="${key}">
+      ${lastLine}
       <input class="price-input" type="number" inputmode="decimal" step="0.01" placeholder="Price" value="${escapeHtml(curPrice)}" />
       <input class="price-date" type="date" value="${escapeHtml(curDate)}" />
       <select class="price-avail">
@@ -3231,7 +3310,7 @@ function priceCellHtml(item, vendor, canEdit, isCheapest) {
         <option value="no"${sel('no')}>Not available</option>
       </select>
       <div class="price-cell-actions">
-        <button class="price-save" type="button">Save</button>
+        <button class="price-save" type="button">Add price</button>
         <button class="price-cancel" type="button">Cancel</button>
       </div>
     </td>`;
@@ -3452,6 +3531,7 @@ function renderPriceTable() {
   if (priceFabEl) priceFabEl.hidden = !fabAllowed;
   if (!fabAllowed) { const m = document.getElementById('price-fab-menu'); if (m) m.hidden = true; }
   if (shareBtn) shareBtn.hidden = !isAdminRole();
+  if (shareBtn && !shareBtn.hidden) shareBtn.textContent = shareMenuLabel(Storage.getPriceConfig().sharedWith);
   const resetBtn = document.getElementById('price-reset');
   if (resetBtn) resetBtn.hidden = !isAdminRole();
   const reorderBtn = document.getElementById('price-reorder');
@@ -4063,6 +4143,7 @@ if (priceShareBtn) priceShareBtn.addEventListener('click', () => {
       const cur = Storage.getPriceConfig().sharedWith;
       const next = cb.checked ? [...new Set([...cur, cb.dataset.uid])] : cur.filter(u => u !== cb.dataset.uid);
       await Storage.savePriceConfig({ sharedWith: next });
+      priceShareBtn.textContent = shareMenuLabel(next);
     });
   });
   priceShareModal.hidden = false;
@@ -5650,6 +5731,7 @@ function showEditor(record, type, cursorHint) {
   deleteBtn.style.display = (isAdminRole() && !(type === 'note' && currentIsDefault)) ? '' : 'none';
   const assignBtnEl = document.getElementById('assign-btn');
   if (assignBtnEl) assignBtnEl.hidden = (Storage.getRole() !== 'admin' || type !== 'note');
+  if (assignBtnEl && !assignBtnEl.hidden) refreshNoteShareLabel();
   const assignCustomerBtnEl = document.getElementById('assign-customer-btn');
   if (assignCustomerBtnEl) {
     // Admins can assign any note to a customer — or move it to a different
@@ -7858,6 +7940,20 @@ deleteBtn.addEventListener('click', async () => {
 
 // ---------- assign users ----------
 const assignBtn = document.getElementById('assign-btn');
+// "Share / unshare (2)…" (v2026.10.03-1634). "Share with users" gave no hint that the
+// same box is where you take someone OFF, or that anyone already had access.
+// Counted against current members, so a removed account doesn't inflate it.
+function shareMenuLabel(uids) {
+  const n = (Array.isArray(uids) ? uids : []).filter(u => Storage.getMember(u)).length;
+  return n ? `Share / unshare (${n})…` : 'Share / unshare…';
+}
+function refreshNoteShareLabel() {
+  if (!assignBtn) return;
+  const note = currentId ? Storage.getNote(currentId) : null;
+  const label = shareMenuLabel(note && note.assignedTo);
+  assignBtn.textContent = label;
+  assignBtn.setAttribute('aria-label', label);
+}
 const assignModal = document.getElementById('assign-modal');
 const assignModalClose = document.getElementById('assign-modal-close');
 const assignMembersList = document.getElementById('assign-members-list');
@@ -8107,6 +8203,8 @@ if (assignSaveBtn) {
     const uids = checked.map(cb => cb.dataset.uid);
     Storage.assignUsersToNote(currentId, uids);
     assignModal.hidden = true;
+    // assignUsersToNote updates the cache synchronously, so the count is current
+    refreshNoteShareLabel();
   });
 }
 
@@ -11439,7 +11537,7 @@ function tutorialSteps(part) {
       },
       setup: () => { showPriceTable(); return true; },
       target: () => document.querySelector('#price-table .price-cell'),
-      text: 'Tap any cell to record a price: the amount, the date you got it, and whether it’s in stock. It opens with what is already there, so you can fix one thing without retyping the rest. Leaving the price empty is fine — a date and “not available” on its own records that you asked and they had none. Each cell keeps every price you’ve entered.',
+      text: 'Tap any cell to record a price: the amount, the date you got it, and whether it’s in stock. Each tap ADDS a price for today, starting from the last one, which is shown above the boxes. To fix a wrong entry, press and hold the cell and delete it from the history. Leaving the price empty is fine — a date and “not available” on its own records that you asked and they had none. Each cell keeps every price you’ve entered.',
     },
     {
       screen: 'price',
@@ -11461,7 +11559,7 @@ function tutorialSteps(part) {
       screen: 'price',
       setup: () => { showPriceTable(); return true; },
       target: () => document.getElementById('price-more-btn'),
-      text: 'The ⋯ menu holds the rest: sort A–Z or by most recently priced, Layout to reorder rows and columns (tick several to move them to the top together), Filter, export to a spreadsheet (latest prices, or the full price history), import prices from a file or a pasted table (repeats are skipped), share the table with an employee, and (admins) reset it to start over.',
+      text: 'The ⋯ menu holds the rest: sort A–Z or by most recently priced, Layout to reorder rows and columns (tick several to move them to the top together), Filter, export to a spreadsheet (latest prices, or the full price history), import prices from a file or a pasted table (repeats are skipped), Share / unshare to let an employee see it (the number is how many can), and (admins) reset it to start over.',
     },
     {
       screen: 'price',
@@ -11674,7 +11772,7 @@ function tutorialSteps(part) {
         group: 'jobhours',
         requires: () => canEditJobs() && Storage.listJobs().length > 0,
         target: () => document.getElementById('job-employees'),
-        text: 'Untick Billable for hours you are paying but cannot charge — travel, a warranty callback, shop time. You can add the same person twice: six hours billable on one line, two not on the next. The note box says what the time was, and stays in JobPilot.',
+        text: 'Untick Billable for hours you are paying but cannot charge — travel, a warranty callback, shop time. You can add the same person twice: six hours billable on one line, two not on the next. “+ note” on a line adds a note saying what the time was; it stays in JobPilot.',
       },
       {
         screen: 'calendar',
@@ -11682,6 +11780,13 @@ function tutorialSteps(part) {
         requires: () => canEditJobs() && Storage.listJobs().length > 0,
         target: () => document.getElementById('job-nowork'),
         text: 'Tick No work to mark a day off instead of a job. It shows as No Work with a red outline — ordinary jobs get a green one — and it is left out of the hours chart and the QuickBooks file.',
+      },
+      {
+        screen: 'calendar',
+        group: 'jobhours',
+        requires: () => canEditJobs() && Storage.listJobs().length > 0,
+        target: () => document.getElementById('job-customer-chosen'),
+        text: 'Once picked, the customer shows as a chip — tap its ✕ to choose someone else. Close the job with unsaved changes and you are asked before anything is thrown away.',
       },
       {
         screen: 'calendar',
@@ -11862,7 +11967,7 @@ function tutorialSteps(part) {
       group: 'note',
       requires: () => Storage.listRecentCustomerNotes(1).length > 0,
       target: () => document.getElementById('editor-more-btn'),
-      text: 'Note tools: insert a date, share the note, move it to another customer, or delete it.',
+      text: 'Note tools: insert a date, Share / unshare — the number shows how many people can see it; untick someone there to take them off — move it to another customer, or delete it.',
     },
     {
       screen: 'editor',
