@@ -20,6 +20,10 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 100, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.10.03-2135', 'The Settings tour now also covers QuickBooks export, Note keywords and Appearance & editing'],
+  ['v2026.10.03-2132', 'The Settings tour now follows the new section order'],
+  ['v2026.10.03-2131', 'Settings sections reordered: everyday ones first (Signed in as, Crew, Users & access), one-off ones later, What’s new last'],
+  ['v2026.10.03-2129', 'Settings: Time Logger split into Crew and QuickBooks export; customer accounts under Users & access; clearer headings (Signed in as, Note keywords, Backup & restore, Help & tours…)'],
   ['v2026.10.03-2119', 'First sign-in is smoother: it waits for the new membership and quietly retries instead of failing until the app is restarted'],
   ['v2026.10.03-2117', 'Setting a password after an older sign-in sends a fresh link instead of an error; “couldn’t be loaded” now says which step failed'],
   ['v2026.10.03-2042', 'Privacy pass: customers and employees no longer see other accounts’ emails, payroll details or account links; customers read a safe copy of their jobs; customers can be allowed to see their own billable hours (My hours) from a Job started date'],
@@ -169,10 +173,6 @@ const CHANGELOG = [
   ['v2026.08.18-2359', 'Invite someone to start their own company — a separate org with its own data, which they administer'],
   ['v2026.08.18-2345', 'Sample data now covers everything — jobs, hours, price table, employees — and Remove says exactly what it will delete'],
   ['v2026.08.18-2325', 'The hours chart is now built from the hours you enter on calendar jobs, not from the hours note'],
-  ['v2026.08.18-1029', 'Note hours worked per person on a job; the day view pills show them as Name: 4'],
-  ['v2026.08.17-2140', 'Customers linked to an app account can see their own scheduled jobs — date, time and who is coming'],
-  ['v2026.08.17-2030', 'Employees can reach the Calendar (and a shared Price Table) from their home screen'],
-  ['v2026.08.17-1714', 'The scrollbar in a note stays visible instead of fading out'],
 ];
 const APP_VERSION = CHANGELOG[0][0];
 
@@ -765,14 +765,11 @@ function applyFeatureVisibility() {
   // were renumbered in v2026.09.18-2129 and 7 became Jobs.
   ['hours-export-block', 'qb-items-block', 'tutorial-btn-8', 'editor-help-hours']
     .forEach(id => { const el = document.getElementById(id); if (el) el.hidden = !hoursOn; });
-  // With the export gone, the card is no longer about QuickBooks at all.
-  const tlTitle = document.getElementById('timelogger-card-title');
-  if (tlTitle) {
-    // Keep the fold arrow — textContent alone wiped it.
-    const caret = tlTitle.querySelector('.setting-list-caret');
-    tlTitle.textContent = hoursOn ? 'Time Logger — QuickBooks' : 'Employees & customer accounts';
-    if (caret) tlTitle.append(' ', caret);
-  }
+  // QuickBooks export is its own section since v2026.10.03-2129 — nothing left in it
+  // without Hours, so it goes as a whole. (Crew and customer accounts live
+  // elsewhere and are unaffected.)
+  const qbRow = document.getElementById('qb-export-row');
+  if (qbRow) qbRow.hidden = !hoursOn;
   // Screen switches (v2026.10.02-1840)
   const show = (id, on) => { const el = document.getElementById(id); if (el) el.hidden = !on; };
   show('tutorial-btn-4', isFeatureOn('price'));
@@ -2801,7 +2798,7 @@ function renderJobEmployees(crew) {
       }).join('')
       : `<li class="member-item job-crew-empty">${names.length
           ? 'Nobody on this job yet.'
-          : 'Add employees in Settings → Time Logger first.'}</li>`;
+          : 'Add employees in Settings → Crew first.'}</li>`;
 
     ul.querySelectorAll('[data-crew-pick]').forEach(sel => {
       sel.addEventListener('change', () => {
@@ -12241,7 +12238,7 @@ function tutorialSteps(part) {
         screen: 'settings',
         setup: () => { if (!settingsView.classList.contains('active')) showSettings(); return true; },
         target: () => document.getElementById('iif-btn'),
-        text: 'Hours is in Settings, under Time Logger — QuickBooks, and in the calendar’s ⋯ menu. Long-press anyone’s hours, here or in the job editor, to see every value entered, when and by whom. It collects what everyone actually worked — the hours you enter on each calendar job — so you can check it and send it to QuickBooks.',
+        text: 'Hours is in Settings, under QuickBooks export, and in the calendar’s ⋯ menu. Long-press anyone’s hours, here or in the job editor, to see every value entered, when and by whom. It collects what everyone actually worked — the hours you enter on each calendar job — so you can check it and send it to QuickBooks.',
       },
       {
         screen: 'hours',
@@ -12311,34 +12308,41 @@ function tutorialSteps(part) {
     };
     const step = (target, text) => ({ screen: 'settings', setup: goSettings, target, text });
     return [
+      // Same order as the Settings sections (v2026.10.03-2132).
       step(() => document.querySelector('.settings-fold-all'),
         'This is Settings — the ⚙ at the top of the Home screen. Type in the search box to find a setting, or browse: every section starts closed. Tap a heading to open it, or open and close the lot with these two buttons.'),
-      step(() => document.getElementById('members-list'),
-        'Everyone with access to this company, and what each can do. Admin does everything. Bookkeeper sees everything but changes nothing. Employee sees only the notes and jobs given to them. Customer sees only their own. You can change your own role too, as long as somebody else is an admin — the last admin is locked so the company can never be left without one.'),
-      step(() => document.getElementById('invite-email'),
-        'Invite someone by email and pick what they are. They get a link that signs them straight in — no password to set up first. Get the role wrong and you can change it here afterwards; it takes effect on their phone immediately.'),
-      step(() => document.getElementById('invites-list'),
-        'Invitations you have sent that nobody has accepted yet. Cancel one with ✕ if you invited the wrong address.'),
-      step(() => document.getElementById('new-org-email'),
-        'This is different: it starts someone their OWN company, with their own customers, calendar and hours. Nothing of yours goes with it and you cannot see inside it. The invitation lasts 14 days.'),
       step(() => document.getElementById('org-name-input'),
-        'Your company name, shown at the top of this Account section. Change it whenever you like.'),
+        'Your company name, shown at the top of this Signed in as section. Change it whenever you like.'),
       step(() => document.getElementById('employee-list'),
         'Your crew. Apprentice or journeyman is not just a label — it picks which QuickBooks item their hours are billed against, so getting it wrong makes the import land in the wrong place. Anyone on payroll needs their QuickBooks payroll item typed in exactly, or QuickBooks rejects their hours — and an overtime item if they get it: hours past 8 in a day go there. Rename fixes a spelling everywhere at once, including on jobs from last year.'),
-      step(() => document.getElementById('feature-toggle-list'),
-        'Switch off what you do not use and it disappears from the app — nothing is deleted, and turning it back on puts everything where it was. This is your account only; it follows you to your other devices and changes nothing for anyone else. If part of the app has vanished, look here first.'),
+      step(() => document.getElementById('members-list'),
+        'Everyone with access to this company, and what each can do. Admin does everything. Bookkeeper sees everything but changes nothing. Employee sees only the notes and jobs given to them. Customer sees only their own. You can change your own role too, as long as somebody else is an admin — the last admin is locked so the company can never be left without one.'),
+      step(() => document.getElementById('invites-list'),
+        'Invitations you have sent that nobody has accepted yet. Cancel one with ✕ if you invited the wrong address.'),
+      step(() => document.getElementById('invite-email'),
+        'Invite someone by email and pick what they are. They get a link that signs them straight in — no password to set up first. Get the role wrong and you can change it here afterwards; it takes effect on their phone immediately.'),
       step(() => document.getElementById('customer-link-list'),
         'Link a customer to an app account and they can sign in to see the jobs you have booked for them — the date, the time, the address and who is coming. Tick Can see hours to also show them their billable hours (never non-billable time or notes), and set Job started so those hours count from the start of their job.'),
-      step(row('seed-btn'),
-        'Fills the app with example customers, jobs, hours and prices so you can try anything without touching real work. Remove takes every bit of it back out and tells you exactly what it is deleting first.'),
-      step(row('trash-open-btn'),
-        'Deleting is not final. Notes and customers go here for 30 days and can be put back — including a customer with all their notes.'),
+      step(() => document.getElementById('qb-export-row'),
+        'QuickBooks export: the Service item each classification bills against — typed exactly as it is in QuickBooks, or the import fails — and the Hours button, which opens the chart you check and send to QuickBooks as an .iif file.'),
+      step(row('keyword-input'),
+        'Note keywords. Start a paragraph in any note with one — todo, materials — and the home screen gathers it with every other paragraph like it, from every note. Add your own here.'),
+      step(() => document.getElementById('feature-toggle-list'),
+        'Switch off what you do not use and it disappears from the app — nothing is deleted, and turning it back on puts everything where it was. This is your account only; it follows you to your other devices and changes nothing for anyone else. If part of the app has vanished, look here first.'),
+      step(() => { const el = document.getElementById('theme-cycle-btn'); return el ? el.closest('.setting-row') : null; },
+        'Appearance & editing: light or dark, 12- or 24-hour time, where the Back button sits, which way the calendar swipes, and two editing options. These are for this device only.'),
       step(row('backup-btn'),
         'Downloads everything — including jobs and hours — as one file you can keep. Worth doing before anything drastic. Photos and documents are NOT in it; those live on the device. Restore from backup adds back anything that has gone missing, and never changes or deletes what is already here.'),
+      step(row('trash-open-btn'),
+        'Deleting is not final. Notes and customers go here for 30 days and can be put back — including a customer with all their notes.'),
       step(row('import-csv-btn'),
         'Already have your customers in a spreadsheet? Paste the rows here and each one becomes a customer with their details as their first note.'),
+      step(row('seed-btn'),
+        'Fills the app with example customers, jobs, hours and prices so you can try anything without touching real work. Remove takes every bit of it back out and tells you exactly what it is deleting first.'),
+      step(() => document.getElementById('new-org-email'),
+        'This is different: it starts someone their OWN company, with their own customers, calendar and hours. Nothing of yours goes with it and you cannot see inside it. The invitation lasts 14 days.'),
       step(() => document.getElementById('changelog-toggle'),
-        'What’s new lists every change to the app, newest first. The version you are running is shown at the top of Settings, and an update says “Updating to …” on the loading screen.'),
+        'What’s new lists every change to the app, newest first. The version you are running is shown at the top of Settings, and an update says “Updating to …” on the loading screen.')
     ];
   }
 

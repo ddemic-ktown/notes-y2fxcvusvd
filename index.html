@@ -699,6 +699,120 @@
         <button id="settings-expand-all" class="secondary" type="button">Expand all</button>
         <button id="settings-collapse-all" class="secondary" type="button">Collapse all</button>
       </div>
+      <!-- Section order (v2026.10.03-2131): everyday first, one-off later, What's new last. -->
+
+      <div class="setting-row setting-list-row">
+        <h3 class="setting-list-title">Signed in as</h3>
+        <p id="account-org" class="muted" style="margin: 0 0 4px;" hidden></p>
+        <p id="account-email" class="muted" style="margin: 0 0 8px;"></p>
+        <!-- Any admin can name their own company. Also how the ORIGINAL org
+             gets a name — it predates the field entirely. -->
+        <div id="org-name-row" hidden>
+          <h4 class="setting-sub-title" style="margin-top:0;">Company name</h4>
+          <div class="invite-form">
+            <input id="org-name-input" type="text" placeholder="Company name" autocomplete="off" />
+            <button id="org-name-save" class="primary">Save</button>
+          </div>
+          <p id="org-name-status" class="muted" style="font-size:13px; margin:6px 0 12px;"></p>
+        </div>
+        <button id="signout-btn" class="secondary setting-wide-btn">Sign out</button>
+      </div>
+
+      <!-- Split from "Time Logger — QuickBooks" (v2026.10.03-2129): the crew list is what
+           the calendar schedules against, so it is its own section; QuickBooks
+           settings and the Hours export are another. Customer accounts moved to
+           Users & access — they are about who can sign in. -->
+      <div class="setting-row setting-list-row" data-staff-only>
+        <h3 class="setting-list-title">Crew</h3>
+          <p class="muted setting-hint">Names you can schedule on a job and record hours against.</p>
+          <div class="keyword-add employee-add">
+            <input id="employee-input" type="text" placeholder="Add an employee" autocomplete="off" />
+            <select id="employee-type-input" aria-label="Classification">
+              <option value="journeyman">Journeyman</option>
+              <option value="apprentice">Apprentice</option>
+            </select>
+            <button id="employee-add-btn">Add</button>
+          </div>
+          <!-- Own class as well as keyword-list: employees stack as full-width
+               cards, keywords still wrap as pills. -->
+          <ul id="employee-list" class="keyword-list employee-list"></ul>
+          <p class="muted setting-hint">Jobs scheduled before a name was linked to an app account don't carry that account, so the person can't see them. Run this once after linking.</p>
+          <button id="employee-relink-btn" class="secondary setting-wide-btn">Re-link accounts to existing jobs</button>
+          <p id="employee-relink-status" class="muted setting-hint"></p>
+
+      </div>
+
+      <div class="setting-row setting-list-row" data-staff-only>
+        <h3 class="setting-list-title">Users &amp; access</h3>
+        <ul id="members-list" class="members-list"></ul>
+        <h4 class="setting-sub-title">Waiting to accept</h4>
+        <ul id="invites-list" class="members-list"></ul>
+        <h4 class="setting-sub-title">Invite someone</h4>
+        <div class="invite-form">
+          <input id="invite-email" type="email" placeholder="Email address" autocomplete="off" />
+          <select id="invite-role">
+            <option value="admin">Admin</option>
+            <option value="employee">Employee</option>
+            <option value="bookkeeper">Bookkeeper</option>
+            <option value="customer">Customer</option>
+          </select>
+          <button id="invite-btn" class="primary">Invite</button>
+        </div>
+        <p id="invite-status" class="muted" style="font-size:13px; margin-top:6px;"></p>
+        <h4 class="setting-sub-title">Customer accounts</h4>
+        <p class="muted setting-hint">Link a customer to their app account and they can see their own scheduled jobs — date, time, address and who's coming. Tick <strong>Can see hours</strong> to also show them their billable hours, counted from the <strong>Job started</strong> date.</p>
+        <div class="keyword-add employee-add">
+          <select id="customer-link-customer" class="employee-type-select" aria-label="Customer"></select>
+          <select id="customer-link-account" class="employee-type-select" aria-label="App account"></select>
+          <button id="customer-link-add">Link</button>
+        </div>
+        <ul id="customer-link-list" class="keyword-list employee-list"></ul>
+
+      </div>
+
+      <!-- Admin + bookkeeper; the service items are admin-only, so a bookkeeper
+           sees the Hours button only. Hidden whole when Hours is switched off. -->
+      <div class="setting-row setting-list-row" data-role-iif id="qb-export-row">
+        <h3 class="setting-list-title">QuickBooks export</h3>
+        <div data-staff-only>
+          <div id="qb-items-block">
+          <h4 class="setting-sub-title">QuickBooks service items</h4>
+          <p class="muted setting-hint">Which QuickBooks Service item each classification bills against. These must match your item list <strong>exactly</strong> — QuickBooks compares them character for character, and a single wrong character fails every row of the import. A sub-item is written parent:child. Leave blank to use the built-in default.</p>
+          <label class="employee-field">
+            <span class="employee-field-label">Journeyman item</span>
+            <input id="iif-item-journeyman" type="text" class="signin-input" autocomplete="off" spellcheck="false" placeholder="Service Rates:Standard Labour" />
+          </label>
+          <label class="employee-field">
+            <span class="employee-field-label">Apprentice item</span>
+            <input id="iif-item-apprentice" type="text" class="signin-input" autocomplete="off" spellcheck="false" placeholder="Service Rates:Labour Rate" />
+          </label>
+          </div>
+        </div>
+        <div id="hours-export-block" data-role-iif>
+          <h4 class="setting-sub-title">Export</h4>
+          <p class="muted setting-hint">Your calendar jobs' hours as an editable chart, then export as a .iif file for QuickBooks Desktop. The date range lives on that screen.</p>
+          <button id="iif-btn" class="secondary setting-wide-btn">Hours</button>
+        </div>
+      </div>
+
+      <div class="setting-row setting-list-row" id="keyword-settings-card" data-staff-only>
+        <h3 class="setting-list-title">Note keywords</h3>
+        <p class="muted setting-hint">e.g. todo, materials — a paragraph starting with one shows up on the home screen with every other one like it.</p>
+        <div class="keyword-add">
+          <input id="keyword-input" type="text" placeholder="Add a keyword" autocomplete="off" />
+          <button id="keyword-add-btn">Add</button>
+        </div>
+        <ul id="keyword-list" class="keyword-list"></ul>
+      </div>
+
+      <!-- Features: per-user show/hide. Each checkbox is SHOWN-when-checked, so
+           the default (all boxes ticked) is the app as it has always been. The
+           list is generated from FEATURE_TOGGLES in app.js. -->
+      <div class="setting-row setting-list-row" data-staff-only>
+        <h3 class="setting-list-title">Show or hide features</h3>
+        <p class="muted setting-hint">Turn off what you don't use and it disappears from the app. Nothing is deleted — turn it back on and everything is where you left it. This is your account only; it follows you to your other devices and doesn't change what anyone else sees.</p>
+        <div id="feature-toggle-list"></div>
+      </div>
       <div class="setting-row setting-list-row">
         <h3 class="setting-list-title">Appearance &amp; editing</h3>
         <label class="setting-inline-label">Theme</label>
@@ -742,79 +856,8 @@
         </label>
       </div>
 
-      <!-- Features: per-user show/hide. Each checkbox is SHOWN-when-checked, so
-           the default (all boxes ticked) is the app as it has always been. The
-           list is generated from FEATURE_TOGGLES in app.js. -->
       <div class="setting-row setting-list-row" data-staff-only>
-        <h3 class="setting-list-title">Features</h3>
-        <p class="muted setting-hint">Turn off what you don't use and it disappears from the app. Nothing is deleted — turn it back on and everything is where you left it. This is your account only; it follows you to your other devices and doesn't change what anyone else sees.</p>
-        <div id="feature-toggle-list"></div>
-      </div>
-
-      <div class="setting-row setting-list-row" id="keyword-settings-card" data-staff-only>
-        <h3 class="setting-list-title">Aggregator Keywords</h3>
-        <div class="keyword-add">
-          <input id="keyword-input" type="text" placeholder="Add a keyword" autocomplete="off" />
-          <button id="keyword-add-btn">Add</button>
-        </div>
-        <ul id="keyword-list" class="keyword-list"></ul>
-      </div>
-
-      <!-- Card is role-gated as a whole (admin + bookkeeper); the Employees
-           half is admin-only, so a bookkeeper sees Export only. -->
-      <div class="setting-row setting-list-row" data-role-iif>
-        <h3 class="setting-list-title" id="timelogger-card-title">Time Logger — QuickBooks</h3>
-
-        <div data-staff-only>
-          <h4 class="setting-sub-title" style="margin-top:0;">Employees</h4>
-          <p class="muted setting-hint">Names you can schedule on a job and record hours against.</p>
-          <div class="keyword-add employee-add">
-            <input id="employee-input" type="text" placeholder="Add an employee" autocomplete="off" />
-            <select id="employee-type-input" aria-label="Classification">
-              <option value="journeyman">Journeyman</option>
-              <option value="apprentice">Apprentice</option>
-            </select>
-            <button id="employee-add-btn">Add</button>
-          </div>
-          <!-- Own class as well as keyword-list: employees stack as full-width
-               cards, keywords still wrap as pills. -->
-          <ul id="employee-list" class="keyword-list employee-list"></ul>
-          <p class="muted setting-hint">Jobs scheduled before a name was linked to an app account don't carry that account, so the person can't see them. Run this once after linking.</p>
-          <button id="employee-relink-btn" class="secondary setting-wide-btn">Re-link accounts to existing jobs</button>
-          <p id="employee-relink-status" class="muted setting-hint"></p>
-
-          <h4 class="setting-sub-title">Customer accounts</h4>
-          <p class="muted setting-hint">Link a customer to their app account and they can see their own scheduled jobs — date, time and who's coming. Nothing else.</p>
-          <div class="keyword-add employee-add">
-            <select id="customer-link-customer" class="employee-type-select" aria-label="Customer"></select>
-            <select id="customer-link-account" class="employee-type-select" aria-label="App account"></select>
-            <button id="customer-link-add">Link</button>
-          </div>
-          <ul id="customer-link-list" class="keyword-list employee-list"></ul>
-
-          <div id="qb-items-block">
-          <h4 class="setting-sub-title">QuickBooks service items</h4>
-          <p class="muted setting-hint">Which QuickBooks Service item each classification bills against. These must match your item list <strong>exactly</strong> — QuickBooks compares them character for character, and a single wrong character fails every row of the import. A sub-item is written parent:child. Leave blank to use the built-in default.</p>
-          <label class="employee-field">
-            <span class="employee-field-label">Journeyman item</span>
-            <input id="iif-item-journeyman" type="text" class="signin-input" autocomplete="off" spellcheck="false" placeholder="Service Rates:Standard Labour" />
-          </label>
-          <label class="employee-field">
-            <span class="employee-field-label">Apprentice item</span>
-            <input id="iif-item-apprentice" type="text" class="signin-input" autocomplete="off" spellcheck="false" placeholder="Service Rates:Labour Rate" />
-          </label>
-          </div>
-        </div>
-
-        <div id="hours-export-block" data-role-iif>
-          <h4 class="setting-sub-title">Export</h4>
-          <p class="muted setting-hint">Your calendar jobs' hours as an editable chart, then export as a .iif file for QuickBooks Desktop. The date range lives on that screen.</p>
-          <button id="iif-btn" class="secondary setting-wide-btn">Hours</button>
-        </div>
-      </div>
-
-      <div class="setting-row setting-list-row" data-staff-only>
-        <h3 class="setting-list-title">Backup</h3>
+        <h3 class="setting-list-title">Backup &amp; restore</h3>
         <p class="muted setting-hint">Downloads everything — customers, notes, settings and the price table — as one file you can keep somewhere safe. Customer files stored on this device are not included.</p>
         <button id="backup-btn" class="secondary setting-wide-btn" type="button">Download backup</button>
         <!-- Admin only. Adds back what is MISSING; never overwrites. (v2026.09.30-2250) -->
@@ -829,94 +872,8 @@
         <button id="trash-open-btn" class="secondary setting-wide-btn" type="button">Trash</button>
       </div>
 
-      <div class="setting-row setting-list-row" data-staff-only>
-        <h3 class="setting-list-title">Sample data</h3>
-        <p class="muted setting-hint">Fills the app with a few example customers, notes and keywords so you can try things out. Remove it any time — your own data isn’t touched.</p>
-        <button id="seed-btn" class="secondary setting-wide-btn">Add sample data</button>
-        <button id="unseed-btn" class="secondary setting-wide-btn" hidden>Remove sample data</button>
-        <p id="seed-status" class="muted setting-hint" style="margin-top:8px;"></p>
-      </div>
-
-      <div class="setting-row setting-list-row" data-staff-only>
-        <h3 class="setting-list-title">Import customers from CSV</h3>
-        <p class="muted" style="margin:0 0 8px; font-size:13px;">
-          Paste rows from a spreadsheet. First row is treated as column headers (unchecked → first row is a customer). Each row becomes a customer; non-empty cells are joined as lines in their default note.
-        </p>
-        <label class="setting-check setting-check-tight">
-          <input id="import-has-header" type="checkbox" checked />
-          <span>First row is header</span>
-        </label>
-        <textarea id="import-csv" class="csv-textarea" rows="6" placeholder="Name,Address,Phone&#10;John Smith,123 Maple St,(403) 555-1234&#10;Jane Doe,456 Oak Ave,(403) 555-5678"></textarea>
-        <div class="csv-actions">
-          <button id="import-csv-btn" class="primary setting-wide-btn">Import</button>
-          <span id="import-status" class="muted setting-hint"></span>
-        </div>
-      </div>
-
-      <div class="setting-row setting-list-row" data-staff-only>
-        <h3 class="setting-list-title">Users</h3>
-        <ul id="members-list" class="members-list"></ul>
-        <h4 class="setting-sub-title">Pending Invites</h4>
-        <ul id="invites-list" class="members-list"></ul>
-        <h4 class="setting-sub-title">Invite a User</h4>
-        <div class="invite-form">
-          <input id="invite-email" type="email" placeholder="Email address" autocomplete="off" />
-          <select id="invite-role">
-            <option value="admin">Admin</option>
-            <option value="employee">Employee</option>
-            <option value="bookkeeper">Bookkeeper</option>
-            <option value="customer">Customer</option>
-          </select>
-          <button id="invite-btn" class="primary">Invite</button>
-        </div>
-        <p id="invite-status" class="muted" style="font-size:13px; margin-top:6px;"></p>
-      </div>
-
-      <!-- INVITE A NEW COMPANY — deliberately its OWN section, not a fifth
-           option in the role dropdown above. This does not add someone to your
-           org; it hands them a separate company with their own data, and one
-           mis-picked dropdown value should not be able to do that. Shown only
-           to the founder account (Storage.canInviteNewOrg), and enforced
-           independently by isFounder() in firestore.rules. -->
-      <div id="new-org-row" class="setting-row setting-list-row" hidden>
-        <h3 class="setting-list-title">Invite a New Company</h3>
-        <p class="muted setting-hint">Starts a separate company with its own customers, calendar and hours. They become its admin. Nothing here is shared with it.</p>
-        <div class="invite-form">
-          <input id="new-org-email" type="email" placeholder="Owner's email address" autocomplete="off" />
-          <input id="new-org-name" type="text" placeholder="Company name" autocomplete="off" />
-          <button id="new-org-btn" class="primary">Invite</button>
-        </div>
-        <p id="new-org-status" class="muted" style="font-size:13px; margin-top:6px;"></p>
-        <!-- Shown after sending, whether or not the email got through. NOT the
-             sign-in link — that is generated server-side and never returned to
-             the browser. It doesn't need to be: the invite is matched by EMAIL
-             ADDRESS, so any sign-in method with that address finds it. -->
-        <div id="new-org-handoff" class="new-org-handoff" hidden>
-          <p class="muted setting-hint">If the email doesn't arrive, send them this:</p>
-          <textarea id="new-org-handoff-text" class="csv-textarea" rows="8" readonly></textarea>
-          <button id="new-org-handoff-copy" class="secondary setting-wide-btn" type="button">Copy</button>
-        </div>
-      </div>
-
       <div class="setting-row setting-list-row">
-        <h3 class="setting-list-title">Account</h3>
-        <p id="account-org" class="muted" style="margin: 0 0 4px;" hidden></p>
-        <p id="account-email" class="muted" style="margin: 0 0 8px;"></p>
-        <!-- Any admin can name their own company. Also how the ORIGINAL org
-             gets a name — it predates the field entirely. -->
-        <div id="org-name-row" hidden>
-          <h4 class="setting-sub-title" style="margin-top:0;">Company name</h4>
-          <div class="invite-form">
-            <input id="org-name-input" type="text" placeholder="Company name" autocomplete="off" />
-            <button id="org-name-save" class="primary">Save</button>
-          </div>
-          <p id="org-name-status" class="muted" style="font-size:13px; margin:6px 0 12px;"></p>
-        </div>
-        <button id="signout-btn" class="secondary setting-wide-btn">Sign out</button>
-      </div>
-
-      <div class="setting-row setting-list-row">
-        <h3 class="setting-list-title">Help</h3>
+        <h3 class="setting-list-title">Help &amp; tours</h3>
         <div class="setting-btn-col">
           <button id="tutorial-btn-1" class="secondary" data-tutorial-part="1">Tutorial 1 — The basics</button>
           <button id="tutorial-btn-2" class="secondary" data-tutorial-part="2">Tutorial 2 — Home screen &amp; search</button>
@@ -932,6 +889,56 @@
           <button id="tutorial-btn-7" class="secondary" data-role-cal data-tutorial-part="7">Tutorial 7 — Jobs</button>
           <button id="tutorial-btn-8" class="secondary" data-role-iif data-tutorial-part="8">Tutorial 8 — Hours</button>
           <button id="tutorial-btn-9" class="secondary" data-staff-only data-tutorial-part="9">Tutorial 9 — Running your company</button>
+        </div>
+      </div>
+
+      <div class="setting-row setting-list-row" data-staff-only>
+        <h3 class="setting-list-title">Import customers</h3>
+        <p class="muted" style="margin:0 0 8px; font-size:13px;">
+          Paste rows from a spreadsheet. First row is treated as column headers (unchecked → first row is a customer). Each row becomes a customer; non-empty cells are joined as lines in their default note.
+        </p>
+        <label class="setting-check setting-check-tight">
+          <input id="import-has-header" type="checkbox" checked />
+          <span>First row is header</span>
+        </label>
+        <textarea id="import-csv" class="csv-textarea" rows="6" placeholder="Name,Address,Phone&#10;John Smith,123 Maple St,(403) 555-1234&#10;Jane Doe,456 Oak Ave,(403) 555-5678"></textarea>
+        <div class="csv-actions">
+          <button id="import-csv-btn" class="primary setting-wide-btn">Import</button>
+          <span id="import-status" class="muted setting-hint"></span>
+        </div>
+      </div>
+
+      <div class="setting-row setting-list-row" data-staff-only>
+        <h3 class="setting-list-title">Sample data</h3>
+        <p class="muted setting-hint">Fills the app with a few example customers, notes and keywords so you can try things out. Remove it any time — your own data isn’t touched.</p>
+        <button id="seed-btn" class="secondary setting-wide-btn">Add sample data</button>
+        <button id="unseed-btn" class="secondary setting-wide-btn" hidden>Remove sample data</button>
+        <p id="seed-status" class="muted setting-hint" style="margin-top:8px;"></p>
+      </div>
+
+      <!-- INVITE A NEW COMPANY — deliberately its OWN section, not a fifth
+           option in the role dropdown above. This does not add someone to your
+           org; it hands them a separate company with their own data, and one
+           mis-picked dropdown value should not be able to do that. Shown only
+           to the founder account (Storage.canInviteNewOrg), and enforced
+           independently by isFounder() in firestore.rules. -->
+      <div id="new-org-row" class="setting-row setting-list-row" hidden>
+        <h3 class="setting-list-title">Start a separate company</h3>
+        <p class="muted setting-hint">Starts a separate company with its own customers, calendar and hours. They become its admin. Nothing here is shared with it.</p>
+        <div class="invite-form">
+          <input id="new-org-email" type="email" placeholder="Owner's email address" autocomplete="off" />
+          <input id="new-org-name" type="text" placeholder="Company name" autocomplete="off" />
+          <button id="new-org-btn" class="primary">Invite</button>
+        </div>
+        <p id="new-org-status" class="muted" style="font-size:13px; margin-top:6px;"></p>
+        <!-- Shown after sending, whether or not the email got through. NOT the
+             sign-in link — that is generated server-side and never returned to
+             the browser. It doesn't need to be: the invite is matched by EMAIL
+             ADDRESS, so any sign-in method with that address finds it. -->
+        <div id="new-org-handoff" class="new-org-handoff" hidden>
+          <p class="muted setting-hint">If the email doesn't arrive, send them this:</p>
+          <textarea id="new-org-handoff-text" class="csv-textarea" rows="8" readonly></textarea>
+          <button id="new-org-handoff-copy" class="secondary setting-wide-btn" type="button">Copy</button>
         </div>
       </div>
 
