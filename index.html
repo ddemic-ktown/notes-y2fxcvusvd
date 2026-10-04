@@ -762,7 +762,12 @@
         <h4 class="setting-sub-title">Customer accounts</h4>
         <p class="muted setting-hint">Link a customer to their app account and they can see their own scheduled jobs — date, time, address and who's coming. Tick <strong>Can see hours</strong> to also show them their billable hours, counted from the <strong>Job started</strong> date.</p>
         <div class="keyword-add employee-add">
-          <select id="customer-link-customer" class="employee-type-select" aria-label="Customer"></select>
+          <!-- Search, not a long drop-down (v2026.10.03-2145). Picking one shows it as a chip. -->
+          <div class="cust-link-pick">
+            <input id="customer-link-search" class="search-input" type="search" placeholder="Search customers…" autocomplete="off" aria-label="Customer" />
+            <div id="customer-link-chosen" class="job-cust-chosen" hidden></div>
+            <ul id="customer-link-results" class="members-list cust-link-results" hidden></ul>
+          </div>
           <select id="customer-link-account" class="employee-type-select" aria-label="App account"></select>
           <button id="customer-link-add">Link</button>
         </div>

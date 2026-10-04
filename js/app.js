@@ -20,6 +20,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 100, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.10.03-2145', 'Linking a customer account: search for the customer instead of scrolling a long list'],
   ['v2026.10.03-2135', 'The Settings tour now also covers QuickBooks export, Note keywords and Appearance & editing'],
   ['v2026.10.03-2132', 'The Settings tour now follows the new section order'],
   ['v2026.10.03-2131', 'Settings sections reordered: everyday ones first (Signed in as, Crew, Users & access), one-off ones later, What’s new last'],
@@ -172,7 +173,6 @@ const CHANGELOG = [
   ['v2026.08.19-0007', 'A new-company invite is now tied to one company, expires after 14 days, and any admin can rename their own company'],
   ['v2026.08.18-2359', 'Invite someone to start their own company — a separate org with its own data, which they administer'],
   ['v2026.08.18-2345', 'Sample data now covers everything — jobs, hours, price table, employees — and Remove says exactly what it will delete'],
-  ['v2026.08.18-2325', 'The hours chart is now built from the hours you enter on calendar jobs, not from the hours note'],
 ];
 const APP_VERSION = CHANGELOG[0][0];
 
@@ -9179,21 +9179,53 @@ function applyRoleUI(role) {
 
 // Customer -> app account links, so a customer can be shown their own jobs.
 // Same shape as employeeLinks, keyed by customer id rather than by name.
+// Picked customer for a new link (v2026.10.03-2145) — a search, not a long drop-down.
+let custLinkPick = null;   // customer id
+function renderCustomerLinkSearch() {
+  const input = document.getElementById('customer-link-search');
+  const list = document.getElementById('customer-link-results');
+  const chosen = document.getElementById('customer-link-chosen');
+  if (!input || !list || !chosen) return;
+  const links = Storage.getSettings().customerLinks || {};
+  if (custLinkPick) {
+    input.hidden = true; list.hidden = true; chosen.hidden = false;
+    chosen.innerHTML = `<span class="job-cust-chip">${escapeHtml(customerCrumbLabel(custLinkPick))}<button type="button" class="job-cust-chip-x" aria-label="Choose a different customer">✕</button></span>`;
+    chosen.querySelector('.job-cust-chip-x').addEventListener('click', () => {
+      custLinkPick = null; input.value = ''; renderCustomerLinkSearch(); input.focus();
+    });
+    return;
+  }
+  input.hidden = false; chosen.hidden = true; chosen.innerHTML = '';
+  const words = (input.value || '').trim().toLowerCase().split(/\s+/).filter(Boolean);
+  if (!words.length) { list.hidden = true; list.innerHTML = ''; return; }
+  const hits = Storage.liveCustomers().filter(c => {
+    const def = Storage.getDefaultNoteForCustomer(c.id);
+    const hay = (def ? def.body : '').toLowerCase();
+    return words.every(w => hay.includes(w));
+  }).slice(0, 8);
+  list.hidden = false;
+  list.innerHTML = hits.length ? hits.map(c => {
+    const addr = addressCandidates(c.id)[0] || '';
+    const linked = links[c.id] ? '<span class="cust-link-tag">linked</span>' : '';
+    return `<li class="member-item job-customer-item" data-pick="${c.id}"><span class="member-email">${escapeHtml(customerCrumbLabel(c.id))}${linked}${addr ? `<em class="setting-check-hint">${escapeHtml(addr)}</em>` : ''}</span></li>`;
+  }).join('') : '<li class="member-item job-crew-empty">No customer matches.</li>';
+  list.querySelectorAll('[data-pick]').forEach(li => li.addEventListener('click', () => {
+    custLinkPick = li.dataset.pick; renderCustomerLinkSearch();
+  }));
+}
 function renderCustomerLinks() {
-  const custSel = document.getElementById('customer-link-customer');
   const acctSel = document.getElementById('customer-link-account');
   const listEl = document.getElementById('customer-link-list');
   const addBtn = document.getElementById('customer-link-add');
-  if (!custSel || !acctSel || !listEl) return;
+  const search = document.getElementById('customer-link-search');
+  if (!acctSel || !listEl) return;
   const links = Storage.getSettings().customerLinks || {};
-  const customers = Storage.liveCustomers();
   const accounts = Storage.listMembers().filter(m => m.role === 'customer');
-
-  // A blank first choice, not the first real customer — that read as a
-  // placeholder and showed an actual customer's name. (v2026.09.30-2038)
-  custSel.innerHTML = customers.length
-    ? '<option value="">Select customer</option>' + customers.map(c => `<option value="${c.id}">${escapeHtml(customerCrumbLabel(c.id))}</option>`).join('')
-    : '<option value="">No customers yet</option>';
+  if (search && !search.dataset.wired) {
+    search.dataset.wired = '1';
+    search.addEventListener('input', renderCustomerLinkSearch);
+  }
+  renderCustomerLinkSearch();
   acctSel.innerHTML = accounts.length
     ? accounts.map(m => `<option value="${m.uid}">${escapeHtml(m.name || m.email || m.uid)}</option>`).join('')
     : '<option value="">No customer accounts yet</option>';
@@ -9241,10 +9273,13 @@ function renderCustomerLinks() {
   if (addBtn && !addBtn.dataset.wired) {
     addBtn.dataset.wired = '1';
     addBtn.addEventListener('click', async () => {
-      if (!custSel.value || !acctSel.value) return;
+      if (!custLinkPick || !acctSel.value) return;
       const prev = { ...(Storage.getSettings().customerLinks || {}) };
       const next = { ...prev };
-      next[custSel.value] = acctSel.value;
+      next[custLinkPick] = acctSel.value;
+      custLinkPick = null;
+      const si = document.getElementById('customer-link-search');
+      if (si) si.value = '';
       await Storage.setSetting('customerLinks', next);
       renderCustomerLinks();
       await Storage.syncCustAccess(prev);

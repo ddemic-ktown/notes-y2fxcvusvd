@@ -1,6 +1,6 @@
 // Service worker — offline cache for JobPilot
 // Version format: na-YYYY.MM.DD-HHMM (Pacific time) — must match APP_VERSION in app.js.
-const VERSION = 'na-2026.10.03-2135';
+const VERSION = 'na-2026.10.03-2145';
 // SHELL is what the app cannot run without; EXTRAS are nice to have offline.
 // They are cached separately because `cache.addAll()` is ALL-OR-NOTHING: one
 // failed request out of fifteen rejects the whole promise, `install` fails, and
