@@ -20,6 +20,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 100, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.10.03-1749', 'Job editor: closing with unsaved changes or deleting no longer asks — a bubble offers tap to go back / tap to undo'],
   ['v2026.10.03-1734', 'Job editor: full screen on phones, customer first as a chip, times stacked, slimmer sections, + note per crew line, title shows customer and date, asks before discarding changes, Save/Cancel pinned to the bottom'],
   ['v2026.10.03-1636', 'The calendar’s blue current-time line now shows the time'],
   ['v2026.10.03-1634', 'Sharing a note or the price table now reads Share / unshare, with a count when shared; the boxes say untick to stop sharing'],
@@ -172,7 +173,6 @@ const CHANGELOG = [
   ['v2026.08.16-1951', 'The hours note now understands Aug 14, Thu Aug 14, 8/14 and 2026-08-14 as date lines, not just August 14'],
   ['v2026.08.16-1929', 'Fixed double-tap zoom snapping straight back out on phones'],
   ['v2026.08.16-1923', 'The Files card now fills its full width — tap the left side to open, + Add on the right'],
-  ['v2026.08.16-1808', 'Photos close with an X in the corner, double-tap zoom is more reliable, and the Files card is easier to tap'],
 ];
 const APP_VERSION = CHANGELOG[0][0];
 
@@ -2605,12 +2605,51 @@ function jobFormState() {
     crew: jobCrewDraft.filter(c => c && c.name).map(c => [c.name, c.hours, c.billable, c.note || '']),
   });
 }
-// ✕, Cancel and a tap outside all come here. Asks only when something changed.
-async function requestCloseJobModal() {
+// ✕, Cancel and a tap outside all come here. They close AT ONCE — never a
+// "Discard changes?" question, which stops the work to ask (see CLAUDE.md,
+// "Don't stop the workflow"). If anything had changed, a bubble offers the way
+// back for a few seconds, with every edit exactly as it was. (v2026.10.03-1749)
+function captureJobDraft() {
+  const v = (id) => ((document.getElementById(id) || {}).value || '');
+  return {
+    id: jobEditingId, prefix: jobTitlePrefix, snapshot: jobSnapshot,
+    chosen: jobChosenCustomer ? { ...jobChosenCustomer } : null,
+    crew: jobCrewDraft.map(c => ({ ...c })),
+    date: v('job-date'), start: v('job-start'), end: v('job-end'), dur: getJobDuration(),
+    desc: v('job-desc'), addr: v('job-address'),
+    addrShown: !document.getElementById('job-address-wrap').hidden,
+    noWork: !!(document.getElementById('job-nowork') || {}).checked,
+  };
+}
+function restoreJobDraft(d) {
+  // The job may have been deleted in the meantime — then it comes back as new.
+  const id = d.id && Storage.getJob(d.id) ? d.id : null;
+  openJobModal(id, d.date);
+  const set = (elId, val) => { const el = document.getElementById(elId); if (el) el.value = val; };
+  set('job-date', d.date); set('job-start', d.start); set('job-end', d.end);
+  setJobDuration(d.dur == null ? NaN : Number(d.dur));
+  set('job-desc', d.desc); set('job-address', d.addr);
+  document.getElementById('job-address-wrap').hidden = !d.addrShown;
+  jobChosenCustomer = d.chosen;
+  renderJobCustomer('');
+  renderJobEmployees(d.crew);
+  const nw = document.getElementById('job-nowork'); if (nw) nw.checked = d.noWork;
+  applyNoWorkState();
+  jobTitlePrefix = id ? d.prefix : (d.id ? '' : d.prefix);
+  // Keep the ORIGINAL snapshot, so closing again still knows it is unsaved
+  jobSnapshot = d.snapshot;
+  updateJobTitle();
+  requestAnimationFrame(() => {
+    document.querySelectorAll('#job-employees [data-crew-note]').forEach(autoGrowNote);
+    autoGrowNote(document.getElementById('job-desc'));
+  });
+}
+function requestCloseJobModal() {
   if (jobModal.hidden) return;
-  if (jobFormState() !== jobSnapshot
-      && !await askConfirm('Your changes to this job haven’t been saved.', { title: 'Discard changes?', okLabel: 'Discard' })) return;
+  const changed = jobFormState() !== jobSnapshot;
+  const draft = changed ? captureJobDraft() : null;
   jobModal.hidden = true;
+  if (draft) showActionToast('Changes weren’t saved — tap to go back', () => restoreJobDraft(draft));
 }
 
 // Address candidates from the customer's default note: skip the name line and
@@ -3215,10 +3254,18 @@ if (jobDuplicate) jobDuplicate.addEventListener('click', () => {
 const jobDelete = document.getElementById('job-delete');
 if (jobDelete) jobDelete.addEventListener('click', async () => {
   if (!jobEditingId) return;
-  if (!await askConfirm('Delete this job?')) return;
+  // No "Delete this job?" (v2026.10.03-1749): it goes at once, and the bubble undoes it.
+  // The whole record is kept, so undo puts back the same id, crew, hours and
+  // hours history.
+  const gone = Storage.getJob(jobEditingId);
   await Storage.deleteJob(jobEditingId);
   jobModal.hidden = true;
-  if (calendarDayView.classList.contains('active')) renderCalendarDay(); else renderCalendar();
+  const redraw = () => { if (calendarDayView.classList.contains('active')) renderCalendarDay(); else renderCalendar(); };
+  redraw();
+  if (gone) showActionToast('Job deleted — tap to undo', async () => {
+    await Storage.saveJob({ ...gone, crew: (gone.crew || []).map(c => ({ ...c })) });
+    redraw();
+  });
 });
 const calFabBtn = document.getElementById('cal-fab');
 if (calFabBtn) calFabBtn.addEventListener('click', () => openJobModal(null, ymd(calCursor)));
@@ -7301,6 +7348,24 @@ function showEditorToast(msg) {
   editorToast.hidden = false;
   if (editorToastTimer) clearTimeout(editorToastTimer);
   editorToastTimer = setTimeout(() => { editorToast.hidden = true; }, 3000);
+}
+// A bubble you can TAP (v2026.10.03-1749) — the alternative to stopping the work with a
+// question. Says what just happened and offers the way back; ignore it and it
+// goes. One at a time: a new one replaces the last.
+let actionToastTimer = null;
+function showActionToast(msg, onTap, ms = 5000) {
+  const el = document.getElementById('action-toast');
+  if (!el) return;
+  el.textContent = msg;
+  el.onclick = () => {
+    clearTimeout(actionToastTimer);
+    el.hidden = true;
+    el.onclick = null;
+    if (onTap) onTap();
+  };
+  el.hidden = false;
+  clearTimeout(actionToastTimer);
+  actionToastTimer = setTimeout(() => { el.hidden = true; el.onclick = null; }, ms);
 }
 function restoreSnapshot(snap) {
   bodyInput.value = snap.text;
@@ -11786,7 +11851,7 @@ function tutorialSteps(part) {
         group: 'jobhours',
         requires: () => canEditJobs() && Storage.listJobs().length > 0,
         target: () => document.getElementById('job-customer-chosen'),
-        text: 'Once picked, the customer shows as a chip — tap its ✕ to choose someone else. Close the job with unsaved changes and you are asked before anything is thrown away.',
+        text: 'Once picked, the customer shows as a chip — tap its ✕ to choose someone else. Close it without saving and a bubble lets you tap straight back in with your edits intact; Delete job works the same way, with a tap to undo.',
       },
       {
         screen: 'calendar',
