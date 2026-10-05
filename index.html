@@ -424,6 +424,24 @@
     </main>
   </section>
 
+  <!-- JOB MENU (v2026.10.04-1840): what a tap on a job opens, for every role. -->
+  <div id="job-menu" class="modal-overlay" hidden>
+    <div class="modal-panel">
+      <div class="modal-header">
+        <h2 class="modal-title" id="job-menu-title">Job</h2>
+        <button id="job-menu-close" class="icon-btn" aria-label="Close">✕</button>
+      </div>
+      <p id="job-menu-sub" class="modal-hint"></p>
+      <div class="setting-btn-col">
+        <a id="job-menu-gcal" class="primary setting-wide-btn job-menu-link" target="_blank" rel="noopener" hidden>Add to Google Calendar</a>
+        <button id="job-menu-ics" class="primary setting-wide-btn" type="button" hidden>Add to calendar</button>
+        <a id="job-menu-dir" class="secondary setting-wide-btn job-menu-link" target="_blank" rel="noopener" hidden>Directions</a>
+        <button id="job-menu-day" class="secondary setting-wide-btn" type="button" hidden>Show this day</button>
+        <button id="job-menu-edit" class="secondary setting-wide-btn" type="button" hidden>Edit job</button>
+      </div>
+    </div>
+  </div>
+
   <!-- JOB STARTED (per customer; admin) — v2026.10.03-2042 -->
   <div id="job-start-modal" class="modal-overlay" hidden>
     <div class="modal-panel">
@@ -760,7 +778,7 @@
         </div>
         <p id="invite-status" class="muted" style="font-size:13px; margin-top:6px;"></p>
         <h4 class="setting-sub-title">Customer accounts</h4>
-        <p class="muted setting-hint">Link a customer to their app account and they can see their own scheduled jobs — date, time, address and who's coming. Tick <strong>Can see hours</strong> to also show them their billable hours, counted from the <strong>Job started</strong> date.</p>
+        <p class="muted setting-hint">Link a customer to their app account and they can see their own scheduled jobs — date, time, address and who's coming. Tick <strong>Can see hours</strong> to also show them their hours — billable and no-charge time, marked as such — counted from the <strong>Job started</strong> date.</p>
         <div class="keyword-add employee-add">
           <!-- Search, not a long drop-down (v2026.10.03-2145). Picking one shows it as a chip. -->
           <div class="cust-link-pick">

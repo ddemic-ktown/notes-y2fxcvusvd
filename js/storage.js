@@ -85,20 +85,21 @@ function timelogsCol()   { return collection(db, `orgs/${_orgId}/timelogs`); }
 function privateSettingsDoc() { return doc(db, `orgs/${_orgId}/settings/private`); }
 function custJobsCol()   { return collection(db, `orgs/${_orgId}/custJobs`); }
 function custAccessDoc(u){ return doc(db, `orgs/${_orgId}/custAccess/${u}`); }
-const PRIVATE_SETTING_KEYS = ['customerLinks', 'employeeLinks', 'iifItemApprentice', 'iifItemJourneyman', 'customerHours', 'custJobsBuilt'];
+const PRIVATE_SETTING_KEYS = ['customerLinks', 'employeeLinks', 'iifItemApprentice', 'iifItemJourneyman', 'customerHours', 'custJobsBuilt', 'custJobsBuiltV2'];
 let _custBackfill = false;
 let _privLoaded = false;
 // First run on this company: build the customer-safe copies and access docs
 // once, after the private doc has loaded and any migration has finished.
 function maybeBackfillCustJobs() {
-  if (_role !== 'admin' || !_privLoaded || _privSettings.custJobsBuilt || _custBackfill || _settingsMigrating) return;
-  if (PRIVATE_SETTING_KEYS.some(k => k !== 'custJobsBuilt' && k in _pubSettings)) return;
+  // V2 (v2026.10.04-1847): copies now carry no-charge hours, so every company rebuilds once more.
+  if (_role !== 'admin' || !_privLoaded || _privSettings.custJobsBuiltV2 || _custBackfill || _settingsMigrating) return;
+  if (PRIVATE_SETTING_KEYS.some(k => !k.startsWith('custJobsBuilt') && k in _pubSettings)) return;
   _custBackfill = true;
   Storage.resyncCustJobs()
     .then(async (r) => {
       if (r.failed) return;                       // try again next sign-in
       await Storage.syncCustAccess();
-      await setDoc(privateSettingsDoc(), { custJobsBuilt: nowIso() }, { merge: true });
+      await setDoc(privateSettingsDoc(), { custJobsBuilt: nowIso(), custJobsBuiltV2: nowIso() }, { merge: true });
     })
     .catch(err => console.warn('custJobs backfill', err))
     .finally(() => { _custBackfill = false; });
@@ -176,9 +177,13 @@ function custSafeCopy(job) {
   const crewIn = Array.isArray(job.crew) && job.crew.length
     ? job.crew
     : (job.employeeNames || []).map(n => ({ name: n, hours: (job.employeeHours || {})[n], billable: true }));
+  // v2026.10.04-1847: no-charge (non-billable) hours are included too, flagged nc,
+  // when this customer may see hours. Crew notes never are.
   const crew = crewIn.filter(c => c && c.name).map(c => {
     const h = Number(c.hours);
-    return { name: c.name, hours: (canSee && c.billable !== false && Number.isFinite(h) && h > 0) ? h : null };
+    const line = { name: c.name, hours: (canSee && Number.isFinite(h) && h > 0) ? h : null };
+    if (canSee && c.billable === false) line.nc = true;
+    return line;
   });
   return {
     date: job.date || '', start: job.start || '', end: job.end || '',

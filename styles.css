@@ -3435,3 +3435,9 @@ body.vv-zoomed-pinch .cal-cells { overflow-y: visible; }
 .cust-link-pick { display: flex; flex-direction: column; gap: 6px; flex: 1 1 100%; min-width: 0; }
 .cust-link-results { max-height: 260px; overflow-y: auto; }
 .cust-link-tag { margin-left: 6px; font-size: 11px; color: var(--ink-soft); border: 1px solid var(--line); border-radius: 999px; padding: 0 6px; }
+
+/* Job menu links look like the buttons beside them (v2026.10.04-1840) */
+a.job-menu-link { display: block; text-align: center; text-decoration: none; box-sizing: border-box; }
+a.job-menu-link[hidden] { display: none; }
+
+.myh-nc { color: var(--ink-soft); font-size: 0.9em; }   /* v2026.10.04-1847 */

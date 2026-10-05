@@ -20,6 +20,8 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 100, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.10.04-1847', 'Customers who can see hours now also see no-charge time, marked “(no charge)”, with Billable / No charge / Total'],
+  ['v2026.10.04-1840', 'Tapping a job opens a menu for everyone: add it to your calendar (Apple on iPhone, Google elsewhere), directions, and Edit for admins; the 📍 pin moved into it'],
   ['v2026.10.03-2159', 'Address, phone and email recognition is stricter and smarter: only lines that clearly are contact info count (suites before or after, city lines joined, extensions, labels), everything else in the note is ignored'],
   ['v2026.10.03-2145', 'Linking a customer account: search for the customer instead of scrolling a long list'],
   ['v2026.10.03-2135', 'The Settings tour now also covers QuickBooks export, Note keywords and Appearance & editing'],
@@ -171,8 +173,6 @@ const CHANGELOG = [
   ['v2026.08.19-0752', 'Hours chart: employee colours, per-person day and week totals, and hours save as soon as you leave the cell'],
   ['v2026.08.19-0033', 'The calendar tour now shows where hours go on a job, and a new Tutorial 8 covers users, invites, trash, backup and sample data'],
   ['v2026.08.19-0020', 'A new company sees two dismissible cards on the home screen — take the tour, add sample data — instead of a pop-up'],
-  ['v2026.08.19-0007', 'A new-company invite is now tied to one company, expires after 14 days, and any admin can rename their own company'],
-  ['v2026.08.18-2359', 'Invite someone to start their own company — a separate org with its own data, which they administer'],
 ];
 const APP_VERSION = CHANGELOG[0][0];
 
@@ -1615,7 +1615,7 @@ function renderCalSearchResults() {
     const when = j.date ? prettyDate(j.date) : '—';
     const time = (j.start || j.end) ? `${j.start || ''}${j.end ? '–' + j.end : ''}` : '';
     const note = isCustomerRole() ? '' : (j.description || '').trim();
-    return `<article class="cal-result${j.noWork ? ' cal-nowork' : ' cal-working'}" data-date="${escapeHtml(j.date || '')}">
+    return `<article class="cal-result${j.noWork ? ' cal-nowork' : ' cal-working'}" data-date="${escapeHtml(j.date || '')}" data-job="${j.id}">
       <p class="cal-result-when">${escapeHtml(when)}${time ? ` · ${escapeHtml(time)}` : ''}</p>
       <p class="cal-result-who">${escapeHtml(jobTitle(j) || 'No customer')}</p>
       ${j.address ? `<p class="cal-result-addr">${escapeHtml(j.address)}</p>` : ''}
@@ -1624,12 +1624,8 @@ function renderCalSearchResults() {
     </article>`;
   }).join('');
   box.querySelectorAll('.cal-result[data-date]').forEach(card => {
-    card.addEventListener('click', () => {
-      const d = card.dataset.date;
-      if (!d) return;
-      calCursor = parseYmd(d);
-      showCalendarDay(d);
-    });
+    // The job menu (v2026.10.04-1840), with "Show this day" — what a tap used to do.
+    card.addEventListener('click', () => openJobMenu(card.dataset.job, { showDay: true }));
   });
 }
 
@@ -1913,13 +1909,13 @@ function renderCalendar() {
         const w = 100 / t.n;
         const ind = t.depth * indentPx;
         const who = jobTitle(j) || '—';
-        return `<div class="cal-wk-job${j.noWork ? ' cal-nowork' : ' cal-working'}"`
+        return `<div class="cal-wk-job${j.noWork ? ' cal-nowork' : ' cal-working'}" data-job="${j.id}"`
           + ` style="top:${pct(t.sp.start)};height:${((t.sp.end - t.sp.start) / range * 100).toFixed(3)}%;left:calc(${(t.lane * w).toFixed(3)}% + ${ind}px);width:calc(${w.toFixed(3)}% - ${ind}px)"`
           + ` title="${escapeHtml(`${who} · ${fmtClock(t.sp.start)}–${fmtClock(t.sp.end)}`)}">`
           + `<span class="cal-wk-who">${escapeHtml(who)}</span><span class="cal-wk-chips">${chips}</span></div>`;
       }).join('');
       const untimed = js.filter(j => !jobSpan(j)).slice(0, 3).map(j =>
-        `<div class="cal-wk-untimed${j.noWork ? ' cal-nowork-text' : ''}">${escapeHtml(jobTitle(j) || '—')}</div>`).join('');
+        `<div class="cal-wk-untimed${j.noWork ? ' cal-nowork-text' : ''}" data-job="${j.id}">${escapeHtml(jobTitle(j) || '—')}</div>`).join('');
       const classes = ['cal-cell', 'cal-wk-col'];
       if (!js.length) classes.push('cal-empty');
       if (s === todayStr) classes.push('cal-today');
@@ -1951,7 +1947,11 @@ function renderCalendar() {
     btn.addEventListener('click', () => calShiftMonth(parseInt(btn.dataset.shift, 10)));
   });
   calGrid.querySelectorAll('.cal-cell').forEach(cell => {
-    cell.addEventListener('click', () => {
+    cell.addEventListener('click', (e) => {
+      // A job drawn in the week view opens its menu (v2026.10.04-1840); the rest of the
+      // column still opens the day.
+      const jobEl = e.target.closest('[data-job]');
+      if (jobEl && cell.contains(jobEl)) { openJobMenu(jobEl.dataset.job); return; }
       const date = cell.dataset.date;
       const jobs = Storage.listJobsByDate(date);
       // Spec: tapping an EMPTY day goes straight to the new-job screen
@@ -2238,7 +2238,8 @@ function renderCalendarDay() {
     const tight = shown < 52;
     const addr = j.address && !tight ? `<div class="cal-block-addr">${escapeHtml(j.address)}</div>` : '';
     // 📍 directions (v2026.10.03-0725) — its own tap target; see the stopPropagation below.
-    const pin = j.address ? `<a class="cal-pin" href="${escapeHtml(mapsUrl(j.address))}" target="_blank" rel="noopener" aria-label="Directions to ${escapeHtml(j.address)}" title="Directions">📍</a>` : '';
+    // (The 📍 pin went in v2026.10.04-1840 — Directions is in the job menu a tap opens.)
+    const pin = '';
     return `<div class="cal-block${tight ? ' cal-block-tight' : ''}${sizeClass}${j.noWork ? ' cal-nowork' : ' cal-working'}" data-job="${j.id}" style="top:${top}px;height:${height}px;left:${left};width:${width};z-index:${1 + depth}">
       ${tight ? '' : `<div class="cal-block-time">${escapeHtml(timeTxt)}</div>`}
       <div class="cal-block-head">
@@ -2285,7 +2286,7 @@ function wireDayInteractions(canEdit) {
   if (!timeline) return;
   timeline.querySelectorAll('.cal-untimed-job, #cal-day-untimed .cal-untimed-job').forEach(() => {});
   document.querySelectorAll('#cal-day-untimed .cal-untimed-job').forEach(el => {
-    el.addEventListener('click', () => { if (canEdit) openJobModal(el.dataset.job, calSelectedDate); });
+    el.addEventListener('click', () => openJobMenu(el.dataset.job));
   });
 
   timeline.querySelectorAll('.cal-block').forEach(block => {
@@ -2396,7 +2397,7 @@ function wireDayInteractions(canEdit) {
     block.addEventListener('pointercancel', finish);
     block.addEventListener('click', () => {
       if (moved) { moved = false; return; }              // that was a drag, not a tap
-      if (canEdit) openJobModal(jobId, calSelectedDate);
+      openJobMenu(jobId);                                // menu for every role (v2026.10.04-1840)
     });
   });
 }
@@ -2761,6 +2762,111 @@ function addressCandidates(customerId) {
   const def = customerId ? Storage.getDefaultNoteForCustomer(customerId) : null;
   return def ? parseContactInfo(def.body).addresses.map(x => x.full) : [];
 }
+
+// ---------- job menu & add to calendar (v2026.10.04-1840) ----------
+// A tap on a job opens this for every role: add it to your own calendar,
+// directions, and (admins) Edit. iPhone/iPad get a calendar FILE (Apple
+// Calendar opens it); Android and computers get a Google Calendar link —
+// Google Calendar on Android can't open a calendar file.
+function isAppleMobile() {
+  return /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+}
+function jobCalendarParts(j) {
+  const title = jobTitle(j) || 'Job';
+  const crew = crewNames(jobCrew(j));
+  const notes = [];
+  if (crew.length) notes.push(`Crew: ${crew.join(', ')}`);
+  if (!isCustomerRole() && j.description) notes.push(j.description);
+  const sp = jobSpan(j);
+  const d = parseYmd(j.date);
+  const at = (min) => new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, min);
+  return {
+    title, location: j.address ? navAddress(j.address) : '', notes: notes.join('\n'),
+    allDay: !sp,
+    start: sp ? at(sp.start) : d,
+    end: sp ? at(sp.trueEnd) : new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1),
+  };
+}
+function calStamp(dt, allDay) {
+  const p = (n) => String(n).padStart(2, '0');
+  const day = `${dt.getFullYear()}${p(dt.getMonth() + 1)}${p(dt.getDate())}`;
+  return allDay ? day : `${day}T${p(dt.getHours())}${p(dt.getMinutes())}00`;
+}
+function googleCalendarUrl(j) {
+  const c = jobCalendarParts(j);
+  const q = new URLSearchParams({
+    action: 'TEMPLATE', text: c.title,
+    dates: `${calStamp(c.start, c.allDay)}/${calStamp(c.end, c.allDay)}`,
+    details: c.notes, location: c.location,
+  });
+  try { q.set('ctz', Intl.DateTimeFormat().resolvedOptions().timeZone); } catch (e) {}
+  return `https://calendar.google.com/calendar/render?${q.toString()}`;
+}
+function jobIcs(j) {
+  const c = jobCalendarParts(j);
+  const esc = (v) => String(v || '').replace(/\\/g, '\\\\').replace(/[,;]/g, (m) => '\\' + m).replace(/\r?\n/g, '\\n');
+  const now = new Date();
+  const utc = `${now.getUTCFullYear()}${String(now.getUTCMonth() + 1).padStart(2, '0')}${String(now.getUTCDate()).padStart(2, '0')}T${String(now.getUTCHours()).padStart(2, '0')}${String(now.getUTCMinutes()).padStart(2, '0')}00Z`;
+  const dt = (k, v) => c.allDay ? `${k};VALUE=DATE:${calStamp(v, true)}` : `${k}:${calStamp(v, false)}`;
+  return ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//JobPilot//EN', 'CALSCALE:GREGORIAN',
+    'BEGIN:VEVENT', `UID:${j.id}@jobpilot`, `DTSTAMP:${utc}`, dt('DTSTART', c.start), dt('DTEND', c.end),
+    `SUMMARY:${esc(c.title)}`,
+    ...(c.location ? [`LOCATION:${esc(c.location)}`] : []),
+    ...(c.notes ? [`DESCRIPTION:${esc(c.notes)}`] : []),
+    'END:VEVENT', 'END:VCALENDAR'].join('\r\n');
+}
+let jobMenuId = null;
+function openJobMenu(jobId, opts = {}) {
+  const j = Storage.getJob(jobId);
+  const menu = document.getElementById('job-menu');
+  if (!j || !menu) return;
+  jobMenuId = jobId;
+  document.getElementById('job-menu-title').textContent = jobTitle(j) || 'Job';
+  const sp = jobSpan(j);
+  const when = shortDate(j.date) + (sp ? ` · ${fmtClock(sp.start)}–${fmtClock(sp.trueEnd % 1440)}` : '');
+  const crew = crewNames(jobCrew(j));
+  document.getElementById('job-menu-sub').textContent = [when, j.address || '', crew.join(', ')].filter(Boolean).join(' · ');
+  const gcal = document.getElementById('job-menu-gcal');
+  const ics = document.getElementById('job-menu-ics');
+  const apple = isAppleMobile();
+  // Phones say "Add to calendar"; a computer names Google Calendar.
+  gcal.hidden = apple; ics.hidden = !apple;
+  if (!apple) { gcal.href = googleCalendarUrl(j); gcal.textContent = isPhoneWidth() ? 'Add to calendar' : 'Add to Google Calendar'; }
+  const dir = document.getElementById('job-menu-dir');
+  dir.hidden = !j.address || j.noWork;
+  if (j.address) dir.href = mapsUrl(j.address);
+  document.getElementById('job-menu-day').hidden = !opts.showDay;
+  document.getElementById('job-menu-edit').hidden = !isAdminRole();
+  menu.hidden = false;
+}
+(() => {
+  const menu = document.getElementById('job-menu');
+  if (!menu) return;
+  const close = () => { menu.hidden = true; };
+  document.getElementById('job-menu-close').addEventListener('click', close);
+  menu.addEventListener('click', (e) => { if (e.target === menu) close(); });
+  document.getElementById('job-menu-gcal').addEventListener('click', () => setTimeout(close, 0));
+  document.getElementById('job-menu-dir').addEventListener('click', () => setTimeout(close, 0));
+  document.getElementById('job-menu-ics').addEventListener('click', () => {
+    const j = Storage.getJob(jobMenuId);
+    if (!j) return;
+    // Opening the file (not downloading it) is what makes iOS offer "Add to Calendar"
+    const url = URL.createObjectURL(new Blob([jobIcs(j)], { type: 'text/calendar;charset=utf-8' }));
+    close();
+    window.location.href = url;
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  });
+  document.getElementById('job-menu-day').addEventListener('click', () => {
+    const j = Storage.getJob(jobMenuId);
+    close();
+    if (j) showCalendarDay(j.date);
+  });
+  document.getElementById('job-menu-edit').addEventListener('click', () => {
+    const j = Storage.getJob(jobMenuId);
+    close();
+    if (j) openJobModal(j.id, j.date);
+  });
+})();
 
 function openJobModal(jobId, dateStr) {
   if (!jobModal || !isAdminRole()) return;
@@ -11577,7 +11683,8 @@ function myHoursRows(from, to) {
     .map(j => {
       const lines = (Array.isArray(j.crew) ? j.crew : []).filter(c => c && c.name && Number(c.hours) > 0);
       const total = lines.reduce((a, c) => a + Number(c.hours), 0);
-      return { date: j.date, lines, total };
+      const nc = lines.filter(c => c.nc).reduce((a, c) => a + Number(c.hours), 0);
+      return { date: j.date, lines, total, nc };
     })
     .filter(r => r.total > 0)
     .sort((a, b) => a.date.localeCompare(b.date));
@@ -11597,11 +11704,18 @@ function renderMyHours() {
     table.innerHTML = '<tbody><tr><td class="price-empty-state">No hours recorded between these dates.</td></tr></tbody>';
     return;
   }
+  // "No charge" (v2026.10.04-1847) = time worked but not charged for — not "not billed
+  // yet". Totals split into Billable / No charge / Total.
   const grand = rows.reduce((a, r) => a + r.total, 0);
+  const grandNc = rows.reduce((a, r) => a + r.nc, 0);
   table.innerHTML = '<thead><tr><th class="iif-tot-name">Date</th><th class="iif-tot-name">Who</th><th class="iif-tot-sum">Hours</th></tr></thead><tbody>'
     + rows.map(r => `<tr><th class="iif-tot-name">${escapeHtml(shortDate(r.date))}</th>`
-      + `<td class="myh-who">${r.lines.map(c => `${escapeHtml(c.name)} ${fmt(Number(c.hours))}`).join(', ')}</td>`
+      + `<td class="myh-who">${r.lines.map(c => `${escapeHtml(c.name)} ${fmt(Number(c.hours))}${c.nc ? ' <span class="myh-nc">(no charge)</span>' : ''}`).join(', ')}</td>`
       + `<td class="iif-tot-sum">${fmt(r.total)}</td></tr>`).join('')
+    + (grandNc
+      ? `<tr class="iif-tot-all"><th class="iif-tot-name" colspan="2">Billable</th><td class="iif-tot-sum">${fmt(grand - grandNc)}</td></tr>`
+        + `<tr class="iif-tot-all"><th class="iif-tot-name" colspan="2">No charge</th><td class="iif-tot-sum">${fmt(grandNc)}</td></tr>`
+      : '')
     + `<tr class="iif-tot-all"><th class="iif-tot-name" colspan="2">Total</th><td class="iif-tot-sum">${fmt(grand)}</td></tr></tbody>`;
 }
 function showMyHours() {
@@ -12217,17 +12331,15 @@ function tutorialSteps(part) {
         requires: () => Storage.listJobs().length > 0 && canEditJobs(),
         setup: goDay,
         target: () => document.querySelector('#calendar-day-view .cal-block'),
-        text: 'Press and hold a job to pick it up and drag it to a new time; drag the corner to change how long it runs. Both snap to quarter hours. A quick tap opens it for editing.',
+        text: 'Press and hold a job to pick it up and drag it to a new time; drag the corner to change how long it runs. Both snap to quarter hours. A quick tap opens the job menu, where Edit job is.',
       },
       {
-        // Only jobs with an address carry a 📍; with none on this day the
-        // target is missing and the step is skipped.
         screen: 'calendar-day',
         group: 'caljobs',
         requires: () => Storage.listJobs().length > 0,
         setup: goDay,
-        target: () => document.querySelector('#calendar-day-view .cal-pin'),
-        text: 'A 📍 on a job with an address opens directions to it in your maps app.',
+        target: () => document.querySelector('#calendar-day-view .cal-block'),
+        text: 'Tap a job for its menu: add it to your own phone or Google calendar, get directions to the address, and — for admins — edit it.',
       },
     ];
   }
@@ -12439,7 +12551,7 @@ function tutorialSteps(part) {
       step(() => document.getElementById('invite-email'),
         'Invite someone by email and pick what they are. They get a link that signs them straight in — no password to set up first. Get the role wrong and you can change it here afterwards; it takes effect on their phone immediately.'),
       step(() => document.getElementById('customer-link-list'),
-        'Link a customer to an app account and they can sign in to see the jobs you have booked for them — the date, the time, the address and who is coming. Tick Can see hours to also show them their billable hours (never non-billable time or notes), and set Job started so those hours count from the start of their job.'),
+        'Link a customer to an app account and they can sign in to see the jobs you have booked for them — the date, the time, the address and who is coming. Tick Can see hours to also show them their hours — billable and no-charge time, marked as such, but never crew notes — and set Job started so those hours count from the start of their job.'),
       step(() => document.getElementById('qb-export-row'),
         'QuickBooks export: the Service item each classification bills against — typed exactly as it is in QuickBooks, or the import fails — and the Hours button, which opens the chart you check and send to QuickBooks as an .iif file.'),
       step(row('keyword-input'),
