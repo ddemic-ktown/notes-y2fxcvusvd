@@ -1,0 +1,18 @@
+# GitHub Pages (Jekyll) settings — only used to keep project notes and
+# Firebase config OFF the live site. They stay in the repo. (Oct 12 2026)
+# The app itself has no build step; Jekyll copies everything else as-is.
+exclude:
+  - "*.md"
+  - README.md
+  - CLAUDE.md
+  - HANDOFF.md
+  - FEATURES.md
+  - app-store-plan.md
+  - firebase-email-template.md
+  - quickbooks_iif_project_brief.md
+  - firestore.rules
+  - firebase.json
+  - .firebaserc
+  - .gitignore
+  - .DS_Store
+  - _config.yml
