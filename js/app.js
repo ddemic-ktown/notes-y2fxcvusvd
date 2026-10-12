@@ -20,6 +20,9 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 100, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.10.12-1143', 'One app-wide “Updating…” message at the bottom while saved data is being checked against the server; replaces the Price Table’s own note'],
+  ['v2026.10.12-1137', 'Price Table rows load when you first open it instead of at every sign-in, with a faint “Updating…” note while saved prices are being checked against the server'],
+  ['v2026.10.12-1123', 'Uses the database less: rebuilds and setting saves only write what changed, the Price Table no longer re-reads every row on open, and a sign-in race that could unshare notes is fixed'],
   ['v2026.10.04-1847', 'Customers who can see hours now also see no-charge time, marked “(no charge)”, with Billable / No charge / Total'],
   ['v2026.10.04-1840', 'Tapping a job opens a menu for everyone: add it to your calendar (Apple on iPhone, Google elsewhere), directions, and Edit for admins; the 📍 pin moved into it'],
   ['v2026.10.03-2159', 'Address, phone and email recognition is stricter and smarter: only lines that clearly are contact info count (suites before or after, city lines joined, extensions, labels), everything else in the note is ignored'],
@@ -3496,13 +3499,14 @@ function showPriceTable() {
   hideAllScreens();
   priceView.classList.add('active');
   renderCrumbs('crumbs-price', [{ label: 'Home', go: 'home' }, { label: 'Price Table' }]);
+  Storage.ensurePriceItems();   // rows listener starts on first visit (v2026.10.12)
   renderPriceTable();
   restoreScroll('price');
-  // Draw from cache first (instant), then confirm against the server. If the
-  // realtime stream died while the app was frozen, the cache can be hours
-  // stale and nothing else on this screen would ever notice. The fetch emits,
-  // which redraws through rerenderCurrent.
-  Storage.refreshPriceTable();
+  // Draw from cache first (instant), then make sure the live listeners are
+  // really connected. A reconnect resumes from where they left off, so it costs
+  // only the rows that changed — the old full re-read of the table on every
+  // visit was dropped v2026.10.12. Throttled inside Storage.
+  Storage.reconnect();
   checkDeployedVersion();   // not only the home screen (v2026.09.24-2031)
   if (!handlingPopstate) history.pushState({ screen: 'price' }, '');
 }
@@ -8957,6 +8961,7 @@ if (signoutBtn) {
 const backupBtn = document.getElementById('backup-btn');
 const backupStatus = document.getElementById('backup-status');
 if (backupBtn) backupBtn.addEventListener('click', async () => {
+  await Storage.ensurePriceItems();   // rows load on first use (v2026.10.12)
   const customers = Storage.listCustomers().map(c => ({
     id: c.id,
     name: customerCrumbLabel(c.id),
@@ -9105,10 +9110,26 @@ function renderContactStrip(customerId) {
 // go up later — the app is offline-first, but a user in a basement had no way
 // to tell a saved note from a stranded one.
 const syncStatusEl = document.getElementById('sync-status');
+// "Updating…" (v2026.10.12): some live list is still showing the device copy.
+// Only shown once that has lasted UPDATING_DELAY, so a quick wake-up doesn't
+// flash it. Offline and Saving… take priority.
+const UPDATING_DELAY = 1000;
+let updatingTimer = null;
+let updatingShown = false;
 function renderSyncStatus() {
   if (!syncStatusEl) return;
   const offline = !navigator.onLine;
   const pending = Storage.pendingWrites ? Storage.pendingWrites() : 0;
+  const updating = Storage.isUpdating ? Storage.isUpdating() : false;
+  if (!updating) {
+    if (updatingTimer) { clearTimeout(updatingTimer); updatingTimer = null; }
+    updatingShown = false;
+  } else if (!updatingShown && !updatingTimer) {
+    updatingTimer = setTimeout(() => {
+      updatingTimer = null;
+      if (Storage.isUpdating()) { updatingShown = true; renderSyncStatus(); }
+    }, UPDATING_DELAY);
+  }
   if (offline) {
     syncStatusEl.textContent = 'Offline — saved on this device';
     syncStatusEl.className = 'sync-toast sync-offline';
@@ -9116,6 +9137,10 @@ function renderSyncStatus() {
   } else if (pending > 0) {
     syncStatusEl.textContent = 'Saving…';
     syncStatusEl.className = 'sync-toast sync-saving';
+    syncStatusEl.hidden = false;
+  } else if (updatingShown) {
+    syncStatusEl.textContent = 'Updating…';
+    syncStatusEl.className = 'sync-toast sync-updating';
     syncStatusEl.hidden = false;
   } else {
     syncStatusEl.hidden = true;
@@ -10209,12 +10234,16 @@ onAuthStateChanged(auth, async (user) => {
   handleIncomingShare();
   // One-time catch-up: stamp customer names onto already-shared notes
   Storage.backfillAssignedCustomerNames();
-  // Drop stale assignments left behind by removed members (field edit only)
-  Storage.cleanupOrphanedAssignments();
   // Bin anything that has sat in Trash longer than 30 days
   Storage.purgeExpiredTrash();
-  // Strip admin/bookkeeper uids from assignedTo — they see everything anyway
-  Storage.cleanupElevatedAssignments();
+  // Both sweeps read the member list, which can arrive after the notes —
+  // wait for it, or an empty list would unshare every note (v2026.10.12).
+  Storage.whenMembersLoaded().then(() => {
+    // Drop stale assignments left behind by removed members (field edit only)
+    Storage.cleanupOrphanedAssignments();
+    // Strip admin/bookkeeper uids from assignedTo — they see everything anyway
+    Storage.cleanupElevatedAssignments();
+  });
   // First magic-link sign-in (or forgot-password): prompt to set a password.
   if (pendingPasswordPrompt) {
     pendingPasswordPrompt = false;
@@ -13011,6 +13040,7 @@ function detachTutorialTapWatch() {
 
 // Start a tutorial part programmatically (getting-started cards, Settings → Help)
 function startTutorial(part, opts = {}) {
+  if (part === 4) Storage.ensurePriceItems();   // its steps need the rows
   tutorialPart = part || 1;
   tutorialStartPart = tutorialPart;
   tutorialDirection = 1;

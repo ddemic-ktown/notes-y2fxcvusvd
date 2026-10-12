@@ -1606,6 +1606,8 @@ body.back-floating .fab-menu { right: 90px; }
   pointer-events: none;        /* never swallow a tap meant for the page */
 }
 .sync-toast.sync-saving { background: rgba(37, 99, 235, 0.12); color: var(--accent); border-color: rgba(37, 99, 235, 0.3); }
+/* Updating… (v2026.10.12): quieter than Saving… — nothing of yours is at stake. */
+.sync-toast.sync-updating { background: var(--surface); color: var(--ink-soft); border-color: var(--line); }
 .sync-toast.sync-offline { background: #fde68a; color: #92400e; border-color: #f59e0b; }
 body.dark-mode .sync-toast.sync-offline { background: #78350f; color: #fde68a; border-color: #b45309; }
 /* Magnified along with the page like every other fixed control, so it hides

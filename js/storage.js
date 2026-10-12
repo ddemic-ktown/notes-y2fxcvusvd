@@ -31,7 +31,6 @@ const _cache = {
 };
 const _listeners = new Set();
 let _lastReconnect = 0;      // throttles Storage.reconnect()
-let _lastPriceFetch = 0;     // throttles Storage.refreshPriceTable()
 let _onRoleChange = null;
 let _uid = null;
 let _orgId = null;
@@ -40,7 +39,11 @@ let _unsubs = [];
 let _jobsUnsub = null;              // tracked apart so it can be replaced alone
 let _hotFrom = '', _hotTo = '';     // the live window, YYYY-MM-DD
 const _fetchedMonths = new Set();   // 'YYYY-MM' already pulled by getDocs
-const _fetchedLogRanges = new Set(); // 'from|to' timelog ranges already pulled
+// Set by the members listener's first snapshot. The sign-in sweeps that read
+// the member list wait for it — run against the empty list they would treat
+// every member as gone (v2026.10.12).
+let _membersLoaded = false;
+const _membersWaiters = [];
 let _ready = false;
 let _customersReady = false;
 let _notesError = null;
@@ -64,6 +67,12 @@ function uid() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 }
 function nowIso() { return new Date().toISOString(); }
+// Key-order-independent JSON, for "would this write change anything?" checks.
+function canon(v) {
+  if (Array.isArray(v)) return '[' + v.map(canon).join(',') + ']';
+  if (v && typeof v === 'object') return '{' + Object.keys(v).sort().map(k => JSON.stringify(k) + ':' + canon(v[k])).join(',') + '}';
+  return JSON.stringify(v === undefined ? null : v);
+}
 
 // ---------- Firestore path helpers ----------
 function notesCol()     { return collection(db, `orgs/${_orgId}/notes`); }
@@ -128,11 +137,22 @@ function splitSettings(all) {
 }
 // Every settings write goes through here so private keys never land in the
 // public doc. Admin only (rules).
+// Only keys that differ from what the doc already holds are sent, and a half
+// with no differences isn't written at all (v2026.10.12) — most settings live
+// in just one of the two docs, and each write also echoes back as a read.
+function changedKeys(next, cur) {
+  const out = {};
+  for (const [k, v] of Object.entries(next)) if (canon(v) !== canon((cur || {})[k])) out[k] = v;
+  return out;
+}
 function persistSettings(label) {
   const { pub, priv } = splitSettings(_cache.settings);
-  const a = tracked(setDoc(settingsDoc(), pub, { merge: true })).catch(err => console.warn(label + '.pub', err));
-  const b = tracked(setDoc(privateSettingsDoc(), priv, { merge: true })).catch(err => console.warn(label + '.priv', err));
-  return Promise.all([a, b]);
+  const pubDiff = changedKeys(pub, _pubSettings);
+  const privDiff = changedKeys(priv, _privSettings);
+  const ops = [];
+  if (Object.keys(pubDiff).length) ops.push(tracked(setDoc(settingsDoc(), pubDiff, { merge: true })).catch(err => console.warn(label + '.pub', err)));
+  if (Object.keys(privDiff).length) ops.push(tracked(setDoc(privateSettingsDoc(), privDiff, { merge: true })).catch(err => console.warn(label + '.priv', err)));
+  return Promise.all(ops);
 }
 // One-time move of private keys out of the public doc. The private copy is
 // written and CONFIRMED before anything is stripped, so a failure loses nothing.
@@ -207,20 +227,80 @@ function syncCustJob(id, next, prev) {
   if (copy) tracked(setDoc(doc(custJobsCol(), id), copy)).catch(err => console.warn('custJob.set', err));
   else if (had) tracked(deleteDoc(doc(custJobsCol(), id))).catch(err => console.warn('custJob.del', err));
 }
+// ---- saved copy vs live (v2026.10.12) ----
+// With the offline cache on, every listener first answers from the device copy
+// and then from the server. liveSnapshot() records which one each listener is
+// on, so the app can show one "Updating…" message while any of them is still
+// on the device copy. includeMetadataChanges is what reports the switch even
+// when nothing changed; callbacks that carry ONLY that switch (or a pending-
+// write flag) are not passed on, so handlers run exactly as often as before.
+const _liveState = new Map();   // listener key -> true once confirmed by the server
+function setLive(key, live) {
+  if (_liveState.get(key) === live) return;
+  _liveState.set(key, live);
+  emitSync();
+}
+function dropLive(...keys) {
+  let changed = false;
+  for (const k of keys) changed = _liveState.delete(k) || changed;
+  if (changed) emitSync();
+}
+function liveSnapshot(key, ref, onNext, onError) {
+  let seen = false;
+  let lastSig = null;   // document listeners: what we last passed on
+  return onSnapshot(ref, { includeMetadataChanges: true }, (snap) => {
+    setLive(key, !snap.metadata.fromCache);
+    const isQuery = typeof snap.docChanges === 'function';
+    if (isQuery) {
+      if (seen && snap.docChanges().length === 0) return;
+    } else {
+      const sig = snap.exists() ? canon(snap.data()) : '-';
+      if (seen && sig === lastSig) return;
+      lastSig = sig;
+    }
+    seen = true;
+    onNext(snap);
+  }, (err) => {
+    setLive(key, true);   // a refused listener is not "still updating"
+    if (onError) onError(err); else console.warn(key + ' listener', err);
+  });
+}
+
 // Price listeners on their own handles, so an employee the table is not
 // shared with can retry them alone (v2026.10.03-2042).
 let _priceUnsubs = [];
 let _priceRetry = null;
+// The ROWS listener starts on first use, not at sign-in (v2026.10.12): a
+// listener that has been away 30+ minutes is billed as a full re-read, so
+// starting it at sign-in cost one read per price row on every app open, even
+// in sessions that never visit the table. The small config doc stays live —
+// the home card and the tour need sharedWith to decide whether to show it.
+let _priceItemsWanted = false;   // someone has asked for the rows this session
+let _priceItemsLoaded = false;   // first snapshot has arrived
+const _priceItemsWaiters = [];
+function flushPriceItemsWaiters() { _priceItemsWaiters.splice(0).forEach(f => f()); }
+function priceRowsAllowed() { return !!(_orgId && _role && _role !== 'customer'); }
+function schedulePriceRetry() {
+  if (_role !== 'employee' || _priceRetry) return;
+  _priceRetry = setTimeout(() => { _priceRetry = null; if (_role === 'employee' && _orgId) attachPriceListeners(); }, 120000);
+}
+function startPriceItemsListener() {
+  if (!priceRowsAllowed()) { flushPriceItemsWaiters(); return; }
+  _priceUnsubs.push(liveSnapshot('priceItems', priceItemsCol(), (snap) => {
+    _cache.priceItems = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    _priceItemsLoaded = true;
+    flushPriceItemsWaiters();
+    emit();
+  }, (err) => { console.warn('priceItems listener', err); flushPriceItemsWaiters(); schedulePriceRetry(); }));
+}
 function attachPriceListeners() {
   _priceUnsubs.forEach(u => { try { u(); } catch (e) {} });
   _priceUnsubs = [];
+  dropLive('priceConfig', 'priceItems');
   if (_priceRetry) { clearTimeout(_priceRetry); _priceRetry = null; }
   if (!_role || _role === 'customer') return;
-  const retry = () => {
-    if (_role !== 'employee' || _priceRetry) return;
-    _priceRetry = setTimeout(() => { _priceRetry = null; if (_role === 'employee' && _orgId) attachPriceListeners(); }, 120000);
-  };
-  _priceUnsubs.push(onSnapshot(priceConfigDoc(), (snap) => {
+  const retry = schedulePriceRetry;
+  _priceUnsubs.push(liveSnapshot('priceConfig', priceConfigDoc(), (snap) => {
     _cache.priceConfig = snap.exists()
       ? { vendors: [], sharedWith: [], ...snap.data() }
       : { vendors: [], sharedWith: [] };
@@ -232,10 +312,7 @@ function attachPriceListeners() {
     emit();
     retry();
   }));
-  _priceUnsubs.push(onSnapshot(priceItemsCol(), (snap) => {
-    _cache.priceItems = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-    emit();
-  }, (err) => { console.warn('priceItems listener', err); retry(); }));
+  if (_priceItemsWanted) startPriceItemsListener();
 }
 
 // ---------- listeners ----------
@@ -248,7 +325,7 @@ function attachListeners() {
   const notesQuery = (_role === 'admin' || _role === 'bookkeeper')
     ? notesCol()
     : query(notesCol(), where('assignedTo', 'array-contains', _uid));
-  _unsubs.push(onSnapshot(notesQuery, (snap) => {
+  _unsubs.push(liveSnapshot('notes', notesQuery, (snap) => {
     _cache.notes = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     _notesError = null;
     _ready = true;
@@ -264,13 +341,13 @@ function attachListeners() {
   if (_role !== 'admin' && _role !== 'bookkeeper') {
     _customersReady = true;
   } else {
-    _unsubs.push(onSnapshot(customersCol(), (snap) => {
+    _unsubs.push(liveSnapshot('customers', customersCol(), (snap) => {
       _cache.customers = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       _customersReady = true;
       emit();
     }));
   }
-  _unsubs.push(onSnapshot(settingsDoc(), (snap) => {
+  _unsubs.push(liveSnapshot('settings', settingsDoc(), (snap) => {
     _pubSettings = snap.exists() ? snap.data() : {};
     recomputeSettings();
     emit();
@@ -278,7 +355,7 @@ function attachListeners() {
     maybeBackfillCustJobs();
   }));
   if (isStaffRole()) {
-    _unsubs.push(onSnapshot(privateSettingsDoc(), (snap) => {
+    _unsubs.push(liveSnapshot('privateSettings', privateSettingsDoc(), (snap) => {
       _privSettings = snap.exists() ? snap.data() : {};
       _privLoaded = true;
       recomputeSettings();
@@ -290,7 +367,7 @@ function attachListeners() {
   }
   // A customer's own flags (v2026.10.03-2042): can they see hours, and from when.
   if (_role === 'customer') {
-    _unsubs.push(onSnapshot(custAccessDoc(_uid), (snap) => {
+    _unsubs.push(liveSnapshot('custAccess', custAccessDoc(_uid), (snap) => {
       _cache.custAccess = snap.exists() ? snap.data() : {};
       emit();
     }, (err) => { console.warn('custAccess listener', err); _cache.custAccess = {}; }));
@@ -298,10 +375,11 @@ function attachListeners() {
   // Staff read the whole member list; everyone else may read only their OWN
   // member doc (v2026.10.03-2042) — the list carries every account's email address.
   const membersSource = isStaffRole() ? membersCol() : doc(membersCol(), _uid);
-  _unsubs.push(onSnapshot(membersSource, (snap) => {
+  _unsubs.push(liveSnapshot('members', membersSource, (snap) => {
     _cache.members = isStaffRole()
       ? snap.docs.map(d => ({ uid: d.id, ...d.data() }))
       : (snap.exists() ? [{ uid: snap.id, ...snap.data() }] : []);
+    if (!_membersLoaded) { _membersLoaded = true; _membersWaiters.splice(0).forEach(f => f()); }
     // An admin can change our role (or remove us) while the app is open.
     // Firestore rules apply the new role instantly, so the UI and the data
     // listeners must follow — otherwise the screen shows powers the server
@@ -347,7 +425,7 @@ function attachListeners() {
   attachJobsListener();
   // Only admins may read invites (firestore.rules) — skip the listener for other roles.
   if (_role === 'admin') {
-    _unsubs.push(onSnapshot(invitesCol(), (snap) => {
+    _unsubs.push(liveSnapshot('invites', invitesCol(), (snap) => {
       _cache.invites = snap.docs.map(d => ({ email: d.id, ...d.data() }));
       emit();
     }));
@@ -361,8 +439,9 @@ function detachListeners() {
   _priceUnsubs.forEach(u => { try { u(); } catch (e) {} });
   _priceUnsubs = [];
   if (_priceRetry) { clearTimeout(_priceRetry); _priceRetry = null; }
+  _priceItemsLoaded = false;
+  if (_liveState.size) { _liveState.clear(); emitSync(); }
   _fetchedMonths.clear();
-  _fetchedLogRanges.clear();
 }
 
 // ---------- calendar jobs: hot window + archive ----------
@@ -388,6 +467,7 @@ function mergeHotJobs(docs) {
 }
 function attachJobsListener() {
   if (_jobsUnsub) { try { _jobsUnsub(); } catch (e) {} _jobsUnsub = null; }
+  dropLive('jobs');
   if (!_role) return;
   const w = hotWindow();
   _hotFrom = w.from; _hotTo = w.to;
@@ -399,7 +479,7 @@ function attachJobsListener() {
     : _role === 'customer'
       ? query(custJobsCol(), where('customerUids', 'array-contains', _uid))   // safe copies (v2026.10.03-2042)
       : query(jobsCol(), where('employeeUids', 'array-contains', _uid));
-  _jobsUnsub = onSnapshot(q, (snap) => {
+  _jobsUnsub = liveSnapshot('jobs', q, (snap) => {
     const docs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     if (_role === 'admin' || _role === 'bookkeeper') mergeHotJobs(docs);
     else _cache.jobs = docs;                   // employee query covers everything
@@ -596,6 +676,24 @@ export const Storage = {
   },
 
   getNotesError() { return _notesError; },
+  // Start the price rows listener if it isn't running; resolves once rows are
+  // in the cache (from the device copy or the server), or after 8s regardless.
+  ensurePriceItems() {
+    if (!_priceItemsWanted) {
+      _priceItemsWanted = true;
+      if (priceRowsAllowed()) startPriceItemsListener();
+    }
+    if (_priceItemsLoaded || !priceRowsAllowed()) return Promise.resolve();
+    return new Promise(r => { _priceItemsWaiters.push(r); setTimeout(r, 8000); });
+  },
+  // True while any live list is still showing the device copy (see liveSnapshot).
+  isUpdating() {
+    for (const v of _liveState.values()) if (!v) return true;
+    return false;
+  },
+
+  // Resolves once the member list has arrived (see _membersLoaded).
+  whenMembersLoaded() { return _membersLoaded ? Promise.resolve() : new Promise(r => _membersWaiters.push(r)); },
   getRole() { return _role; },
   getOrgId() { return _orgId; },
   getUid() { return _uid; },
@@ -612,10 +710,10 @@ export const Storage = {
     _cache.customers = [];
     _cache.settings = { ...DEFAULT_SETTINGS };
     _pubSettings = {}; _privSettings = {}; _privLoaded = false; _cache.custAccess = {};
-    _cache.members = [];
+    _cache.members = []; _membersLoaded = false;
     _cache.invites = [];
     _cache.priceConfig = { vendors: [], sharedWith: [] };
-    _cache.priceItems = [];
+    _cache.priceItems = []; _priceItemsWanted = false;
     _cache.jobs = [];
     _cache.timelogs = [];
 
@@ -692,9 +790,9 @@ export const Storage = {
     _cache.notes = []; _cache.customers = [];
     _cache.settings = { ...DEFAULT_SETTINGS };
     _pubSettings = {}; _privSettings = {}; _privLoaded = false; _cache.custAccess = {};
-    _cache.members = []; _cache.invites = [];
+    _cache.members = []; _cache.invites = []; _membersLoaded = false;
     _cache.priceConfig = { vendors: [], sharedWith: [] };
-    _cache.priceItems = [];
+    _cache.priceItems = []; _priceItemsWanted = false;
     _cache.jobs = [];
     _cache.timelogs = [];
     emit();
@@ -955,29 +1053,6 @@ export const Storage = {
   listPriceItems() {
     return _cache.priceItems.slice().sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
   },
-  // Belt to reconnect()'s braces: a one-off authoritative fetch when the price
-  // screen opens, so entering it always shows what the server has rather than
-  // whatever the cache was left holding.
-  //
-  // This is NOT free — it costs one read per row, unlike reconnect(), which
-  // resumes from a token. Hence the throttle, and hence it runs only on this
-  // screen rather than on every navigation.
-  async refreshPriceTable() {
-    if (!_orgId || !this.canViewPriceTable()) return;
-    if (Date.now() - _lastPriceFetch < 15000) return;
-    _lastPriceFetch = Date.now();
-    try {
-      const [cfgSnap, itemSnap] = await Promise.all([
-        getDoc(priceConfigDoc()),
-        getDocs(priceItemsCol()),
-      ]);
-      _cache.priceConfig = cfgSnap.exists()
-        ? { vendors: [], sharedWith: [], ...cfgSnap.data() }
-        : { vendors: [], sharedWith: [] };
-      _cache.priceItems = itemSnap.docs.map(d => ({ id: d.id, ...d.data() }));
-      emit();
-    } catch (e) { console.warn('refreshPriceTable', e); }
-  },
   // Admins always; employees when the table is shared with them.
   canEditPriceTable() {
     if (_role === 'admin') return true;
@@ -1207,17 +1282,31 @@ export const Storage = {
   // each job with a linked customer, deletes copies that no longer belong.
   // Run after relinking, a restore, a rename sweep, a hours-visibility change,
   // and once per company as the first backfill.
-  async resyncCustJobs() {
+  // customerId: rebuild only that customer's copies (v2026.10.12). Copies that
+  // already match are left alone, so a rebuild costs writes only for what changed.
+  async resyncCustJobs(customerId = null) {
     if (_role !== 'admin') return { written: 0, removed: 0, failed: 1 };
     try {
-      const [jSnap, cSnap] = await Promise.all([getDocs(jobsCol()), getDocs(custJobsCol())]);
+      const jq = customerId ? query(jobsCol(), where('customerId', '==', customerId)) : jobsCol();
+      const cq = customerId ? query(custJobsCol(), where('customerId', '==', customerId)) : custJobsCol();
+      const [jSnap, cSnap] = await Promise.all([getDocs(jq), getDocs(cq)]);
+      const have = new Map(cSnap.docs.map(d => [d.id, d.data()]));
+      const sameCopy = (a, b) => {
+        if (!a) return false;
+        const { updated: _ua, ...ra } = a;
+        const { updated: _ub, ...rb } = b;
+        return canon(ra) === canon(rb);
+      };
       const want = new Set();
       const ops = [];
+      let written = 0;
       for (const d of jSnap.docs) {
         const copy = custSafeCopy({ id: d.id, ...d.data() });
         if (!copy) continue;
         want.add(d.id);
+        if (sameCopy(have.get(d.id), copy)) continue;
         ops.push(tracked(setDoc(doc(custJobsCol(), d.id), copy)));
+        written++;
       }
       let removed = 0;
       for (const d of cSnap.docs) {
@@ -1230,7 +1319,7 @@ export const Storage = {
       const res = await Promise.allSettled(ops);
       const failed = res.filter(r => r.status === 'rejected').length;
       if (failed) console.warn('resyncCustJobs: writes failed', failed);
-      return { written: want.size, removed, failed };
+      return { written, removed, failed };
     } catch (err) {
       console.warn('resyncCustJobs', err);
       return { written: 0, removed: 0, failed: 1 };
@@ -1238,13 +1327,15 @@ export const Storage = {
   },
   // custAccess/{uid} mirrors each linked customer's flags so their own account
   // can read them; unlinked accounts lose theirs. prevLinks: links before the change.
-  async syncCustAccess(prevLinks = {}) {
+  // onlyCustomerId: refresh just that customer's flags (v2026.10.12).
+  async syncCustAccess(prevLinks = {}, onlyCustomerId = null) {
     if (_role !== 'admin') return;
     const links = _cache.settings.customerLinks || {};
     const live = new Set();
     for (const [cid, u] of Object.entries(links)) {
       if (!u) continue;
       live.add(u);
+      if (onlyCustomerId && cid !== onlyCustomerId) continue;
       const h = custHoursFor(cid);
       tracked(setDoc(custAccessDoc(u), { customerId: cid, canSeeHours: !!h.canSee, started: h.started || '' }))
         .catch(err => console.warn('custAccess.set', err));
@@ -1264,8 +1355,8 @@ export const Storage = {
     if (!next.started) delete next.started;
     all[customerId] = next;
     await this.setSetting('customerHours', all);
-    await this.syncCustAccess();
-    if (!!before.canSee !== !!next.canSee) await this.resyncCustJobs();
+    await this.syncCustAccess({}, customerId);
+    if (!!before.canSee !== !!next.canSee) await this.resyncCustJobs(customerId);
   },
   // A customer's own flags (their account only).
   getMyCustAccess() { return { ...(_cache.custAccess || {}) }; },
@@ -1452,7 +1543,9 @@ export const Storage = {
     // ---- every job, from the server ----
     let jobs = 0;
     try {
-      const snap = await getDocs(jobsCol());
+      // Only jobs carrying the name (v2026.10.12). employeeNames is derived from
+      // crew on every save, so it lists everyone the sweep below would touch.
+      const snap = await getDocs(query(jobsCol(), where('employeeNames', 'array-contains', from)));
       for (const d of snap.docs) {
         const j = d.data() || {};
         const names = Array.isArray(j.employeeNames) ? j.employeeNames : [];
@@ -1527,82 +1620,8 @@ export const Storage = {
     tracked(deleteDoc(doc(jobsCol(), id))).catch(err => console.warn("deleteJob", err));
   },
 
-  // ---------- Time logs (hours actually worked) ----------
-  // A job is a plan; a timelog is a fact. Separate collections so deleting a
-  // cancelled job can never touch recorded hours. ONE DOCUMENT PER PERSON: two
-  // people on one line of the hours note is two records, because that's two
-  // rows in QuickBooks and two people's pay.
-  //
-  // Fetched on demand for the range the Hours screen is showing — no live
-  // listener, because this serves one screen that you open deliberately, and a
-  // permanent listener would re-read every record at every sign-in for a
-  // screen most sessions never visit.
-  async ensureTimeLogRange(fromStr, toStr) {
-    if (!_orgId || _role === 'customer') return;
-    if (!fromStr || !toStr) return;
-    const key = `${fromStr}|${toStr}`;
-    if (_fetchedLogRanges.has(key)) return;
-    _fetchedLogRanges.add(key);                       // claim it before awaiting
-    try {
-      const q = (_role === 'admin' || _role === 'bookkeeper')
-        ? query(timelogsCol(), where('date', '>=', fromStr), where('date', '<=', toStr))
-        : query(timelogsCol(), where('employeeUids', 'array-contains', _uid));
-      const snap = await getDocs(q);
-      const docs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      const have = new Set(_cache.timelogs.map(t => t.id));
-      const added = docs.filter(d => !have.has(d.id));
-      if (added.length) { _cache.timelogs = _cache.timelogs.concat(added); emit(); }
-    } catch (err) {
-      _fetchedLogRanges.delete(key);                  // let it retry
-      console.warn('ensureTimeLogRange', err);
-    }
-  },
-  listTimeLogs() { return _cache.timelogs.slice(); },
-  listTimeLogsInRange(fromStr, toStr) {
-    return _cache.timelogs.filter(t =>
-      (!fromStr || t.date >= fromStr) && (!toStr || t.date <= toStr));
-  },
-  getTimeLog(id) { return _cache.timelogs.find(t => t.id === id) || null; },
-  async saveTimeLog(rec) {
-    const id = rec.id || uid();
-    const now = nowIso();
-    const existing = _cache.timelogs.find(t => t.id === id);
-    const next = {
-      id,
-      date: rec.date,                                  // 'YYYY-MM-DD'
-      employeeName: rec.employeeName || '',
-      // Rules filter on uids, never on the name — see the jobs comment.
-      employeeUids: this.employeeUidsFor([rec.employeeName].filter(Boolean)),
-      customerId: rec.customerId || null,
-      customerName: rec.customerName || '',
-      hours: Number(rec.hours) || 0,
-      hoursFormatted: rec.hoursFormatted || '',
-      note: rec.note || '',                            // the source line, for context
-      created: existing ? existing.created : now,
-      updated: now,
-    };
-    const i = _cache.timelogs.findIndex(t => t.id === id);
-    if (i === -1) _cache.timelogs.push(next); else _cache.timelogs[i] = next;
-    emit();
-    // Not awaited — see the note in saveJob.
-    tracked(setDoc(doc(timelogsCol(), id), stripId(next)))
-      .catch(err => console.warn('saveTimeLog', err));
-    return next;
-  },
-  // Sequential rather than a batch: it keeps the cache and the write path
-  // identical to the single-record case, and a partial failure leaves the
-  // records that did save intact instead of rolling the lot back.
-  async saveTimeLogsBulk(recs) {
-    const out = [];
-    for (const r of recs) out.push(await this.saveTimeLog(r));
-    return out;
-  },
-  async deleteTimeLog(id) {
-    _cache.timelogs = _cache.timelogs.filter(t => t.id !== id);
-    emit();
-    // Not awaited — see the note in saveJob.
-    tracked(deleteDoc(doc(timelogsCol(), id))).catch(err => console.warn('deleteTimeLog', err));
-  },
+  // (Time-log read/write functions removed v2026.10.12 — unused since v2026.08.19-0819.
+  // Old timelog docs are still included in backups and sample-data cleanup.)
 
   // ---------- Sample data ----------
   // A full demo org, not just a few notes: customers, notes, employees,
@@ -1705,6 +1724,7 @@ export const Storage = {
 
   async seedSampleData() {
     if (_role !== 'admin') return null;
+    await this.ensurePriceItems();
     const now = nowIso();
     const today = new Date();
     // Day offsets from today. Negative = worked (has hours and, mostly, a
@@ -2087,6 +2107,7 @@ export const Storage = {
   // only on an explicit press of a button that isn't even shown unless sample
   // data exists.
   async sampleDataPlan() {
+    await this.ensurePriceItems();
     const notes = _cache.notes.filter(n => n.demo);
     const customers = _cache.customers.filter(c => c.demo);
     const items = _cache.priceItems.filter(i => i.demo);
@@ -2360,7 +2381,9 @@ export const Storage = {
   // (assignedTo only ever contains member uids — the assign modal lists members,
   // and employee self-assignment requires membership — so this is safe.)
   cleanupOrphanedAssignments() {
-    if (_role !== 'admin') return;
+    // An empty list means "not loaded yet", never "everyone left" — the admin
+    // running this is a member themselves.
+    if (_role !== 'admin' || !_membersLoaded || !_cache.members.length) return;
     const memberUids = new Set(_cache.members.map(m => m.uid));
     _cache.notes.forEach((n, idx) => {
       if (!Array.isArray(n.assignedTo) || n.assignedTo.length === 0) return;
