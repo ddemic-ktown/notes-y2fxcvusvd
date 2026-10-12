@@ -20,6 +20,9 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 100, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.10.12-1429', 'Calendar prev/next line: the three labels sit closer together, the current day/month is larger and blue, and each side is tappable all the way to the edge'],
+  ['v2026.10.12-1425', 'The search bar pulses a few times when you arrive at a screen it is filtering, so a forgotten search doesn’t look like missing data'],
+  ['v2026.10.12-1421', 'Offline notice now reads “Offline — will sync later” and shows briefly instead of staying on screen: when the connection drops, when the app opens offline, and on each change saved offline'],
   ['v2026.10.12-1143', 'One app-wide “Updating…” message at the bottom while saved data is being checked against the server; replaces the Price Table’s own note'],
   ['v2026.10.12-1137', 'Price Table rows load when you first open it instead of at every sign-in, with a faint “Updating…” note while saved prices are being checked against the server'],
   ['v2026.10.12-1123', 'Uses the database less: rebuilds and setting saves only write what changed, the Price Table no longer re-reads every row on open, and a sign-in race that could unshare notes is fixed'],
@@ -8928,6 +8931,39 @@ COLLAPSIBLE_SEARCH_IDS.forEach(id => {
 });
 refreshSearchCollapse();
 
+// ---------- search bar pulses on arrival (v2026.10.12) ----------
+// A search left typed in quietly hides most of a list, and coming back to the
+// screen later it looks like data went missing. So when you ARRIVE at a screen
+// whose search bar holds text, the bar pulses three times.
+// "Arrive" is detected generically: a MutationObserver on every screen's class.
+// Re-renders also run hideAllScreens() → add('active'), but in one task, so the
+// first record of the batch still shows the screen was already active — only a
+// screen that was NOT active before the batch counts. No show* function needs a call.
+function flashActiveSearch(screen) {
+  screen.querySelectorAll('input[type="search"]').forEach(input => {
+    if (!input.value.trim() || input.offsetParent === null || input.closest('[hidden]')) return;
+    const wrap = input.closest('.search-wrap') || input.parentElement;
+    wrap.classList.remove('search-flash');
+    void wrap.offsetWidth;            // restart the animation if it is mid-run
+    wrap.classList.add('search-flash');
+  });
+}
+document.addEventListener('animationend', (e) => {
+  if (e.animationName !== 'search-flash') return;
+  const wrap = e.target.closest('.search-flash');
+  if (wrap) wrap.classList.remove('search-flash');
+});
+const screenArrivalObserver = new MutationObserver((records) => {
+  const before = new Map();
+  for (const r of records) if (!before.has(r.target)) before.set(r.target, r.oldValue || '');
+  for (const [el, old] of before) {
+    const wasActive = /(^|\s)active(\s|$)/.test(old);
+    if (!wasActive && el.classList.contains('active')) flashActiveSearch(el);
+  }
+});
+document.querySelectorAll('section.screen').forEach(s =>
+  screenArrivalObserver.observe(s, { attributes: true, attributeFilter: ['class'], attributeOldValue: true }));
+
 // Show/Hide password toggles — the set-password one flips both fields at once
 function wirePasswordToggle(toggleId, inputIds) {
   const btn = document.getElementById(toggleId);
@@ -9116,11 +9152,34 @@ const syncStatusEl = document.getElementById('sync-status');
 const UPDATING_DELAY = 1000;
 let updatingTimer = null;
 let updatingShown = false;
+// Offline (v2026.10.12): a brief notice, not a permanent bar. Shown for
+// OFFLINE_FLASH when the connection drops, when the app opens offline, and on
+// each change saved while offline (a new pending write), then it fades out.
+// Saving… and Updating… stay hidden while offline — writes and listeners are
+// all waiting on the connection, so they would only sit there.
+const OFFLINE_FLASH = 1500;
+const OFFLINE_FADE = 400;
+let offlineFlashUntil = 0;
+let offlineFlashTimer = null;
+let offlineFadeTimer = null;
+let syncWasOffline = false;
+let syncLastPending = 0;
+function flashOffline() {
+  offlineFlashUntil = Date.now() + OFFLINE_FLASH + OFFLINE_FADE;
+  clearTimeout(offlineFlashTimer); clearTimeout(offlineFadeTimer);
+  offlineFlashTimer = setTimeout(() => {
+    if (syncStatusEl) syncStatusEl.classList.add('sync-fade');
+    offlineFadeTimer = setTimeout(renderSyncStatus, OFFLINE_FADE + 20);
+  }, OFFLINE_FLASH);
+}
 function renderSyncStatus() {
   if (!syncStatusEl) return;
   const offline = !navigator.onLine;
   const pending = Storage.pendingWrites ? Storage.pendingWrites() : 0;
   const updating = Storage.isUpdating ? Storage.isUpdating() : false;
+  if (offline && (!syncWasOffline || pending > syncLastPending)) flashOffline();
+  syncWasOffline = offline;
+  syncLastPending = pending;
   if (!updating) {
     if (updatingTimer) { clearTimeout(updatingTimer); updatingTimer = null; }
     updatingShown = false;
@@ -9131,9 +9190,15 @@ function renderSyncStatus() {
     }, UPDATING_DELAY);
   }
   if (offline) {
-    syncStatusEl.textContent = 'Offline — saved on this device';
-    syncStatusEl.className = 'sync-toast sync-offline';
-    syncStatusEl.hidden = false;
+    const now = Date.now();
+    if (now < offlineFlashUntil) {
+      syncStatusEl.textContent = 'Offline — will sync later';
+      // Keep the fade going if a re-render lands mid-fade.
+      syncStatusEl.className = 'sync-toast sync-offline' + (now > offlineFlashUntil - OFFLINE_FADE ? ' sync-fade' : '');
+      syncStatusEl.hidden = false;
+    } else {
+      syncStatusEl.hidden = true;
+    }
   } else if (pending > 0) {
     syncStatusEl.textContent = 'Saving…';
     syncStatusEl.className = 'sync-toast sync-saving';
