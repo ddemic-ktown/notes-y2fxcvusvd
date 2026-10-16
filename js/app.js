@@ -20,6 +20,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 100, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.10.15-2239', 'Undid the v2026.10.15-2006 dark button bar attempt — it had no effect'],
   ['v2026.10.15-2210', 'The checkbox button on a blank first line of a note adds one box, not an empty row and two boxes'],
   ['v2026.10.15-2006', 'Android: the system buttons at the bottom of the screen are dark again in dark mode'],
   ['v2026.10.12-1429', 'Calendar prev/next line: the three labels sit closer together, the current day/month is larger and blue, and each side is tappable all the way to the edge'],
