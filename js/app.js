@@ -20,6 +20,8 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 100, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.10.15-2210', 'The checkbox button on a blank first line of a note adds one box, not an empty row and two boxes'],
+  ['v2026.10.15-2006', 'Android: the system buttons at the bottom of the screen are dark again in dark mode'],
   ['v2026.10.12-1429', 'Calendar prev/next line: the three labels sit closer together, the current day/month is larger and blue, and each side is tappable all the way to the edge'],
   ['v2026.10.12-1425', 'The search bar pulses a few times when you arrive at a screen it is filtering, so a forgotten search doesn’t look like missing data'],
   ['v2026.10.12-1421', 'Offline notice now reads “Offline — will sync later” and shows briefly instead of staying on screen: when the connection drops, when the app opens offline, and on each change saved offline'],
@@ -7537,7 +7539,7 @@ bodyInput.addEventListener('click', () => {
   if (isReadOnlyRole()) { restoreBodyEditable(); return; } // view-only
   const value = bodyInput.value;
   const pos = bodyInput.selectionStart;
-  const lineStart = pos == null ? -1 : value.lastIndexOf('\n', pos - 1) + 1;
+  const lineStart = pos == null ? -1 : lineStartAt(value, pos);
   const col = pos == null ? -1 : pos - lineStart;
   const head = lineStart < 0 ? '' : value.substring(lineStart, lineStart + 2);
   // An EMPTY checkbox line is only two characters long, so every tap on it
@@ -7750,7 +7752,7 @@ bodyInput.addEventListener('beforeinput', (e) => {
   // Single typed characters are left alone; e.data is null for a real paste.
   if (e.inputType === 'insertText' && e.data != null && e.data.length < 2) return;
   const pos = bodyInput.selectionStart;
-  pasteLineStart = bodyInput.value.lastIndexOf('\n', pos - 1) + 1;
+  pasteLineStart = lineStartAt(bodyInput.value, pos);
 });
 bodyInput.addEventListener('input', () => {
   if (pasteLineStart === null) return;
@@ -7872,13 +7874,19 @@ function sinkCheckedLines(pos) {
   bodyInput.selectionStart = bodyInput.selectionEnd = newPos;
 }
 
+// Start of the line holding `pos`. At pos 0, lastIndexOf('\n', -1) still checks
+// index 0, so a note starting with a blank line gave 1 — past the cursor — and the
+// checkbox button turned that line into two boxed rows (v2026.10.15-2210).
+function lineStartAt(value, pos) {
+  return pos > 0 ? value.lastIndexOf('\n', pos - 1) + 1 : 0;
+}
 function toggleCheckboxOnSelection() {
   pushUndo();
   undoLastRunType = null;
   const value = bodyInput.value;
   const selStart = bodyInput.selectionStart;
   const selEnd = bodyInput.selectionEnd;
-  const lineStart = value.lastIndexOf('\n', selStart - 1) + 1;
+  const lineStart = lineStartAt(value, selStart);
   let probe = selEnd;
   if (selEnd > selStart && value[selEnd - 1] !== '\n') probe = selEnd - 1;
   let lineEnd = value.indexOf('\n', probe);
@@ -7912,7 +7920,7 @@ bodyInput.addEventListener('keydown', (e) => {
   if (e.key !== 'Enter') return;
   const val = bodyInput.value;
   const pos = bodyInput.selectionStart;
-  const lineStart = val.lastIndexOf('\n', pos - 1) + 1;
+  const lineStart = lineStartAt(val, pos);
   const currentLine = val.substring(lineStart, pos);
   const prefixMatch = currentLine.match(/^([-–]\s|☐\s|☑\s)/);
   if (!prefixMatch) return;

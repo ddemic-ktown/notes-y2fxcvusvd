@@ -111,7 +111,10 @@ html, body { overflow-x: clip; }
    slides in is the html background, and that stayed the light one. */
 /* No color-scheme: dark here (removed v2026.09.30-2322) — it restyled every unstyled
    native control, and turned See all into a grey box. */
-html.dark-mode { background: #111827; }
+html.dark-mode { background: #111827; color-scheme: dark; }
+/* v2026.10.15-2006: dark color-scheme on <html> only, so Android colours its system
+   button bar dark; body resets to light so native controls (See all) look as before. */
+body { color-scheme: light; }
 /* Headers are flex rows of a title and some buttons. Without this the title
    refuses to shrink below its content and pushes the buttons out instead. */
 .app-header, .home-header-top, .customers-header-top, .customers-header-bottom { min-width: 0; }
