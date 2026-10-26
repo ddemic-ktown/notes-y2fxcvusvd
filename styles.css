@@ -112,6 +112,10 @@ html, body { overflow-x: clip; }
 /* No color-scheme: dark here (removed v2026.09.30-2322) — it restyled every unstyled
    native control, and turned See all into a grey box. */
 html.dark-mode { background: #111827; }
+/* v2026.10.26-0849: the color-scheme meta (set by applyTheme) only exists to tint the
+   Android system button bar. Keep every control on the page light-scheme as
+   before, so the See all grey-box problem above does not come back. */
+body { color-scheme: light; }
 /* Headers are flex rows of a title and some buttons. Without this the title
    refuses to shrink below its content and pushes the buttons out instead. */
 .app-header, .home-header-top, .customers-header-top, .customers-header-bottom { min-width: 0; }
@@ -1580,6 +1584,15 @@ body.back-floating .fab-menu { right: 90px; }
   .crumb-link { font-size: 12px; max-width: 38%; }
 }
 .editor-header .crumbs { flex: 1; }
+/* Note moved to another customer / general notes (v2026.10.26-0853): three soft pulses. */
+@keyframes crumbs-flash {
+  0%, 100% { background: transparent; box-shadow: 0 0 0 0 rgba(37, 99, 235, 0); }
+  50% { background: rgba(37, 99, 235, 0.18); box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.35); }
+}
+.crumbs.crumbs-flash { border-radius: 6px; animation: crumbs-flash 0.6s ease-in-out 3; }
+@media (prefers-reduced-motion: reduce) {
+  .crumbs.crumbs-flash { animation: crumbs-flash 1.2s ease-in-out 1; }
+}
 .editor-header .crumb-current { font-size: 15px; }
 .app-version { font-size: 12px; color: var(--ink-soft); }
 /* Sync toast: quiet by default, only speaks when something is pending. It was

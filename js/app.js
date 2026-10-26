@@ -20,6 +20,9 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 100, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.10.26-0853', 'Moving a note to another customer or to general notes flashes the breadcrumb instead of showing a pop-up message'],
+  ['v2026.10.26-0852', 'Day view: tapping Calendar at the top goes back to the calendar'],
+  ['v2026.10.26-0849', 'Android: try again to make the system buttons bar dark in dark mode (dark app background + dark colour-scheme hint)'],
   ['v2026.10.15-2239', 'Undid the v2026.10.15-2006 dark button bar attempt — it had no effect'],
   ['v2026.10.15-2210', 'The checkbox button on a blank first line of a note adds one box, not an empty row and two boxes'],
   ['v2026.10.15-2006', 'Android: the system buttons at the bottom of the screen are dark again in dark mode'],
@@ -6337,7 +6340,10 @@ function getScreenNavs() {
     }
     n.addEventListener('click', (e) => {
       const b = e.target.closest('[data-nav]');
-      if (!b || b.classList.contains('active')) return;
+      // Day view highlights Calendar too, but tapping it there goes back to the
+      // calendar grid instead of doing nothing (v2026.10.26-0852).
+      const dayToGrid = b && b.dataset.nav === 'calendar' && calendarDayView && calendarDayView.classList.contains('active');
+      if (!b || (b.classList.contains('active') && !dayToGrid)) return;
       if (b.dataset.nav === 'home') { if (editorView.classList.contains('active')) commitAndCleanupEditor(); goHome(); return; }
       if (b.dataset.nav === 'customers') setTimeout(showCustomers, 0);
       else if (b.dataset.nav === 'calendar') showCalendar();
@@ -8538,10 +8544,15 @@ function wireAssignCustomerRows() {
       } else {
         renderEditorCrumbs(currentType, targetId);
       }
-      // Nothing else on screen moves, so say what happened.
-      showEditorToast(targetId
-        ? `Filed under ${customerCrumbLabel(targetId)}`
-        : 'Moved to general notes');
+      // Nothing else on screen moves, so the breadcrumb — which now names the
+      // new owner — flashes to show the change (v2026.10.26-0853, replaced the toast).
+      const crumbsEl = document.getElementById('crumbs-editor');
+      if (crumbsEl) {
+        crumbsEl.classList.remove('crumbs-flash');
+        void crumbsEl.offsetWidth;   // restart the animation if it is already running
+        crumbsEl.classList.add('crumbs-flash');
+        crumbsEl.addEventListener('animationend', () => crumbsEl.classList.remove('crumbs-flash'), { once: true });
+      }
     });
   });
 }
@@ -10075,6 +10086,8 @@ function applyTheme() {
   document.documentElement.classList.toggle('dark-mode', theme === 'dark');   // v2026.09.30-2250
   const meta = document.querySelector('meta[name="theme-color"]');
   if (meta) meta.setAttribute('content', theme === 'dark' ? '#1f2937' : '#ffffff');
+  const cs = document.querySelector('meta[name="color-scheme"]');   // v2026.10.26-0849: tints the Android system button bar
+  if (cs) cs.setAttribute('content', theme === 'dark' ? 'dark' : 'light');
   const btn = document.getElementById('theme-cycle-btn');
   if (btn) {
     const p = getThemePref();
