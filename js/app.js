@@ -20,6 +20,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 100, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.10.28-0047', 'Android: app colour changed from blue to dark grey so the system buttons bar is dark (may need the app re-added to the home screen)'],
   ['v2026.10.28-0044', 'Leaving a note with Calendar, Price, Hours or Customers, then pressing Back, reopens the same note where you were'],
   ['v2026.10.26-0853', 'Moving a note to another customer or to general notes flashes the breadcrumb instead of showing a pop-up message'],
   ['v2026.10.26-0852', 'Day view: tapping Calendar at the top goes back to the calendar'],
