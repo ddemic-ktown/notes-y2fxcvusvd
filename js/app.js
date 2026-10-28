@@ -20,6 +20,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 100, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.10.28-0044', 'Leaving a note with Calendar, Price, Hours or Customers, then pressing Back, reopens the same note where you were'],
   ['v2026.10.26-0853', 'Moving a note to another customer or to general notes flashes the breadcrumb instead of showing a pop-up message'],
   ['v2026.10.26-0852', 'Day view: tapping Calendar at the top goes back to the calendar'],
   ['v2026.10.26-0849', 'Android: try again to make the system buttons bar dark in dark mode (dark app background + dark colour-scheme hint)'],
@@ -6069,6 +6070,37 @@ function showEditor(record, type, cursorHint) {
   }, 50);
 }
 
+// Note ⇄ other screen (v2026.10.28-0044). Leaving a note with a top nav button
+// (Calendar, Price, Hours, Customers) saves it and stamps its history entry
+// with which note it was, plus cursor and scroll. Back then lands on that entry
+// and the popstate handler reopens the same note where you were, so you can
+// flip between a note and another screen with the nav button and Back.
+function rememberNoteForBack() {
+  if (currentType !== 'note' || !currentId) return;
+  if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
+  commitSave();
+  history.replaceState({
+    screen: 'editor', noteId: currentId, returnScreen, customerId: activeCustomerId,
+    selStart: bodyInput.selectionStart, selEnd: bodyInput.selectionEnd,
+    bodyScroll: bodyInput.scrollTop,
+  }, '');
+}
+function reopenRememberedNote(st) {
+  const note = st && st.noteId ? Storage.getNote(st.noteId) : null;
+  if (!note) return false;
+  returnScreen = st.returnScreen || (note.customerId ? 'customer-notes' : 'notes');
+  activeCustomerId = st.customerId !== undefined ? st.customerId : (note.customerId || null);
+  showEditor(note, 'note');
+  // After showEditor's own 50ms pass. Selection without focus, so no keyboard.
+  setTimeout(() => {
+    const len = bodyInput.value.length;
+    if (typeof st.selStart === 'number') {
+      try { bodyInput.setSelectionRange(Math.min(st.selStart, len), Math.min(st.selEnd ?? st.selStart, len)); } catch (e) {}
+    }
+    if (typeof st.bodyScroll === 'number') bodyInput.scrollTop = st.bodyScroll;
+  }, 80);
+  return true;
+}
 function returnFromEditor() {
   if (returnScreen === 'aggregator-section') {
     // Leaving the compiled aggregator editor that was opened from the
@@ -6344,6 +6376,7 @@ function getScreenNavs() {
       // calendar grid instead of doing nothing (v2026.10.26-0852).
       const dayToGrid = b && b.dataset.nav === 'calendar' && calendarDayView && calendarDayView.classList.contains('active');
       if (!b || (b.classList.contains('active') && !dayToGrid)) return;
+      if (b.dataset.nav !== 'home' && editorView.classList.contains('active')) rememberNoteForBack();
       if (b.dataset.nav === 'home') { if (editorView.classList.contains('active')) commitAndCleanupEditor(); goHome(); return; }
       if (b.dataset.nav === 'customers') setTimeout(showCustomers, 0);
       else if (b.dataset.nav === 'calendar') showCalendar();
@@ -8134,7 +8167,10 @@ window.addEventListener('popstate', (e) => {
     handlingPopstate = false; return;
   }
 
-  if (screen === 'editor') { returnFromEditor(); handlingPopstate = false; return; }
+  if (screen === 'editor') {
+    if (!reopenRememberedNote(e.state)) returnFromEditor();   // v2026.10.28-0044
+    handlingPopstate = false; return;
+  }
   if (screen === 'customers') { showCustomers(); handlingPopstate = false; return; }
   if (screen === 'customer-notes') {
     if (e.state.customerId) showCustomerNotes(e.state.customerId, e.state.returnTo);
