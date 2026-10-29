@@ -20,6 +20,10 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 100, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.10.28-2315', 'Settings › Members: Shared notes button per employee/customer — lists what is shared with them (notes and price table), open or unshare from there'],
+  ['v2026.10.28-2312', 'Calendar for employees: the address is the heading, the customer name is smaller and grey underneath'],
+  ['v2026.10.28-2308', 'Job editor: tapping an hours or other typing field scrolls it into view above Save/Cancel once the keyboard is up'],
+  ['v2026.10.28-2305', 'Calendar: new Settings › Calendar swipe › Scroll — months scroll continuously, the month at the top is outlined and named'],
   ['v2026.10.28-0047', 'Android: app colour changed from blue to dark grey so the system buttons bar is dark (may need the app re-added to the home screen)'],
   ['v2026.10.28-0044', 'Leaving a note with Calendar, Price, Hours or Customers, then pressing Back, reopens the same note where you were'],
   ['v2026.10.26-0853', 'Moving a note to another customer or to general notes flashes the breadcrumb instead of showing a pop-up message'],
@@ -1307,6 +1311,15 @@ function jobTitle(j) {
   return j.customerName || (j.customerId ? customerCrumbLabel(j.customerId) : '');
 }
 
+// Employees (v2026.10.28-2312): on the calendar the ADDRESS is what they need — where
+// to go — so it takes the customer name's place as the heading, and the name
+// becomes a subdued second line. Admins, bookkeepers and customers unchanged;
+// a job without an address falls back to the customer name.
+function calAddrFirst(j) {
+  return !!(j && !j.noWork && (j.address || '').trim() && Storage.getRole() === 'employee');
+}
+function calHeadLabel(j) { return calAddrFirst(j) ? j.address.trim() : jobTitle(j); }
+
 function groupByCrew(jobs) {
   const map = new Map();
   jobs.forEach(j => {
@@ -1383,10 +1396,15 @@ let calMode = localStorage.getItem('na-cal-mode') === 'week' ? 'week' : 'month';
 function calSwipeVertical() {
   try { return localStorage.getItem('na-cal-swipe') === 'vertical'; } catch (e) { return false; }
 }
+// 'scroll' (v2026.10.28-2305): month view becomes one continuous scroll of months.
+function calSwipeScroll() {
+  try { return localStorage.getItem('na-cal-swipe') === 'scroll'; } catch (e) { return false; }
+}
+function calScrollOn() { return calMode === 'month' && calSwipeScroll(); }
 function applyCalSwipeButton() {
   const btn = document.getElementById('cal-swipe-cycle-btn');
   if (!btn) return;
-  const label = calSwipeVertical() ? 'Up and down' : 'Sideways';
+  const label = calSwipeScroll() ? 'Scroll' : (calSwipeVertical() ? 'Up and down' : 'Sideways');
   btn.textContent = label;
   btn.setAttribute('aria-label', `Calendar swipe: ${label}. Tap to change.`);
 }
@@ -1394,8 +1412,11 @@ function applyCalSwipeButton() {
   const btn = document.getElementById('cal-swipe-cycle-btn');
   if (btn) btn.addEventListener('click', () => {
     try {
-      if (calSwipeVertical()) localStorage.removeItem('na-cal-swipe');
+      // Sideways → Up and down → Scroll → Sideways
+      if (calSwipeScroll()) localStorage.removeItem('na-cal-swipe');
+      else if (calSwipeVertical()) localStorage.setItem('na-cal-swipe', 'scroll');
       else localStorage.setItem('na-cal-swipe', 'vertical');
+      calScrollAnchor = null;
     } catch (e) {}
     applyCalSwipeButton();
   });
@@ -1745,43 +1766,15 @@ function openCalFilter() {
   }));
 })();
 
-function renderCalendar() {
-  renderCalFilterBars();
-  // Older months aren't in the live window — pull them once, on demand. The
-  // grid draws trailing days of both neighbours, so cover those too.
-  for (const off of [-1, 0, 1]) {
-    Storage.ensureJobMonth(ymd(new Date(calCursor.getFullYear(), calCursor.getMonth() + off, 1)));
-  }
-  if (!calGrid) return;
-  // Home › August. The year is dropped: you can see which month you're in from
-  // the grid, and the crumb is a place, not a date stamp. It comes back only
-  // when you've wandered out of the current year, where it is the one thing you
-  // actually need to know.
-  const calYear = calCursor.getFullYear();
-  const thisYear = new Date().getFullYear();
-  renderCrumbs('crumbs-calendar', [
-    { label: 'Home', go: 'home' },
-    { label: MONTH_NAMES[calCursor.getMonth()] + (calYear === thisYear ? '' : ` ${calYear}`) },
-  ]);
-  const canEdit = isAdminRole();
-  const calFab = document.getElementById('cal-fab');
-  if (calFab) calFab.style.display = canEdit ? '' : 'none';
-
-  const days = calGridDays(calCursor);
-  const todayStr = ymd(new Date());
-  // On a phone a pill shows the INITIAL only, in both month and week view —
-  // the colour is what you actually read a week by, and the names ate the room
-  // the customer needed. Full name stays in the title attribute and the day view.
-  const shortPills = isPhoneWidth();
-  const head = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']
-    .map(d => `<div class="cal-head">${d}</div>`).join('');
-  const cells = days.map(d => {
+// One month-grid cell. Pulled out of renderCalendar (v2026.10.28-2305) so the
+// continuous-scroll view draws its months with exactly the same cells.
+function calCellHtml(d, refMonth, shortPills, todayStr) {
     const s = ymd(d);
     const jobs = calJobsByDate(s);
     // In week view every cell is 'this week', so nothing is greyed as an
     // adjacent month — a week that straddles two months is one week, not a
     // week with four faded days in it.
-    const otherMonth = calMode === 'month' && d.getMonth() !== calCursor.getMonth();
+    const otherMonth = calMode === 'month' && d.getMonth() !== refMonth.getMonth();
     const classes = ['cal-cell'];
     if (otherMonth) classes.push('cal-other');
     if (!jobs.length) classes.push('cal-empty');   // greyed when nobody is on
@@ -1798,7 +1791,7 @@ function renderCalendar() {
     let shown = 0;
     const lines = shortPills ? '' : jobs.slice(0, deskCap).map(j => {
       shown++;
-      const who = jobTitle(j) || '—';
+      const who = calHeadLabel(j) || '—';
       const jcrew = jobCrew(j);
       const jnames = crewNames(jcrew);
       const chips = jnames.length
@@ -1831,7 +1824,7 @@ function renderCalendar() {
             return `<span class="cal-chip cal-chip-initial" style="${chipStyle(n)}" title="${escapeHtml(n)}">${escapeHtml(first.slice(0, 1).toUpperCase())}</span>`;
           }).join('')
         : '<span class="cal-chip cal-chip-none">—</span>';
-      const whos = take.map(j => jobTitle(j) || '—');
+      const whos = take.map(j => calHeadLabel(j) || '—');
       const anyNoWork = take.some(j => j.noWork);
       return `<div class="cal-job${anyNoWork ? ' cal-nowork-text' : ''}">${chips}<span class="cal-job-who">${escapeHtml(whos.join(', '))}</span></div>`;
     }).join('');
@@ -1840,7 +1833,160 @@ function renderCalendar() {
     return `<div class="${classes.join(' ')}" data-date="${s}">
       <div class="cal-daynum">${d.getDate()}</div>${lines}${groupedLines}${more}
     </div>`;
+}
+
+// CONTINUOUS SCROLL (v2026.10.28-2305). Settings › Calendar swipe › Scroll: the month
+// view is months stacked one under another in their own scroller. The month at
+// the top of the screen names the breadcrumb, is the calCursor (so week view,
+// + and Jump to today all start from it) and gets a blue outline. More months
+// are added when you get near either end; each month's jobs load as it is drawn.
+let calScrollStart = null;     // 1st of the first month drawn
+let calScrollCount = 0;        // how many months are drawn
+let calScrollAnchor = null;    // { ym: 'YYYY-MM', offset } — what stays put across a redraw
+const CAL_SCROLL_ADD = 6;
+function calYm(d) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; }
+function calScrollCrumbs() {
+  const calYear = calCursor.getFullYear();
+  renderCrumbs('crumbs-calendar', [
+    { label: 'Home', go: 'home' },
+    { label: MONTH_NAMES[calCursor.getMonth()] + (calYear === new Date().getFullYear() ? '' : ` ${calYear}`) },
+  ]);
+}
+function calScrollJumpTo(d) {
+  calCursor = new Date(d.getFullYear(), d.getMonth(), 1);
+  calScrollAnchor = { ym: calYm(calCursor), offset: 0 };
+  calScrollStart = null;       // rebuild the range around it
+  renderCalendar();
+}
+function renderCalendarScroll() {
+  const cur = new Date(calCursor.getFullYear(), calCursor.getMonth(), 1);
+  if (!calScrollAnchor) calScrollAnchor = { ym: calYm(cur), offset: 0 };
+  if (!calScrollStart) {
+    calScrollStart = new Date(cur.getFullYear(), cur.getMonth() - 3, 1);
+    calScrollCount = 10;
+  }
+  const months = [];
+  for (let i = 0; i < calScrollCount; i++) months.push(new Date(calScrollStart.getFullYear(), calScrollStart.getMonth() + i, 1));
+  // One either side too, for the jobs of the spill days.
+  for (let i = -1; i <= calScrollCount; i++) {
+    Storage.ensureJobMonth(ymd(new Date(calScrollStart.getFullYear(), calScrollStart.getMonth() + i, 1)));
+  }
+  calScrollCrumbs();
+  const canEdit = isAdminRole();
+  const calFab = document.getElementById('cal-fab');
+  if (calFab) calFab.style.display = canEdit ? '' : 'none';
+  const shortPills = isPhoneWidth();
+  const todayStr = ymd(new Date());
+  const head = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map(d => `<div class="cal-head">${d}</div>`).join('');
+  const blocks = months.map(m => {
+    const cells = monthGridDays(m).map(d => d.getMonth() !== m.getMonth()
+      ? '<div class="cal-cell cal-blank" aria-hidden="true"></div>'   // other month: it has its own block
+      : calCellHtml(d, m, shortPills, todayStr)).join('');
+    const ym = calYm(m);
+    const title = MONTH_NAMES[m.getMonth()] + ' ' + m.getFullYear();
+    return `<section class="cal-mblock${ym === calYm(cur) ? ' cal-mblock-active' : ''}" data-ym="${ym}">`
+      + `<div class="cal-mtitle">${escapeHtml(title)}</div><div class="cal-cells">${cells}</div></section>`;
   }).join('');
+  calGrid.classList.remove('cal-grid-wktl', 'cal-grid-week');
+  calGrid.classList.toggle('cal-grid-tall', !shortPills);
+  calGrid.classList.add('cal-grid-scroll');
+  calGrid.innerHTML = `<div class="cal-headrow">${head}</div><div class="cal-scroll">${blocks}</div>`;
+  renderCalSearchResults();
+  const modeBtn = document.getElementById('cal-mode');
+  if (modeBtn) { modeBtn.textContent = 'Week view'; modeBtn.setAttribute('aria-label', 'Switch to week view'); }
+  wireCalCells(calGrid);
+  const sc = calGrid.querySelector('.cal-scroll');
+  // Put the anchor month back exactly where it was (or at the top on a jump).
+  const place = () => {
+    const a = sc.querySelector(`.cal-mblock[data-ym="${calScrollAnchor.ym}"]`);
+    if (a) sc.scrollTop = a.offsetTop - calScrollAnchor.offset;
+  };
+  place();
+  requestAnimationFrame(place);   // again once fonts/layout settle
+  let busy = false;
+  sc.addEventListener('scroll', () => {
+    if (busy) return;
+    busy = true;
+    requestAnimationFrame(() => { busy = false; calScrollTick(sc); });
+  }, { passive: true });
+}
+function calScrollTick(sc) {
+  if (!sc.isConnected) return;
+  const blocks = [...sc.querySelectorAll('.cal-mblock')];
+  if (!blocks.length) return;
+  // The month at the top: the last one whose top is at or above the top edge
+  // (plus a little, so a month barely peeking in doesn't take over).
+  const line = sc.scrollTop + 40;
+  let top = blocks[0];
+  for (const b of blocks) { if (b.offsetTop <= line) top = b; else break; }
+  calScrollAnchor = { ym: top.dataset.ym, offset: top.offsetTop - sc.scrollTop };
+  if (!top.classList.contains('cal-mblock-active')) {
+    blocks.forEach(b => b.classList.toggle('cal-mblock-active', b === top));
+    const [y, m] = top.dataset.ym.split('-').map(Number);
+    calCursor = new Date(y, m - 1, 1);
+    calScrollCrumbs();
+  }
+  // Near an end: add more months and redraw (the anchor keeps the view still).
+  const nearTop = sc.scrollTop < sc.clientHeight;
+  const nearBottom = sc.scrollTop + sc.clientHeight > sc.scrollHeight - sc.clientHeight;
+  if (nearTop) {
+    calScrollStart = new Date(calScrollStart.getFullYear(), calScrollStart.getMonth() - CAL_SCROLL_ADD, 1);
+    calScrollCount += CAL_SCROLL_ADD;
+    renderCalendar();
+  } else if (nearBottom) {
+    calScrollCount += CAL_SCROLL_ADD;
+    renderCalendar();
+  }
+}
+function wireCalCells(root) {
+  root.querySelectorAll('.cal-cell[data-date]').forEach(cell => {
+    cell.addEventListener('click', (e) => {
+      // A job drawn in the week view opens its menu (v2026.10.04-1840); the rest of the
+      // column still opens the day.
+      const jobEl = e.target.closest('[data-job]');
+      if (jobEl && cell.contains(jobEl)) { openJobMenu(jobEl.dataset.job); return; }
+      const date = cell.dataset.date;
+      const jobs = Storage.listJobsByDate(date);
+      // Spec: tapping an EMPTY day goes straight to the new-job screen
+      if (!jobs.length && isAdminRole()) openJobModal(null, date);
+      else showCalendarDay(date);
+    });
+  });
+}
+
+function renderCalendar() {
+  if (calGrid && calScrollOn()) { renderCalFilterBars(); renderCalendarScroll(); return; }
+  if (calGrid) calGrid.classList.remove('cal-grid-scroll');
+  renderCalFilterBars();
+  // Older months aren't in the live window — pull them once, on demand. The
+  // grid draws trailing days of both neighbours, so cover those too.
+  for (const off of [-1, 0, 1]) {
+    Storage.ensureJobMonth(ymd(new Date(calCursor.getFullYear(), calCursor.getMonth() + off, 1)));
+  }
+  if (!calGrid) return;
+  // Home › August. The year is dropped: you can see which month you're in from
+  // the grid, and the crumb is a place, not a date stamp. It comes back only
+  // when you've wandered out of the current year, where it is the one thing you
+  // actually need to know.
+  const calYear = calCursor.getFullYear();
+  const thisYear = new Date().getFullYear();
+  renderCrumbs('crumbs-calendar', [
+    { label: 'Home', go: 'home' },
+    { label: MONTH_NAMES[calCursor.getMonth()] + (calYear === thisYear ? '' : ` ${calYear}`) },
+  ]);
+  const canEdit = isAdminRole();
+  const calFab = document.getElementById('cal-fab');
+  if (calFab) calFab.style.display = canEdit ? '' : 'none';
+
+  const days = calGridDays(calCursor);
+  const todayStr = ymd(new Date());
+  // On a phone a pill shows the INITIAL only, in both month and week view —
+  // the colour is what you actually read a week by, and the names ate the room
+  // the customer needed. Full name stays in the title attribute and the day view.
+  const shortPills = isPhoneWidth();
+  const head = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']
+    .map(d => `<div class="cal-head">${d}</div>`).join('');
+  const cells = days.map(d => calCellHtml(d, calCursor, shortPills, todayStr)).join('');
   // Cues so it's obvious there's more either side — naming the month beats
   // a bare arrow, and both are tappable for people who'd rather not swipe.
   const cueLabel = (delta) => {
@@ -1922,14 +2068,14 @@ function renderCalendar() {
           : `<span class="cal-chip" style="${chipStyle(n)}" title="${escapeHtml(n)}">${escapeHtml(crewChipLabel(crew, n, true))}</span>`).join('');
         const w = 100 / t.n;
         const ind = t.depth * indentPx;
-        const who = jobTitle(j) || '—';
+        const who = calHeadLabel(j) || '—';
         return `<div class="cal-wk-job${j.noWork ? ' cal-nowork' : ' cal-working'}" data-job="${j.id}"`
           + ` style="top:${pct(t.sp.start)};height:${((t.sp.end - t.sp.start) / range * 100).toFixed(3)}%;left:calc(${(t.lane * w).toFixed(3)}% + ${ind}px);width:calc(${w.toFixed(3)}% - ${ind}px)"`
           + ` title="${escapeHtml(`${who} · ${fmtClock(t.sp.start)}–${fmtClock(t.sp.end)}`)}">`
           + `<span class="cal-wk-who">${escapeHtml(who)}</span><span class="cal-wk-chips">${chips}</span></div>`;
       }).join('');
       const untimed = js.filter(j => !jobSpan(j)).slice(0, 3).map(j =>
-        `<div class="cal-wk-untimed${j.noWork ? ' cal-nowork-text' : ''}" data-job="${j.id}">${escapeHtml(jobTitle(j) || '—')}</div>`).join('');
+        `<div class="cal-wk-untimed${j.noWork ? ' cal-nowork-text' : ''}" data-job="${j.id}">${escapeHtml(calHeadLabel(j) || '—')}</div>`).join('');
       const classes = ['cal-cell', 'cal-wk-col'];
       if (!js.length) classes.push('cal-empty');
       if (s === todayStr) classes.push('cal-today');
@@ -1960,19 +2106,7 @@ function renderCalendar() {
   calGrid.querySelectorAll('.cal-cue').forEach(btn => {
     btn.addEventListener('click', () => calShiftMonth(parseInt(btn.dataset.shift, 10)));
   });
-  calGrid.querySelectorAll('.cal-cell').forEach(cell => {
-    cell.addEventListener('click', (e) => {
-      // A job drawn in the week view opens its menu (v2026.10.04-1840); the rest of the
-      // column still opens the day.
-      const jobEl = e.target.closest('[data-job]');
-      if (jobEl && cell.contains(jobEl)) { openJobMenu(jobEl.dataset.job); return; }
-      const date = cell.dataset.date;
-      const jobs = Storage.listJobsByDate(date);
-      // Spec: tapping an EMPTY day goes straight to the new-job screen
-      if (!jobs.length && isAdminRole()) openJobModal(null, date);
-      else showCalendarDay(date);
-    });
-  });
+  wireCalCells(calGrid);
 }
 
 function showCalendarDay(dateStr) {
@@ -2181,11 +2315,12 @@ function renderCalendarDay() {
   if (untimed.length) {
     untimedWrap.hidden = false;
     untimedWrap.innerHTML = '<p class="cal-untimed-label">Any time</p>' + untimed.map(j => {
-      const who = jobTitle(j) || 'No customer';
+      const who = calHeadLabel(j) || 'No customer';
+      const ucust = calAddrFirst(j) && jobTitle(j) ? ` <span class="cal-untimed-cust">${escapeHtml(jobTitle(j))}</span>` : '';
       const ucrew = jobCrew(j);
       const chips = crewNames(ucrew).map(n =>
         `<span class="cal-chip" style="${chipStyle(n)}">${escapeHtml(crewChipLabel(ucrew, n, false))}</span>`).join('');
-      return `<div class="cal-untimed-job${j.noWork ? ' cal-nowork' : ' cal-working'}" data-job="${j.id}">${escapeHtml(who)} ${chips}</div>`;
+      return `<div class="cal-untimed-job${j.noWork ? ' cal-nowork' : ' cal-working'}" data-job="${j.id}">${escapeHtml(who)}${ucust} ${chips}</div>`;
     }).join('');
   } else {
     untimedWrap.hidden = true;
@@ -2211,7 +2346,8 @@ function renderCalendarDay() {
     // Only the strip above the next block is on screen, so lay the text out for
     // that instead of the block's real height.
     const shown = Math.min(height, visible);
-    const who = jobTitle(j) || 'No customer';
+    const who = calHeadLabel(j) || 'No customer';
+    const addrFirst = calAddrFirst(j);
     const bcrew = jobCrew(j);
     const names = crewNames(bcrew);
     // An overnight job is drawn down to midnight only, so the label carries the
@@ -2250,11 +2386,14 @@ function renderCalendarDay() {
     // forbids the wrap and lets the NAME truncate instead: losing the tail of
     // a name you can read the start of beats losing the chips entirely.
     const tight = shown < 52;
-    const addr = j.address && !tight ? `<div class="cal-block-addr">${escapeHtml(j.address)}</div>` : '';
+    // Employees: the second line is the customer name instead (see calAddrFirst).
+    const addr = tight ? ''
+      : addrFirst ? (jobTitle(j) ? `<div class="cal-block-addr cal-block-cust">${escapeHtml(jobTitle(j))}</div>` : '')
+      : (j.address ? `<div class="cal-block-addr">${escapeHtml(j.address)}</div>` : '');
     // 📍 directions (v2026.10.03-0725) — its own tap target; see the stopPropagation below.
     // (The 📍 pin went in v2026.10.04-1840 — Directions is in the job menu a tap opens.)
     const pin = '';
-    return `<div class="cal-block${tight ? ' cal-block-tight' : ''}${sizeClass}${j.noWork ? ' cal-nowork' : ' cal-working'}" data-job="${j.id}" style="top:${top}px;height:${height}px;left:${left};width:${width};z-index:${1 + depth}">
+    return `<div class="cal-block${tight ? ' cal-block-tight' : ''}${addrFirst ? ' cal-block-addrhead' : ''}${sizeClass}${j.noWork ? ' cal-nowork' : ' cal-working'}" data-job="${j.id}" style="top:${top}px;height:${height}px;left:${left};width:${width};z-index:${1 + depth}">
       ${tight ? '' : `<div class="cal-block-time">${escapeHtml(timeTxt)}</div>`}
       <div class="cal-block-head">
         <div class="cal-block-who">${escapeHtml(who)}</div>
@@ -2417,7 +2556,10 @@ function wireDayInteractions(canEdit) {
 }
 
 const calToday = document.getElementById('cal-today');
-if (calToday) calToday.addEventListener('click', () => { calCursor = new Date(); renderCalendar(); });
+if (calToday) calToday.addEventListener('click', () => {
+  if (calScrollOn()) { calScrollJumpTo(new Date()); return; }   // v2026.10.28-2305
+  calCursor = new Date(); renderCalendar();
+});
 const calModeBtn = document.getElementById('cal-mode');
 if (calModeBtn) calModeBtn.addEventListener('click', () => setCalMode(calMode === 'week' ? 'month' : 'week'));
 // A window dragged narrow (or a tablet rotated) crosses the phone breakpoint
@@ -2470,6 +2612,7 @@ function setCalMode(mode) {
   } else {
     calCursor = new Date(calCursor.getFullYear(), calCursor.getMonth(), 1);
   }
+  calScrollAnchor = null; calScrollStart = null;   // scroll mode starts on calCursor's month
   renderCalendar();
 }
 // Desktop: a SIDEWAYS wheel/trackpad scroll changes months, which is the same
@@ -2479,6 +2622,7 @@ function setCalMode(mode) {
 if (calGrid) {
   let lastWheel = 0;
   calGrid.addEventListener('wheel', (e) => {
+    if (calScrollOn()) return;                               // continuous scroll: no month jumps
     if (Math.abs(e.deltaX) <= Math.abs(e.deltaY)) return;   // vertical scroll
     if (Math.abs(e.deltaX) < 10) return;                    // stray sideways drift
     // One flick of a trackpad fires many events — don't jump three months.
@@ -2507,6 +2651,7 @@ if (calGrid) {
   calGrid.addEventListener('touchend', (e) => {
     if (!tracking) return;
     tracking = false;
+    if (calScrollOn()) return;   // continuous scroll: the finger just scrolls (v2026.10.28-2305)
     if (e.touches.length || Math.abs(viewportZoom() - startZoom) > 0.01) return;   // pinch
     const t = e.changedTouches[0];
     const dx = t.clientX - sx, dy = t.clientY - sy;
@@ -2835,11 +2980,11 @@ function openJobMenu(jobId, opts = {}) {
   const menu = document.getElementById('job-menu');
   if (!j || !menu) return;
   jobMenuId = jobId;
-  document.getElementById('job-menu-title').textContent = jobTitle(j) || 'Job';
+  document.getElementById('job-menu-title').textContent = calHeadLabel(j) || 'Job';
   const sp = jobSpan(j);
   const when = shortDate(j.date) + (sp ? ` · ${fmtClock(sp.start)}–${fmtClock(sp.trueEnd % 1440)}` : '');
   const crew = crewNames(jobCrew(j));
-  document.getElementById('job-menu-sub').textContent = [when, j.address || '', crew.join(', ')].filter(Boolean).join(' · ');
+  document.getElementById('job-menu-sub').textContent = [when, calAddrFirst(j) ? jobTitle(j) : (j.address || ''), crew.join(', ')].filter(Boolean).join(' · ');
   const gcal = document.getElementById('job-menu-gcal');
   const ics = document.getElementById('job-menu-ics');
   const apple = isAppleMobile();
@@ -3396,6 +3541,48 @@ if (jobCustomerSearch) {
     });
   }
 }
+// Keyboard over a job field (v2026.10.28-2308). The sheet shrinks to the visible
+// viewport a moment AFTER the keyboard opens (--app-vh follows visualViewport),
+// so the browser's own scroll-into-view lands on the old, taller sheet and the
+// field ends up behind the keyboard or the Save/Cancel bar. Re-check once the
+// keyboard has settled and scroll the sheet just enough to show the field
+// above the bar. The customer search has its own lift (liftCustomerField).
+function keepJobFieldVisible() {
+  const el = document.activeElement;
+  const modal = document.getElementById('job-modal');
+  if (!el || !modal || modal.hidden || !modal.contains(el)) return;
+  if (el.id === 'job-customer-search' || !el.matches('input, textarea, select, [contenteditable]')) return;
+  const panel = el.closest('.modal-panel');
+  if (!panel) return;
+  const vv = window.visualViewport;
+  const viewBottom = vv ? vv.offsetTop + vv.height : window.innerHeight;
+  const bar = panel.querySelector('.job-action-bar');
+  const barTop = bar ? bar.getBoundingClientRect().top : viewBottom;
+  const bottom = Math.min(viewBottom, barTop) - 12;
+  const top = panel.getBoundingClientRect().top + 8;
+  const r = el.getBoundingClientRect();
+  let delta = 0;
+  if (r.bottom > bottom) delta = r.bottom - bottom;
+  else if (r.top < top) delta = r.top - top;
+  if (delta) panel.scrollTop += delta;
+}
+(() => {
+  const modal = document.getElementById('job-modal');
+  if (!modal) return;
+  modal.addEventListener('focusin', () => {
+    requestAnimationFrame(keepJobFieldVisible);
+    setTimeout(keepJobFieldVisible, 350);    // keyboard open, sheet resized
+    setTimeout(keepJobFieldVisible, 700);    // slow keyboards
+  });
+  if (window.visualViewport) {
+    let t = null;
+    window.visualViewport.addEventListener('resize', () => {
+      if (modal.hidden) return;
+      clearTimeout(t);
+      t = setTimeout(keepJobFieldVisible, 100);
+    });
+  }
+})();
 const jobClose = document.getElementById('job-close');
 if (jobClose) jobClose.addEventListener('click', requestCloseJobModal);
 // Description grows with its text, capped by CSS (v2026.09.30-2316).
@@ -9803,6 +9990,83 @@ document.addEventListener('click', (e) => {
 }, true);
 
 // ---------- Users tab ----------
+// What is shared with one person (v2026.10.28-2315): every live note whose assignedTo
+// has them, plus the price table for employees. Opened from Settings › Members.
+function memberSharedNotes(uid) {
+  return Storage.listAllNotes().filter(n => (n.assignedTo || []).includes(uid));
+}
+let memberSharedUid = null;
+function openMemberSharedModal(uid) {
+  const modal = document.getElementById('member-shared-modal');
+  if (!modal) return;
+  memberSharedUid = uid;
+  renderMemberSharedModal();
+  modal.hidden = false;
+}
+function renderMemberSharedModal() {
+  const modal = document.getElementById('member-shared-modal');
+  const list = document.getElementById('member-shared-list');
+  const priceRow = document.getElementById('member-shared-price');
+  if (!modal || !list || !memberSharedUid) return;
+  const uid = memberSharedUid;
+  const m = Storage.listMembers().find(x => x.uid === uid);
+  document.getElementById('member-shared-title').textContent = 'Shared with ' + ((m && (m.name || m.email)) || 'this person');
+  // Price table — employees only, same rule as Share / unshare price table.
+  if (priceRow) {
+    const isEmp = m && m.role === 'employee';
+    priceRow.hidden = !isEmp;
+    if (isEmp) {
+      const on = Storage.getPriceConfig().sharedWith.includes(uid);
+      priceRow.innerHTML = `<span class="member-shared-what">Price table: <strong>${on ? 'shared' : 'not shared'}</strong></span>`
+        + `<button type="button" class="secondary member-shared-price-toggle">${on ? 'Unshare' : 'Share'}</button>`;
+      priceRow.querySelector('button').addEventListener('click', async () => {
+        const cur = Storage.getPriceConfig().sharedWith;
+        const next = on ? cur.filter(u => u !== uid) : [...new Set([...cur, uid])];
+        await Storage.savePriceConfig({ sharedWith: next });
+        renderMemberSharedModal();
+      });
+    }
+  }
+  const notes = memberSharedNotes(uid);
+  list.innerHTML = notes.length ? notes.map(n => {
+    const title = splitTitleAndBody(n.body || '').title || 'Untitled';
+    const sub = n.isDefault ? 'Customer record'
+      : (n.customerId ? (customerCrumbLabel(n.customerId) || 'Customer') : 'General note');
+    return `<li class="member-item member-shared-item">
+      <button type="button" class="member-shared-open" data-id="${n.id}">
+        <span class="member-shared-name">${escapeHtml(title)}</span>
+        <span class="member-shared-sub">${escapeHtml(sub)}</span>
+      </button>
+      <button type="button" class="secondary member-shared-unshare" data-id="${n.id}">Unshare</button>
+    </li>`;
+  }).join('') : '<li class="member-item">No notes are shared with them.</li>';
+  list.querySelectorAll('.member-shared-unshare').forEach(b => b.addEventListener('click', () => {
+    const note = Storage.getNote(b.dataset.id);
+    if (!note) return;
+    Storage.assignUsersToNote(note.id, (note.assignedTo || []).filter(u => u !== uid));
+    renderMemberSharedModal();
+    renderMembersList();       // the count on the member's button
+  }));
+  list.querySelectorAll('.member-shared-open').forEach(b => b.addEventListener('click', () => {
+    const note = Storage.getNote(b.dataset.id);
+    if (!note) return;
+    // Closing the sheet retires its history entry with an async history.back();
+    // open the note only after that lands, or its own entry would be popped.
+    window.addEventListener('popstate', () => setTimeout(() => {
+      returnScreen = note.customerId ? 'customer-notes' : 'notes';
+      activeCustomerId = note.customerId || null;
+      showEditor(note, 'note');
+    }, 0), { once: true });
+    modal.hidden = true;
+  }));
+}
+(() => {
+  const modal = document.getElementById('member-shared-modal');
+  const close = document.getElementById('member-shared-close');
+  if (close) close.addEventListener('click', () => { modal.hidden = true; });
+  if (modal) modal.addEventListener('click', (e) => { if (e.target === modal) modal.hidden = true; });
+})();
+
 function renderMembersList() {
   const membersList = document.getElementById('members-list');
   const invitesList = document.getElementById('invites-list');
@@ -9842,8 +10106,14 @@ function renderMembersList() {
       ${m.uid === currentUid && lastAdmin
         ? '<p class="member-note">You are the only admin, so you cannot change your own role. Make someone else an admin first.</p>'
         : ''}
+      ${(m.role === 'employee' || m.role === 'customer')
+        ? `<button class="secondary member-shared-btn" type="button" data-uid="${m.uid}">Shared notes (${memberSharedNotes(m.uid).length})</button>`
+        : ''}
     </li>
   `).join('');
+  membersList.querySelectorAll('.member-shared-btn').forEach(btn => {
+    btn.addEventListener('click', () => openMemberSharedModal(btn.dataset.uid));
+  });
 
   membersList.querySelectorAll('.member-role-select').forEach(sel => {
     // Remembered so the select can be put back if the confirmation is declined
@@ -12427,9 +12697,11 @@ function tutorialSteps(part) {
       {
         screen: 'calendar',
         setup: goMonth,
-        target: () => document.querySelector('#cal-grid .cal-cues'),
-        // Follows Settings › Calendar swipe (v2026.09.30-2127).
-        text: calSwipeVertical()
+        target: () => document.querySelector('#cal-grid .cal-cues') || document.querySelector('#cal-grid .cal-scroll'),
+        // Follows Settings › Calendar swipe (v2026.09.30-2127; Scroll v2026.10.28-2305).
+        text: calSwipeScroll()
+          ? 'Scroll up and down through the months — they carry on in both directions. The month at the top is outlined in blue and named at the top of the screen. Settings › Calendar swipe switches this to sideways swipes.'
+          : calSwipeVertical()
           ? 'Swipe up for next month and down for last. These cues name the month you’re heading to, and you can tap them instead. Settings › Calendar swipe switches this to sideways.'
           : 'Swipe left for next month and right for last. These cues name the month you’re heading to, and you can tap them instead. Settings › Calendar swipe switches this to up and down.',
       },

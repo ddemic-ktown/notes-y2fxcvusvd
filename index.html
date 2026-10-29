@@ -863,7 +863,7 @@
         <div class="setting-btn-row">
           <button id="cal-swipe-cycle-btn" class="theme-btn secondary cycle-btn">Sideways</button>
         </div>
-        <p class="setting-check-hint">How you change month or week: swipe sideways, or up and down. The day view always swipes sideways, since its timeline scrolls up and down. This device only.</p>
+        <p class="setting-check-hint">How you change month or week: swipe sideways, swipe up and down, or Scroll — months scroll continuously (month view only; week view then swipes sideways). The day view always swipes sideways, since its timeline scrolls up and down. This device only.</p>
         <label class="setting-check" data-editor-pref>
           <input id="setting-move-checked" type="checkbox" />
           <span>
@@ -1089,6 +1089,18 @@
       <p class="muted" style="font-size:13px; margin:0 0 12px;">Ticked people can see this note. Untick to stop sharing. Admins always have access.</p>
       <ul id="assign-members-list" class="members-list"></ul>
       <button id="assign-save-btn" class="primary setting-wide-btn" type="button" style="margin-top:14px;">Save</button>
+    </div>
+  </div>
+
+  <!-- SHARED WITH ONE MEMBER (v2026.10.28-2315): Settings › Members › Shared notes -->
+  <div id="member-shared-modal" class="modal-overlay" hidden>
+    <div class="modal-panel">
+      <div class="modal-header">
+        <h2 class="modal-title" id="member-shared-title">Shared with</h2>
+        <button id="member-shared-close" class="icon-btn" aria-label="Close">✕</button>
+      </div>
+      <div id="member-shared-price" class="member-shared-price" hidden></div>
+      <ul id="member-shared-list" class="members-list"></ul>
     </div>
   </div>
 
