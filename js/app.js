@@ -20,6 +20,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 100, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.10.28-2322', 'Calendar Scroll view: each week row grows to fit its busiest day (all jobs shown), up to about 30% of the screen'],
   ['v2026.10.28-2315', 'Settings › Members: Shared notes button per employee/customer — lists what is shared with them (notes and price table), open or unshare from there'],
   ['v2026.10.28-2312', 'Calendar for employees: the address is the heading, the customer name is smaller and grey underneath'],
   ['v2026.10.28-2308', 'Job editor: tapping an hours or other typing field scrolls it into view above Save/Cancel once the keyboard is up'],
@@ -1768,7 +1769,9 @@ function openCalFilter() {
 
 // One month-grid cell. Pulled out of renderCalendar (v2026.10.28-2305) so the
 // continuous-scroll view draws its months with exactly the same cells.
-function calCellHtml(d, refMonth, shortPills, todayStr) {
+function calCellHtml(d, refMonth, shortPills, todayStr, noCap) {
+  // noCap (v2026.10.28-2322): Scroll view lists every job — its rows grow to fit instead.
+  const phoneCap = noCap ? Infinity : MAX_CHIPS;
     const s = ymd(d);
     const jobs = calJobsByDate(s);
     // In week view every cell is 'this week', so nothing is greyed as an
@@ -1814,8 +1817,8 @@ function calCellHtml(d, refMonth, shortPills, todayStr) {
     // One letter per person, no hours — there is no room for either.
     const groups = groupByCrew(jobs);
     const groupedLines = !shortPills ? '' : groups.map(g => {
-      if (shown >= MAX_CHIPS) return '';
-      const room = MAX_CHIPS - shown;
+      if (shown >= phoneCap) return '';
+      const room = phoneCap - shown;
       const take = g.jobs.slice(0, room);
       shown += take.length;
       const chips = g.names.length
@@ -1881,7 +1884,7 @@ function renderCalendarScroll() {
   const blocks = months.map(m => {
     const cells = monthGridDays(m).map(d => d.getMonth() !== m.getMonth()
       ? '<div class="cal-cell cal-blank" aria-hidden="true"></div>'   // other month: it has its own block
-      : calCellHtml(d, m, shortPills, todayStr)).join('');
+      : calCellHtml(d, m, shortPills, todayStr, true)).join('');
     const ym = calYm(m);
     const title = MONTH_NAMES[m.getMonth()] + ' ' + m.getFullYear();
     return `<section class="cal-mblock${ym === calYm(cur) ? ' cal-mblock-active' : ''}" data-ym="${ym}">`

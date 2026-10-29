@@ -689,8 +689,10 @@ select.iif-date-input { appearance: none; -webkit-appearance: none; padding-righ
 .cal-mblock.cal-mblock-active { border-color: var(--accent); }
 .cal-mtitle { font-size: 14px; font-weight: 700; color: var(--ink); padding: 4px 4px 6px; }
 .cal-mblock-active .cal-mtitle { color: var(--accent); }
-.cal-scroll .cal-cells { flex: none; overflow: visible; grid-auto-rows: 84px; }
-.cal-grid-tall .cal-scroll .cal-cells { grid-auto-rows: minmax(84px, auto); }
+.cal-scroll .cal-cells { flex: none; overflow: visible; grid-auto-rows: minmax(84px, auto); }
+/* A week row is as tall as its busiest day (v2026.10.28-2322), but one day may only take
+   about 30% of the screen — past that it scrolls inside its own box. */
+.cal-scroll .cal-cell { max-height: calc(var(--app-vh, 100vh) * 0.3); overflow-y: auto; }
 .cal-cell.cal-blank { background: transparent; border-color: transparent; cursor: default; }
 .cal-grid-wktl .cal-headrow, .cal-grid-wktl .cal-cells { grid-template-columns: 34px repeat(7, minmax(0, 1fr)); gap: 1px; }
 .cal-grid-wktl .cal-cells { overflow: hidden; }
