@@ -20,6 +20,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 100, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.11.03-1620', 'Calendar Scroll view: the blue outline stays on this month instead of following the month at the top'],
   ['v2026.10.28-2322', 'Calendar Scroll view: each week row grows to fit its busiest day (all jobs shown), up to about 30% of the screen'],
   ['v2026.10.28-2315', 'Settings › Members: Shared notes button per employee/customer — lists what is shared with them (notes and price table), open or unshare from there'],
   ['v2026.10.28-2312', 'Calendar for employees: the address is the heading, the customer name is smaller and grey underneath'],
@@ -119,79 +120,6 @@ const CHANGELOG = [
   ['v2026.09.24-2001', 'Dragging or resizing a job on the day view now steps in 15-minute jumps as you move it, instead of following your finger and snapping only when you let go'],
   ['v2026.09.21-2336', 'Housekeeping: removed three unreachable branches left over from when customers were edited as their own record type'],
   ['v2026.09.21-2331', 'The orphaned notes list sorts from a ⋯ menu like the customer list does'],
-  ['v2026.09.21-2327', 'Clearing a customer’s name no longer deletes them if they have notes or files — only a genuinely empty one is discarded, and it says so when it happens'],
-  ['v2026.09.21-2317', 'What’s new in Settings is collapsed until you tap it; you can now change your own role as long as another admin exists; the two Hours switches say what each one actually does'],
-  ['v2026.09.21-2312', 'Creating a customer, price item or vendor now points out names you already have that look the same — it never stops you, it just says so'],
-  ['v2026.09.21-2308', 'Assigning a note to a customer now keeps you in the note and updates the trail at the top, instead of jumping to the customer’s screen'],
-  ['v2026.09.21-2300', 'A customer can now be deleted from the ⋯ menu on their own screen, with a confirmation and 30 days in Trash; the customer list’s A–Z / Recent sort moved into a ⋯ menu too'],
-  ['v2026.09.21-2242', 'Attempted fix for the blank screen after backing out of a note — returning to a screen can no longer scroll the page past the end of its content'],
-  ['v2026.09.21-2235', '“How this works” in a screen’s ⋯ menu now ends on that screen instead of carrying on through the whole tour'],
-  ['v2026.09.21-2226', 'iPhone fixes: the price table and job sheet no longer zoom and go blank when you tap a field, price cells open with what is already in them, jobs can run past midnight, and clearing an hours box now saves as empty'],
-  ['v2026.09.19-2231', 'Zooming into the month grid no longer squashes the rows or leaves a blue slab over the bottom, and you can now pan around the zoomed calendar'],
-  ['v2026.09.19-2228', 'Searching the home screen now offers to create what you typed as a customer or a note, right under the results'],
-  ['v2026.09.19-0004', 'Searching for a customer now offers “Create …” at the bottom of the results, so a new customer is one tap without leaving what you were doing'],
-  ['v2026.09.18-2338', 'Opening the app on a slow connection now says “Signing you in” with a spinner instead of showing the sign-in screen as if you had been logged out'],
-  ['v2026.09.18-2307', 'The hours chart shows each job’s address beside the customer, so two visits to the same customer are easy to tell apart'],
-  ['v2026.09.18-2305', 'Save and the other buttons that commit something are green everywhere now, and Save always sits before Cancel'],
-  ['v2026.09.18-2259', 'The floating + no longer swells into a blue slab over the bottom of the screen when you zoom in or the keyboard opens'],
-  ['v2026.09.18-2235', 'Fixed the price table item column collapsing to a few letters wide after names started wrapping'],
-  ['v2026.09.18-2159', 'The calendar swipe animation is a touch quicker'],
-  ['v2026.09.18-2157', 'Swiping between days, weeks and months now slides the new view in from the side instead of fading it'],
-  ['v2026.09.18-2145', 'The tour is one continuous walkthrough now — start it from any screen’s ⋯ menu and you can go forward or back through the whole thing, skipping the parts your role doesn’t use'],
-  ['v2026.09.18-2129', 'The calendar tour is split in two — the calendar itself, then jobs — and runs straight from one into the other'],
-  ['v2026.09.18-2124', 'The tour now covers billable and non-billable hours, No work days, duplicating a job, week view, calendar search, the price table filter and the new Features settings'],
-  ['v2026.09.18-2050', 'A long item name in the price table wraps onto a second line instead of being cut off'],
-  ['v2026.09.18-2025', 'The calendar and share-customer search boxes now have their ✕ to clear them, like every other search box'],
-  ['v2026.09.18-1709', 'Starting or applying the price table filter clears the search box, so what you ticked is what you see'],
-  ['v2026.09.18-1626', 'Price table: tick the rows and columns you want and filter to just those — it stays that way until you turn it off; Sort and Layout moved into the ⋯ menu'],
-  ['v2026.09.18-1554', 'Confirmations and messages now look like the rest of the app instead of a browser box with the website address printed above them'],
-  ['v2026.09.18-1552', 'Naming a new item, vendor or employee now opens a proper field with the keyboard already up, instead of a browser box you had to tap first'],
-  ['v2026.09.18-1550', 'Every save now applies straight away whether or not you have signal — no screen waits on the network any more'],
-  ['v2026.09.18-1548', 'Saving a job while offline now closes the editor instead of leaving it open — the job was always saved, the screen just never noticed'],
-  ['v2026.09.18-1542', 'Adding someone to a job is one tap on “+ Add employee”, each line gets its own note box, and the old colour stripe is gone from day blocks now the pills carry the same thing'],
-  ['v2026.09.18-1013', 'Search the calendar by customer, address, note or who was on the job — tap a result to open that day'],
-  ['v2026.09.18-1006', 'The offline notice is now a toast at the bottom instead of a badge in the header, so it can no longer push the settings button off the side of the screen'],
-  ['v2026.09.18-0912', 'Build a job’s crew line by line with +, so the same person can be on it twice — one line billable, one not; non-billable hours are exported as not billable to the customer'],
-  ['v2026.09.18-0846', 'Tick “No work” on a job to mark a day off — it shows as No Work with a red outline, ordinary jobs get a green one, and it stays out of the hours chart and QuickBooks export'],
-  ['v2026.09.18-0648', 'Holding a price cell to see its history no longer leaves text highlighted in the popup'],
-  ['v2026.09.18-0645', 'Day view: a job with room to spare is now set in bigger type, and its name, address and note wrap onto more lines instead of being cut off'],
-  ['v2026.09.16-1808', 'Job notes now show on the calendar wherever they fit — shorter blocks in the day view, and every job in the desktop month and week grids'],
-  ['v2026.09.16-1805', 'What’s new in Settings now goes back 100 changes instead of 20'],
-  ['v2026.08.29-1156', 'On a desktop the month grid grows a busy week taller than a quiet one, and lists every job for the day instead of stopping at three'],
-  ['v2026.08.29-1152', 'On a desktop each day in the month and week grid lists its jobs one per entry — customer on top, the crew underneath'],
-  ['v2026.08.29-1148', 'On a desktop the month and week grids show each person’s hours beside their name, the way the day view does'],
-  ['v2026.08.29-1144', 'Hours joins the Features list as two switches — one hides the whole hours chart and QuickBooks export, the other just its home screen button'],
-  ['v2026.08.29-1123', 'New Features section in Settings — switch off Aggregators and they disappear from the app, your account only, nothing deleted'],
-  ['v2026.08.29-1035', 'Overlapping jobs in the day view now stack with the later one on top and indented, instead of squeezing side by side'],
-  ['v2026.08.29-1024', 'Pinch-zooming no longer blows the floating + button up into a slab over the screen — it hides until you zoom back out'],
-  ['v2026.08.27-2210', 'Day groups in the hours chart alternate between the two theme shades across the whole row'],
-  ['v2026.08.27-2200', 'The hours chart’s day shading now reads evenly across the whole row, in both light and dark'],
-  ['v2026.08.27-2156', 'The price table’s + hides while you are entering a price'],
-  ['v2026.08.27-2153', 'Cancelling a new customer lands on the home screen instead of opening whichever note was under your finger'],
-  ['v2026.08.27-2120', 'Dragging a row while sorted by latest puts the table back into your own order first, so the row lands where you drop it'],
-  ['v2026.08.27-2116', 'The price table’s Layout button stays available while sorted by latest, and the sort button now reads as a state'],
-  ['v2026.08.27-2106', 'The price table gets a blue + in the corner for a new item or vendor, replacing the two header buttons'],
-  ['v2026.08.27-2031', 'Opening an hours cell no longer shifts the chart on a desktop; on a phone it still brings the row into view'],
-  ['v2026.08.27-1940', 'The hours chart shades alternate days, so a day’s rows read as one block'],
-  ['v2026.08.27-1936', 'In the day view the crew now sits beside the customer name when it fits, so short jobs stop hiding who is on them'],
-  ['v2026.08.27-1933', 'Price table can sort by most recently priced, and a new item is added at the top instead of the bottom'],
-  ['v2026.08.27-1930', 'A just-created customer or note is finished with labelled Save and Cancel buttons instead of a ✓ and an ✕'],
-  ['v2026.08.27-1928', 'The green ✓ on a new customer or note saves and leaves on the first tap instead of only lowering the keyboard'],
-  ['v2026.08.27-1925', 'Filter the hours chart to one employee — the totals and the QuickBooks file follow the filter'],
-  ['v2026.08.27-1918', 'The month grid now fits the screen on Android — the last week row no longer sits behind the address bar'],
-  ['v2026.08.27-1913', 'The price table’s colour legend moved into the ⋯ menu, so it is out of the way while you type a price'],
-  ['v2026.08.27-1908', 'The day view’s ‹ › arrows and header stay put instead of scrolling away with the top of the day'],
-  ['v2026.08.27-1905', 'The calendar and day view now show the month or day you are on between the ‹ › cues, so a cue can’t be mistaken for the current date'],
-  ['v2026.08.27-1900', 'Months and weeks now change with a left/right swipe instead of up/down, with ‹ › cues above the grid'],
-  ['v2026.08.20-2212', 'Pending invites can be resent, and inviting a new company gives you a message to send them if the email goes astray'],
-  ['v2026.08.19-1223', 'The two QuickBooks service item names are now editable in Settings instead of being fixed in the code'],
-  ['v2026.08.19-1152', 'Rename an employee — the new name replaces the old one on every job they are on, past and future'],
-  ['v2026.08.19-1134', 'QuickBooks item names lose the space after the colon, which was making every apprentice row fail to import'],
-  ['v2026.08.19-0830', 'Fixed the ✓ in the hours chart sometimes leaving the cell open instead of closing it'],
-  ['v2026.08.19-0819', 'Hours chart reads the calendar only — edit an hour and it saves to the job; no Save button, no red rows, and a ✓ to close the keyboard'],
-  ['v2026.08.19-0752', 'Hours chart: employee colours, per-person day and week totals, and hours save as soon as you leave the cell'],
-  ['v2026.08.19-0033', 'The calendar tour now shows where hours go on a job, and a new Tutorial 8 covers users, invites, trash, backup and sample data'],
-  ['v2026.08.19-0020', 'A new company sees two dismissible cards on the home screen — take the tour, add sample data — instead of a pop-up'],
 ];
 const APP_VERSION = CHANGELOG[0][0];
 
@@ -1840,8 +1768,8 @@ function calCellHtml(d, refMonth, shortPills, todayStr, noCap) {
 
 // CONTINUOUS SCROLL (v2026.10.28-2305). Settings › Calendar swipe › Scroll: the month
 // view is months stacked one under another in their own scroller. The month at
-// the top of the screen names the breadcrumb, is the calCursor (so week view,
-// + and Jump to today all start from it) and gets a blue outline. More months
+// the top of the screen names the breadcrumb and is the calCursor (so week view,
+// + and Jump to today all start from it). This month (today's) gets a blue outline. More months
 // are added when you get near either end; each month's jobs load as it is drawn.
 let calScrollStart = null;     // 1st of the first month drawn
 let calScrollCount = 0;        // how many months are drawn
@@ -1887,7 +1815,8 @@ function renderCalendarScroll() {
       : calCellHtml(d, m, shortPills, todayStr, true)).join('');
     const ym = calYm(m);
     const title = MONTH_NAMES[m.getMonth()] + ' ' + m.getFullYear();
-    return `<section class="cal-mblock${ym === calYm(cur) ? ' cal-mblock-active' : ''}" data-ym="${ym}">`
+    // The outline marks THIS month (today's) and stays put as you scroll (v2026.11.03-1620).
+    return `<section class="cal-mblock${ym === calYm(new Date()) ? ' cal-mblock-active' : ''}" data-ym="${ym}">`
       + `<div class="cal-mtitle">${escapeHtml(title)}</div><div class="cal-cells">${cells}</div></section>`;
   }).join('');
   calGrid.classList.remove('cal-grid-wktl', 'cal-grid-week');
@@ -1923,8 +1852,7 @@ function calScrollTick(sc) {
   let top = blocks[0];
   for (const b of blocks) { if (b.offsetTop <= line) top = b; else break; }
   calScrollAnchor = { ym: top.dataset.ym, offset: top.offsetTop - sc.scrollTop };
-  if (!top.classList.contains('cal-mblock-active')) {
-    blocks.forEach(b => b.classList.toggle('cal-mblock-active', b === top));
+  if (top.dataset.ym !== calYm(calCursor)) {
     const [y, m] = top.dataset.ym.split('-').map(Number);
     calCursor = new Date(y, m - 1, 1);
     calScrollCrumbs();
@@ -12703,7 +12631,7 @@ function tutorialSteps(part) {
         target: () => document.querySelector('#cal-grid .cal-cues') || document.querySelector('#cal-grid .cal-scroll'),
         // Follows Settings › Calendar swipe (v2026.09.30-2127; Scroll v2026.10.28-2305).
         text: calSwipeScroll()
-          ? 'Scroll up and down through the months — they carry on in both directions. The month at the top is outlined in blue and named at the top of the screen. Settings › Calendar swipe switches this to sideways swipes.'
+          ? 'Scroll up and down through the months — they carry on in both directions. This month is outlined in blue; the month you’ve scrolled to is named at the top of the screen. Settings › Calendar swipe switches this to sideways swipes.'
           : calSwipeVertical()
           ? 'Swipe up for next month and down for last. These cues name the month you’re heading to, and you can tap them instead. Settings › Calendar swipe switches this to sideways.'
           : 'Swipe left for next month and right for last. These cues name the month you’re heading to, and you can tap them instead. Settings › Calendar swipe switches this to up and down.',
