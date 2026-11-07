@@ -20,6 +20,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 100, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.11.07-0850', 'Job menu (tap a job in the calendar): added Duplicate to next day and Delete job'],
   ['v2026.11.03-1620', 'Calendar Scroll view: the blue outline stays on this month instead of following the month at the top'],
   ['v2026.10.28-2322', 'Calendar Scroll view: each week row grows to fit its busiest day (all jobs shown), up to about 30% of the screen'],
   ['v2026.10.28-2315', 'Settings › Members: Shared notes button per employee/customer — lists what is shared with them (notes and price table), open or unshare from there'],
@@ -2927,6 +2928,8 @@ function openJobMenu(jobId, opts = {}) {
   if (j.address) dir.href = mapsUrl(j.address);
   document.getElementById('job-menu-day').hidden = !opts.showDay;
   document.getElementById('job-menu-edit').hidden = !isAdminRole();
+  document.getElementById('job-menu-duplicate').hidden = !isAdminRole();
+  document.getElementById('job-menu-delete').hidden = !isAdminRole();
   menu.hidden = false;
 }
 (() => {
@@ -2955,6 +2958,20 @@ function openJobMenu(jobId, opts = {}) {
     const j = Storage.getJob(jobMenuId);
     close();
     if (j) openJobModal(j.id, j.date);
+  });
+  // Same as the editor's Duplicate: opens the editor as an unsaved copy (v2026.11.07-0850).
+  document.getElementById('job-menu-duplicate').addEventListener('click', () => {
+    const j = Storage.getJob(jobMenuId);
+    close();
+    if (!j) return;
+    openJobModal(j.id, j.date);
+    const dup = document.getElementById('job-duplicate');
+    if (dup && !jobModal.hidden) dup.click();
+  });
+  document.getElementById('job-menu-delete').addEventListener('click', () => {
+    const id = jobMenuId;
+    close();
+    if (id) deleteJobWithUndo(id);
   });
 })();
 
@@ -3588,16 +3605,20 @@ if (jobDelete) jobDelete.addEventListener('click', async () => {
   // No "Delete this job?" (v2026.10.03-1749): it goes at once, and the bubble undoes it.
   // The whole record is kept, so undo puts back the same id, crew, hours and
   // hours history.
-  const gone = Storage.getJob(jobEditingId);
-  await Storage.deleteJob(jobEditingId);
   jobModal.hidden = true;
+  await deleteJobWithUndo(jobEditingId);
+});
+// Shared by the editor and the job menu (v2026.11.07-0850).
+async function deleteJobWithUndo(jobId) {
+  const gone = Storage.getJob(jobId);
+  await Storage.deleteJob(jobId);
   const redraw = () => { if (calendarDayView.classList.contains('active')) renderCalendarDay(); else renderCalendar(); };
   redraw();
   if (gone) showActionToast('Job deleted — tap to undo', async () => {
     await Storage.saveJob({ ...gone, crew: (gone.crew || []).map(c => ({ ...c })) });
     redraw();
   });
-});
+}
 const calFabBtn = document.getElementById('cal-fab');
 if (calFabBtn) calFabBtn.addEventListener('click', () => openJobModal(null, ymd(calCursor)));
 const calDayFabBtn = document.getElementById('cal-day-fab');
@@ -12687,7 +12708,7 @@ function tutorialSteps(part) {
         requires: () => Storage.listJobs().length > 0 && canEditJobs(),
         setup: goDay,
         target: () => document.querySelector('#calendar-day-view .cal-block'),
-        text: 'Press and hold a job to pick it up and drag it to a new time; drag the corner to change how long it runs. Both snap to quarter hours. A quick tap opens the job menu, where Edit job is.',
+        text: 'Press and hold a job to pick it up and drag it to a new time; drag the corner to change how long it runs. Both snap to quarter hours. A quick tap opens the job menu, with Edit job, Duplicate to next day and Delete job.',
       },
       {
         screen: 'calendar-day',
