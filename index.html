@@ -432,16 +432,30 @@
         <h2 class="modal-title" id="job-menu-title">Job</h2>
         <button id="job-menu-close" class="icon-btn" aria-label="Close">✕</button>
       </div>
-      <p id="job-menu-sub" class="modal-hint"></p>
+      <p id="job-menu-sub" class="modal-hint job-menu-sub"></p>
+      <div id="job-menu-crew" class="job-menu-crew" hidden></div>
+      <p id="job-menu-note" class="job-menu-note" hidden></p>
       <div class="setting-btn-col">
         <a id="job-menu-gcal" class="primary setting-wide-btn job-menu-link" target="_blank" rel="noopener" hidden>Add to Google Calendar</a>
         <button id="job-menu-ics" class="primary setting-wide-btn" type="button" hidden>Add to calendar</button>
         <a id="job-menu-dir" class="secondary setting-wide-btn job-menu-link" target="_blank" rel="noopener" hidden>Directions</a>
+        <a id="job-menu-call" class="secondary setting-wide-btn job-menu-link" hidden>Call</a>
         <button id="job-menu-day" class="secondary setting-wide-btn" type="button" hidden>Show this day</button>
         <button id="job-menu-edit" class="secondary setting-wide-btn" type="button" hidden>Edit job</button>
         <button id="job-menu-duplicate" class="secondary setting-wide-btn" type="button" hidden>Duplicate to next day</button>
         <button id="job-menu-delete" class="secondary setting-wide-btn danger-item" type="button" hidden>Delete job</button>
       </div>
+    </div>
+  </div>
+
+  <!-- CALL PICKER (v2026.11.09-1723): the job menu's Call when the customer has several numbers. -->
+  <div id="job-call" class="modal-overlay" hidden>
+    <div class="modal-panel">
+      <div class="modal-header">
+        <h2 class="modal-title">Call</h2>
+        <button id="job-call-close" class="icon-btn" aria-label="Close">✕</button>
+      </div>
+      <div id="job-call-list" class="setting-btn-col"></div>
     </div>
   </div>
 

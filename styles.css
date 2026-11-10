@@ -672,6 +672,13 @@ select.iif-date-input { appearance: none; -webkit-appearance: none; padding-righ
 .cal-grid-tall .cal-cells { grid-auto-rows: minmax(64px, auto); align-content: start; }
 /* Content decides the height now, so a cell must not clip its own jobs. */
 .cal-grid-tall .cal-cell { overflow: visible; }
+/* PHONE MONTH (v2026.11.09-1718) — rows grow to their busiest day like desktop,
+   but a quiet month still stretches to fill the screen (auto rows stretch). */
+.cal-grid-fit .cal-cells { grid-auto-rows: minmax(64px, auto); }
+.cal-grid-fit .cal-cell { overflow: visible; }
+.cal-day-dots { display: inline-flex; flex-wrap: wrap; gap: 2px; margin-left: 3px; vertical-align: middle; }
+.cal-job-line { flex-wrap: nowrap; }
+.cal-job-line .cal-job-who { flex: 1; min-width: 0; }
 
 .cal-grid-week .cal-cells { grid-auto-rows: minmax(0, 1fr); }
 .cal-grid-week .cal-cell { padding: 5px 6px; gap: 3px; overflow-y: auto; }
@@ -3495,5 +3502,12 @@ body.vv-zoomed-pinch .cal-cells { overflow-y: visible; }
 /* Job menu links look like the buttons beside them (v2026.10.04-1840) */
 a.job-menu-link { display: block; text-align: center; text-decoration: none; box-sizing: border-box; }
 a.job-menu-link[hidden] { display: none; }
+/* Job menu info, bigger (v2026.11.09-1723) */
+#job-menu .modal-title { font-size: 22px; }
+.job-menu-sub { font-size: 16px; color: var(--ink); margin-bottom: 10px; }
+.job-menu-crew { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 0 10px; }
+.job-menu-crew .cal-chip { font-size: 13px; padding: 2px 9px; }
+.job-menu-crew[hidden], .job-menu-note[hidden] { display: none; }
+.job-menu-note { font-size: 16px; white-space: pre-wrap; margin: 0 0 14px; max-height: 40vh; overflow-y: auto; }
 
 .myh-nc { color: var(--ink-soft); font-size: 0.9em; }   /* v2026.10.04-1847 */

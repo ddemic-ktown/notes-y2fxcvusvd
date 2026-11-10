@@ -20,6 +20,9 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 100, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.11.09-1731', 'Calendar moves its today circle to the new day after midnight or when the phone wakes, without leaving the screen'],
+  ['v2026.11.09-1723', 'Job menu: bigger text, crew tags and the full note; new Call button (picks a number when the customer has several)'],
+  ['v2026.11.09-1718', 'Phone month view: one line per job in time order, crew dots only when the crew changes, up to 8 per day; each week grows to fit its busiest day'],
   ['v2026.11.07-0850', 'Job menu (tap a job in the calendar): added Duplicate to next day and Delete job'],
   ['v2026.11.03-1620', 'Calendar Scroll view: the blue outline stays on this month instead of following the month at the top'],
   ['v2026.10.28-2322', 'Calendar Scroll view: each week row grows to fit its busiest day (all jobs shown), up to about 30% of the screen'],
@@ -1700,7 +1703,8 @@ function openCalFilter() {
 // continuous-scroll view draws its months with exactly the same cells.
 function calCellHtml(d, refMonth, shortPills, todayStr, noCap) {
   // noCap (v2026.10.28-2322): Scroll view lists every job — its rows grow to fit instead.
-  const phoneCap = noCap ? Infinity : MAX_CHIPS;
+  // Phone month: up to 8 jobs; the week row grows to fit (v2026.11.09-1718).
+  const phoneCap = noCap ? Infinity : (calMode === 'month' ? 8 : MAX_CHIPS);
     const s = ymd(d);
     const jobs = calJobsByDate(s);
     // In week view every cell is 'this week', so nothing is greyed as an
@@ -1742,28 +1746,31 @@ function calCellHtml(d, refMonth, shortPills, todayStr, noCap) {
       </div>`;
     }).join('');
 
-    // PHONE: group by crew so the same names aren't repeated for every job.
-    // One letter per person, no hours — there is no room for either.
-    const groups = groupByCrew(jobs);
-    const groupedLines = !shortPills ? '' : groups.map(g => {
-      if (shown >= phoneCap) return '';
-      const room = phoneCap - shown;
-      const take = g.jobs.slice(0, room);
-      shown += take.length;
-      const chips = g.names.length
-        ? g.names.map(n => {
+    // PHONE (v2026.11.09-1718): one line per job, in start-time order. The first
+    // job's crew sits as dots beside the date; after that a line only starts
+    // with dots when the crew differs from the job above. One letter per person.
+    let headDots = '';
+    let prevKey = null;
+    const groupedLines = !shortPills ? '' : jobs.slice(0, phoneCap).map((j, i) => {
+      shown++;
+      const names = crewNames(jobCrew(j));
+      const key = names.join('|');
+      const dots = names.length
+        ? names.map(n => {
             const first = n.split(/[\s(]+/)[0];
             return `<span class="cal-chip cal-chip-initial" style="${chipStyle(n)}" title="${escapeHtml(n)}">${escapeHtml(first.slice(0, 1).toUpperCase())}</span>`;
           }).join('')
         : '<span class="cal-chip cal-chip-none">—</span>';
-      const whos = take.map(j => calHeadLabel(j) || '—');
-      const anyNoWork = take.some(j => j.noWork);
-      return `<div class="cal-job${anyNoWork ? ' cal-nowork-text' : ''}">${chips}<span class="cal-job-who">${escapeHtml(whos.join(', '))}</span></div>`;
+      let lead = '';
+      if (i === 0) headDots = dots;
+      else if (key !== prevKey) lead = dots;
+      prevKey = key;
+      return `<div class="cal-job cal-job-line${j.noWork ? ' cal-nowork-text' : ''}">${lead}<span class="cal-job-who">${escapeHtml(calHeadLabel(j) || '—')}</span></div>`;
     }).join('');
 
     const more = jobs.length > shown ? `<div class="cal-more">+${jobs.length - shown}</div>` : '';
     return `<div class="${classes.join(' ')}" data-date="${s}">
-      <div class="cal-daynum">${d.getDate()}</div>${lines}${groupedLines}${more}
+      <div class="cal-daynum">${d.getDate()}${headDots ? `<span class="cal-day-dots">${headDots}</span>` : ''}</div>${lines}${groupedLines}${more}
     </div>`;
 }
 
@@ -2025,6 +2032,8 @@ function renderCalendar() {
   // taller than a quiet one. Week view already gives each day a full row, and a
   // phone has no height to spend, so neither gets it.
   calGrid.classList.toggle('cal-grid-tall', calMode === 'month' && !shortPills);
+  // Phone month: each week as tall as its busiest day, still filling the screen (v2026.11.09-1718).
+  calGrid.classList.toggle('cal-grid-fit', calMode === 'month' && shortPills);
   calGrid.innerHTML = cues + `<div class="cal-headrow">${headHtml}</div><div class="cal-cells">${cellsHtml}</div>`;
   // A redraw while a search is open must not put the grid back on screen.
   renderCalSearchResults();
@@ -2603,9 +2612,25 @@ if (calGrid) {
   });
 }
 
+// Midnight rollover (v2026.11.09-1731): "today" is only worked out when the
+// calendar draws, so a phone left open overnight kept yesterday circled until
+// something redrew it. Redraw the open calendar view once the date changes —
+// checked on the minute tick and whenever the app comes back on screen.
+let calTodaySeen = ymd(new Date());
+function calCheckDayRollover() {
+  const now = ymd(new Date());
+  if (now === calTodaySeen) return;
+  calTodaySeen = now;
+  if (calendarDayView && calendarDayView.classList.contains('active')) renderCalendarDay();
+  else if (calendarView && calendarView.classList.contains('active')) renderCalendar();
+}
+document.addEventListener('visibilitychange', () => { if (!document.hidden) calCheckDayRollover(); });
+window.addEventListener('pageshow', calCheckDayRollover);
+
 // Keep the current-time lines moving (v2026.10.01-1646). Repositions the lines
 // already drawn rather than re-rendering, so nothing scrolls or flickers.
 setInterval(() => {
+  calCheckDayRollover();
   const n = new Date().getHours() * 60 + new Date().getMinutes();
   document.querySelectorAll('.cal-now-label').forEach(el => { el.textContent = nowTimeLabel(el.dataset.compact === '1'); });
   document.querySelectorAll('.cal-now').forEach(el => {
@@ -2907,6 +2932,7 @@ function jobIcs(j) {
     'END:VEVENT', 'END:VCALENDAR'].join('\r\n');
 }
 let jobMenuId = null;
+let jobMenuPhones = [];
 function openJobMenu(jobId, opts = {}) {
   const j = Storage.getJob(jobId);
   const menu = document.getElementById('job-menu');
@@ -2915,8 +2941,25 @@ function openJobMenu(jobId, opts = {}) {
   document.getElementById('job-menu-title').textContent = calHeadLabel(j) || 'Job';
   const sp = jobSpan(j);
   const when = shortDate(j.date) + (sp ? ` · ${fmtClock(sp.start)}–${fmtClock(sp.trueEnd % 1440)}` : '');
-  const crew = crewNames(jobCrew(j));
-  document.getElementById('job-menu-sub').textContent = [when, calAddrFirst(j) ? jobTitle(j) : (j.address || ''), crew.join(', ')].filter(Boolean).join(' · ');
+  const jcrew = jobCrew(j);
+  const crew = crewNames(jcrew);
+  document.getElementById('job-menu-sub').textContent = [when, calAddrFirst(j) ? jobTitle(j) : (j.address || '')].filter(Boolean).join(' · ');
+  // Crew as coloured tags and the whole note (v2026.11.09-1723). Customers never
+  // see the note — same rule as the day view.
+  const crewEl = document.getElementById('job-menu-crew');
+  crewEl.innerHTML = crew.map(n => `<span class="cal-chip" style="${chipStyle(n)}">${escapeHtml(crewChipLabel(jcrew, n, false))}</span>`).join('');
+  crewEl.hidden = !crew.length;
+  const noteEl = document.getElementById('job-menu-note');
+  const note = isCustomerRole() ? '' : (j.description || '').trim();
+  noteEl.textContent = note;
+  noteEl.hidden = !note;
+  // Call: the numbers in the customer's main note, as on the customer screen.
+  const def = j.customerId ? Storage.getDefaultNoteForCustomer(j.customerId) : null;
+  jobMenuPhones = extractContacts(def ? def.body : '').phones;
+  const call = document.getElementById('job-menu-call');
+  call.hidden = !jobMenuPhones.length;
+  if (jobMenuPhones.length === 1) call.href = `tel:${jobMenuPhones[0].tel}`;
+  else call.removeAttribute('href');
   const gcal = document.getElementById('job-menu-gcal');
   const ics = document.getElementById('job-menu-ics');
   const apple = isAppleMobile();
@@ -2940,6 +2983,19 @@ function openJobMenu(jobId, opts = {}) {
   menu.addEventListener('click', (e) => { if (e.target === menu) close(); });
   document.getElementById('job-menu-gcal').addEventListener('click', () => setTimeout(close, 0));
   document.getElementById('job-menu-dir').addEventListener('click', () => setTimeout(close, 0));
+  // One number dials at once (the href); several open a picker (v2026.11.09-1723).
+  const callPick = document.getElementById('job-call');
+  const closePick = () => { callPick.hidden = true; };
+  document.getElementById('job-call-close').addEventListener('click', closePick);
+  callPick.addEventListener('click', (e) => { if (e.target === callPick) closePick(); else if (e.target.closest('a')) setTimeout(closePick, 0); });
+  document.getElementById('job-menu-call').addEventListener('click', (e) => {
+    if (jobMenuPhones.length === 1) { setTimeout(close, 0); return; }
+    e.preventDefault();
+    document.getElementById('job-call-list').innerHTML = jobMenuPhones.map(p =>
+      `<a class="secondary setting-wide-btn job-menu-link" href="tel:${escapeHtml(p.tel)}">${escapeHtml(p.display)}</a>`).join('');
+    close();
+    callPick.hidden = false;
+  });
   document.getElementById('job-menu-ics').addEventListener('click', () => {
     const j = Storage.getJob(jobMenuId);
     if (!j) return;
@@ -12644,7 +12700,7 @@ function tutorialSteps(part) {
         screen: 'calendar',
         setup: goMonth,
         target: () => document.querySelector('#cal-grid .cal-cells'),
-        text: 'A month at a time. Each day lists its jobs, and everyone on a job gets a coloured tag — the same colour every time, so you can read the week without reading the names.',
+        text: 'A month at a time. Each day lists its jobs, and everyone on a job gets a coloured tag — the same colour every time, so you can read the week without reading the names. On a phone the dots by the date are the first job’s crew; a job only shows dots again when the crew changes.',
       },
       {
         screen: 'calendar',
