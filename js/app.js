@@ -20,6 +20,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 100, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.11.10-2015', 'Security: new passwords need 10 characters, price CSV exports are safe to open in Excel, clearer message when an email is already invited elsewhere'],
   ['v2026.11.10-2012', 'Security: removing a member also clears any leftover invite for their email'],
   ['v2026.11.10-2008', 'Security: record ids are cleaned before they are written into the page, and the page now has a content security policy'],
   ['v2026.11.09-1731', 'Calendar moves its today circle to the new day after midnight or when the phone wakes, without leaving the screen'],
@@ -5075,7 +5076,10 @@ function priceCsvCell(entry) {
   return `${price}|${entry.avail || 'yes'}|${entry.date || ''}`;
 }
 function csvEscape(v) {
-  const s = String(v == null ? '' : v);
+  let s = String(v == null ? '' : v);
+  // A leading = + - @ makes Excel run the cell as a formula (v2026.11.10-2015). An
+  // apostrophe makes it text; plain numbers such as -5 are left alone.
+  if (/^[=+\-@\t\r]/.test(s) && !/^[+-]?\d+(\.\d+)?$/.test(s)) s = "'" + s;
   return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 function downloadCsv(rows, filename) {
@@ -8927,7 +8931,7 @@ if (setPasswordSave) {
   setPasswordSave.addEventListener('click', async () => {
     setPasswordError.textContent = '';
     const pw = setPasswordInput.value;
-    if (pw.length < 6) { setPasswordError.textContent = 'Password must be at least 6 characters.'; return; }
+    if (pw.length < 10) { setPasswordError.textContent = 'Password must be at least 10 characters.'; return; }
     if (pw !== setPasswordConfirm.value) { setPasswordError.textContent = 'Passwords don’t match.'; return; }
     try {
       await updatePassword(auth.currentUser, pw);
@@ -10231,10 +10235,17 @@ if (inviteBtn) {
       if (inviteEmailInput) inviteEmailInput.value = '';
       renderMembersList();
     } catch (e) {
-      if (inviteStatus) inviteStatus.textContent = 'Failed: ' + (e.message || e);
+      if (inviteStatus) inviteStatus.textContent = inviteFailText(e);
     }
     inviteBtn.disabled = false;
   });
+}
+
+// The rules refuse to replace another company's pending invite (v2026.11.10-2015), and
+// the row can't be read to check first — so a refusal here means that.
+function inviteFailText(e) {
+  if (e && e.code === 'permission-denied') return 'This email already has a pending invite from another company. They need to cancel it first.';
+  return 'Failed: ' + ((e && e.message) || e);
 }
 
 // A founder invite dies after a fortnight, so the pending list has to say how
@@ -10330,7 +10341,7 @@ if (newOrgBtn) {
       if (newOrgName) newOrgName.value = '';
       renderMembersList();
     } catch (e) {
-      if (newOrgStatus) newOrgStatus.textContent = 'Failed: ' + (e.message || e);
+      if (newOrgStatus) newOrgStatus.textContent = inviteFailText(e);
     }
     newOrgBtn.disabled = false;
   });

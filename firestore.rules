@@ -62,9 +62,19 @@ service cloud.firestore {
       // .get(key, default) throughout: a founder row carries no orgId and a
       // join row carries no kind, so reading either field directly would throw
       // on the other shape — and an error in a rule is a denial.
-      allow create, update: if isNewOrgRow(request.resource.data)
+      allow create: if isNewOrgRow(request.resource.data)
         ? isFounder()
         : isAdminOf(request.resource.data.orgId);
+      // Replacing a row that already exists takes the right to have issued the
+      // OLD one as well as the new one (security review Nov 2026, item 7).
+      // Checking only the new data let an admin of one company overwrite
+      // another company's pending invite for the same email.
+      allow update: if (isNewOrgRow(request.resource.data)
+          ? isFounder()
+          : isAdminOf(request.resource.data.orgId)) &&
+        (isNewOrgRow(resource.data)
+          ? isFounder()
+          : isAdminOf(resource.data.orgId));
       allow delete: if isOwnEmailKey() ||
         (isNewOrgRow(resource.data) ? isFounder() : isAdminOf(resource.data.orgId));
     }
