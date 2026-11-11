@@ -287,7 +287,7 @@ function schedulePriceRetry() {
 function startPriceItemsListener() {
   if (!priceRowsAllowed()) { flushPriceItemsWaiters(); return; }
   _priceUnsubs.push(liveSnapshot('priceItems', priceItemsCol(), (snap) => {
-    _cache.priceItems = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    _cache.priceItems = snap.docs.map(d => ({ ...d.data(), id: d.id }));
     _priceItemsLoaded = true;
     flushPriceItemsWaiters();
     emit();
@@ -326,7 +326,7 @@ function attachListeners() {
     ? notesCol()
     : query(notesCol(), where('assignedTo', 'array-contains', _uid));
   _unsubs.push(liveSnapshot('notes', notesQuery, (snap) => {
-    _cache.notes = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    _cache.notes = snap.docs.map(d => ({ ...d.data(), id: d.id }));
     _notesError = null;
     _ready = true;
     emit();
@@ -342,7 +342,7 @@ function attachListeners() {
     _customersReady = true;
   } else {
     _unsubs.push(liveSnapshot('customers', customersCol(), (snap) => {
-      _cache.customers = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      _cache.customers = snap.docs.map(d => ({ ...d.data(), id: d.id }));
       _customersReady = true;
       emit();
     }));
@@ -377,8 +377,8 @@ function attachListeners() {
   const membersSource = isStaffRole() ? membersCol() : doc(membersCol(), _uid);
   _unsubs.push(liveSnapshot('members', membersSource, (snap) => {
     _cache.members = isStaffRole()
-      ? snap.docs.map(d => ({ uid: d.id, ...d.data() }))
-      : (snap.exists() ? [{ uid: snap.id, ...snap.data() }] : []);
+      ? snap.docs.map(d => ({ ...d.data(), uid: d.id }))
+      : (snap.exists() ? [{ ...snap.data(), uid: snap.id }] : []);
     if (!_membersLoaded) { _membersLoaded = true; _membersWaiters.splice(0).forEach(f => f()); }
     // An admin can change our role (or remove us) while the app is open.
     // Firestore rules apply the new role instantly, so the UI and the data
@@ -480,7 +480,7 @@ function attachJobsListener() {
       ? query(custJobsCol(), where('customerUids', 'array-contains', _uid))   // safe copies (v2026.10.03-2042)
       : query(jobsCol(), where('employeeUids', 'array-contains', _uid));
   _jobsUnsub = liveSnapshot('jobs', q, (snap) => {
-    const docs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    const docs = snap.docs.map(d => ({ ...d.data(), id: d.id }));
     if (_role === 'admin' || _role === 'bookkeeper') mergeHotJobs(docs);
     else _cache.jobs = docs;                   // employee query covers everything
     emit();
@@ -1252,7 +1252,7 @@ export const Storage = {
     _fetchedMonths.add(key);                                   // claim it before awaiting
     try {
       const snap = await getDocs(query(jobsCol(), where('date', '>=', from), where('date', '<=', to)));
-      const docs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      const docs = snap.docs.map(d => ({ ...d.data(), id: d.id }));
       const have = new Set(_cache.jobs.map(j => j.id));
       const added = docs.filter(d => !have.has(d.id));
       if (added.length) { _cache.jobs = _cache.jobs.concat(added); emit(); }
@@ -1270,7 +1270,7 @@ export const Storage = {
     try {
       const snap = await getDocs(query(jobsCol(), where('customerId', '==', customerId)));
       const have = new Set(_cache.jobs.map(j => j.id));
-      const added = snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(d => !have.has(d.id));
+      const added = snap.docs.map(d => ({ ...d.data(), id: d.id })).filter(d => !have.has(d.id));
       if (added.length) { _cache.jobs = _cache.jobs.concat(added); emit(); }
     } catch (err) { console.warn('fetchCustomerJobs', err); }
   },
@@ -1301,7 +1301,7 @@ export const Storage = {
       const ops = [];
       let written = 0;
       for (const d of jSnap.docs) {
-        const copy = custSafeCopy({ id: d.id, ...d.data() });
+        const copy = custSafeCopy({ ...d.data(), id: d.id });
         if (!copy) continue;
         want.add(d.id);
         if (sameCopy(have.get(d.id), copy)) continue;
@@ -1646,8 +1646,8 @@ export const Storage = {
     if (!_orgId || (_role !== 'admin' && _role !== 'bookkeeper')) return { jobs: [], timelogs: [] };
     const [j, t] = await Promise.all([getDocs(jobsCol()), getDocs(timelogsCol())]);
     return {
-      jobs: j.docs.map(d => ({ id: d.id, ...d.data() })),
-      timelogs: t.docs.map(d => ({ id: d.id, ...d.data() })),
+      jobs: j.docs.map(d => ({ ...d.data(), id: d.id })),
+      timelogs: t.docs.map(d => ({ ...d.data(), id: d.id })),
     };
   },
   // What a backup would ADD: everything whose id is not on the server at all.
@@ -2116,8 +2116,8 @@ export const Storage = {
     if (_orgId && _role === 'admin') {
       try {
         const [jSnap, tSnap] = await Promise.all([getDocs(jobsCol()), getDocs(timelogsCol())]);
-        jobs = jSnap.docs.filter(d => d.data().demo).map(d => ({ id: d.id, ...d.data() }));
-        logs = tSnap.docs.filter(d => d.data().demo).map(d => ({ id: d.id, ...d.data() }));
+        jobs = jSnap.docs.filter(d => d.data().demo).map(d => ({ ...d.data(), id: d.id }));
+        logs = tSnap.docs.filter(d => d.data().demo).map(d => ({ ...d.data(), id: d.id }));
       } catch (err) {
         console.warn('sampleDataPlan', err);   // fall back to what's cached
       }

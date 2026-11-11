@@ -2,6 +2,13 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
+  <!-- Content-Security-Policy (v2026.11.10-2008, security review item 5). A meta tag
+       because GitHub Pages cannot send headers. Scripts: this site, the Firebase
+       SDK (gstatic) and Google sign-in (apis.google.com) — nothing inline, so
+       injected markup cannot run script. Styles keep 'unsafe-inline': the app
+       writes style="" attributes everywhere. frame-src is the Firebase auth
+       helper iframe. Adding a new outside script/API means adding it HERE. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://www.gstatic.com https://apis.google.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self' https://*.googleapis.com https://www.gstatic.com; frame-src https://note-aggregator.firebaseapp.com; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'" />
   <!-- interactive-widget (v2026.09.30-2137): Android Chrome SHRINKS the page for the
        keyboard instead of covering it and panning the view, which pushed the
        editor toolbar off the top. iOS ignores it. -->

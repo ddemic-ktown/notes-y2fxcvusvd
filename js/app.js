@@ -20,6 +20,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 100, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.11.10-2008', 'Security: record ids are cleaned before they are written into the page, and the page now has a content security policy'],
   ['v2026.11.09-1731', 'Calendar moves its today circle to the new day after midnight or when the phone wakes, without leaving the screen'],
   ['v2026.11.09-1723', 'Job menu: bigger text, crew tags and the full note; new Call button (picks a number when the customer has several)'],
   ['v2026.11.09-1718', 'Phone month view: one line per job in time order, crew dots only when the crew changes, up to 8 per day; each week grows to fit its busiest day'],
@@ -452,7 +453,7 @@ function renderEmployeeList() {
           <span class="employee-field-label">App account</span>
           <select class="employee-link-select" data-emp-link="${escapeHtml(e.name)}" aria-label="App account for ${escapeHtml(e.name)}">
             <option value="">No app account</option>
-            ${members.map(m => `<option value="${m.uid}" ${links[e.name] === m.uid ? 'selected' : ''}>${escapeHtml(m.name || m.email || m.uid)}</option>`).join('')}
+            ${members.map(m => `<option value="${escapeHtml(m.uid)}" ${links[e.name] === m.uid ? 'selected' : ''}>${escapeHtml(m.name || m.email || m.uid)}</option>`).join('')}
           </select>
         </label>
       </div>
@@ -1583,7 +1584,7 @@ function renderCalSearchResults() {
     const when = j.date ? prettyDate(j.date) : '—';
     const time = (j.start || j.end) ? `${j.start || ''}${j.end ? '–' + j.end : ''}` : '';
     const note = isCustomerRole() ? '' : (j.description || '').trim();
-    return `<article class="cal-result${j.noWork ? ' cal-nowork' : ' cal-working'}" data-date="${escapeHtml(j.date || '')}" data-job="${j.id}">
+    return `<article class="cal-result${j.noWork ? ' cal-nowork' : ' cal-working'}" data-date="${escapeHtml(j.date || '')}" data-job="${escapeHtml(j.id)}">
       <p class="cal-result-when">${escapeHtml(when)}${time ? ` · ${escapeHtml(time)}` : ''}</p>
       <p class="cal-result-who">${escapeHtml(jobTitle(j) || 'No customer')}</p>
       ${j.address ? `<p class="cal-result-addr">${escapeHtml(j.address)}</p>` : ''}
@@ -2008,13 +2009,13 @@ function renderCalendar() {
         const w = 100 / t.n;
         const ind = t.depth * indentPx;
         const who = calHeadLabel(j) || '—';
-        return `<div class="cal-wk-job${j.noWork ? ' cal-nowork' : ' cal-working'}" data-job="${j.id}"`
+        return `<div class="cal-wk-job${j.noWork ? ' cal-nowork' : ' cal-working'}" data-job="${escapeHtml(j.id)}"`
           + ` style="top:${pct(t.sp.start)};height:${((t.sp.end - t.sp.start) / range * 100).toFixed(3)}%;left:calc(${(t.lane * w).toFixed(3)}% + ${ind}px);width:calc(${w.toFixed(3)}% - ${ind}px)"`
           + ` title="${escapeHtml(`${who} · ${fmtClock(t.sp.start)}–${fmtClock(t.sp.end)}`)}">`
           + `<span class="cal-wk-who">${escapeHtml(who)}</span><span class="cal-wk-chips">${chips}</span></div>`;
       }).join('');
       const untimed = js.filter(j => !jobSpan(j)).slice(0, 3).map(j =>
-        `<div class="cal-wk-untimed${j.noWork ? ' cal-nowork-text' : ''}" data-job="${j.id}">${escapeHtml(calHeadLabel(j) || '—')}</div>`).join('');
+        `<div class="cal-wk-untimed${j.noWork ? ' cal-nowork-text' : ''}" data-job="${escapeHtml(j.id)}">${escapeHtml(calHeadLabel(j) || '—')}</div>`).join('');
       const classes = ['cal-cell', 'cal-wk-col'];
       if (!js.length) classes.push('cal-empty');
       if (s === todayStr) classes.push('cal-today');
@@ -2261,7 +2262,7 @@ function renderCalendarDay() {
       const ucrew = jobCrew(j);
       const chips = crewNames(ucrew).map(n =>
         `<span class="cal-chip" style="${chipStyle(n)}">${escapeHtml(crewChipLabel(ucrew, n, false))}</span>`).join('');
-      return `<div class="cal-untimed-job${j.noWork ? ' cal-nowork' : ' cal-working'}" data-job="${j.id}">${escapeHtml(who)}${ucust} ${chips}</div>`;
+      return `<div class="cal-untimed-job${j.noWork ? ' cal-nowork' : ' cal-working'}" data-job="${escapeHtml(j.id)}">${escapeHtml(who)}${ucust} ${chips}</div>`;
     }).join('');
   } else {
     untimedWrap.hidden = true;
@@ -2334,7 +2335,7 @@ function renderCalendarDay() {
     // 📍 directions (v2026.10.03-0725) — its own tap target; see the stopPropagation below.
     // (The 📍 pin went in v2026.10.04-1840 — Directions is in the job menu a tap opens.)
     const pin = '';
-    return `<div class="cal-block${tight ? ' cal-block-tight' : ''}${addrFirst ? ' cal-block-addrhead' : ''}${sizeClass}${j.noWork ? ' cal-nowork' : ' cal-working'}" data-job="${j.id}" style="top:${top}px;height:${height}px;left:${left};width:${width};z-index:${1 + depth}">
+    return `<div class="cal-block${tight ? ' cal-block-tight' : ''}${addrFirst ? ' cal-block-addrhead' : ''}${sizeClass}${j.noWork ? ' cal-nowork' : ' cal-working'}" data-job="${escapeHtml(j.id)}" style="top:${top}px;height:${height}px;left:${left};width:${width};z-index:${1 + depth}">
       ${tight ? '' : `<div class="cal-block-time">${escapeHtml(timeTxt)}</div>`}
       <div class="cal-block-head">
         <div class="cal-block-who">${escapeHtml(who)}</div>
@@ -3359,7 +3360,7 @@ function renderJobCustomer(filter) {
       // Show the address too — two customers can share a surname, and the
       // address is what tells you which one you mean.
       const addr = addressCandidates(c.id)[0] || '';
-      return `<li class="member-item job-customer-item" data-id="${c.id}">
+      return `<li class="member-item job-customer-item" data-id="${escapeHtml(c.id)}">
         <span class="member-email">${escapeHtml(customerCrumbLabel(c.id))}${
           addr ? `<em class="setting-check-hint">${escapeHtml(addr)}</em>` : ''
         }</span>
@@ -4042,21 +4043,21 @@ function renderPriceTable() {
     pricePickVendors);
   const reorder = priceReorderMode && canEdit;
   const head = `<thead><tr><th class="price-corner">Item</th>${
-    vendors.map((v, i) => `<th class="price-vendor" data-vendor="${v.id}">${
-      reorder ? `<input type="checkbox" class="price-pick" data-pick-vendor="${v.id}" ${priceSelVendors.has(v.id) ? 'checked' : ''} aria-label="Select ${escapeHtml(v.name)}" />` : ''
+    vendors.map((v, i) => `<th class="price-vendor" data-vendor="${escapeHtml(v.id)}">${
+      reorder ? `<input type="checkbox" class="price-pick" data-pick-vendor="${escapeHtml(v.id)}" ${priceSelVendors.has(v.id) ? 'checked' : ''} aria-label="Select ${escapeHtml(v.name)}" />` : ''
     }${
-      picking ? `<input type="checkbox" class="price-pick price-keep" data-keep-vendor="${v.id}" ${pricePickVendors.has(v.id) ? 'checked' : ''} aria-label="Keep ${escapeHtml(v.name)}" />` : ''
+      picking ? `<input type="checkbox" class="price-pick price-keep" data-keep-vendor="${escapeHtml(v.id)}" ${pricePickVendors.has(v.id) ? 'checked' : ''} aria-label="Keep ${escapeHtml(v.name)}" />` : ''
     }${escapeHtml(v.name)}${
-      reorder ? `<span class="reorder-arrows"><button type="button" class="v-left" data-vendor="${v.id}" ${i === 0 ? 'disabled' : ''}>←</button><button type="button" class="v-right" data-vendor="${v.id}" ${i === vendors.length - 1 ? 'disabled' : ''}>→</button></span>` : ''
+      reorder ? `<span class="reorder-arrows"><button type="button" class="v-left" data-vendor="${escapeHtml(v.id)}" ${i === 0 ? 'disabled' : ''}>←</button><button type="button" class="v-right" data-vendor="${escapeHtml(v.id)}" ${i === vendors.length - 1 ? 'disabled' : ''}>→</button></span>` : ''
     }</th>`).join('')
   }</tr></thead>`;
   const body = `<tbody>${items.map((item, i) => `<tr>
-      <th class="price-item" data-item="${item.id}">${
-        reorder ? `<input type="checkbox" class="price-pick" data-pick-item="${item.id}" ${priceSelItems.has(item.id) ? 'checked' : ''} aria-label="Select ${escapeHtml(item.name)}" />` : ''
+      <th class="price-item" data-item="${escapeHtml(item.id)}">${
+        reorder ? `<input type="checkbox" class="price-pick" data-pick-item="${escapeHtml(item.id)}" ${priceSelItems.has(item.id) ? 'checked' : ''} aria-label="Select ${escapeHtml(item.name)}" />` : ''
       }${
-        picking ? `<input type="checkbox" class="price-pick price-keep" data-keep-item="${item.id}" ${pricePickItems.has(item.id) ? 'checked' : ''} aria-label="Keep ${escapeHtml(item.name)}" />` : ''
+        picking ? `<input type="checkbox" class="price-pick price-keep" data-keep-item="${escapeHtml(item.id)}" ${pricePickItems.has(item.id) ? 'checked' : ''} aria-label="Keep ${escapeHtml(item.name)}" />` : ''
       }<span class="price-item-name">${escapeHtml(item.name)}</span>${
-        reorder ? `<span class="reorder-arrows"><button type="button" class="i-up" data-item="${item.id}" ${i === 0 ? 'disabled' : ''}>↑</button><button type="button" class="i-down" data-item="${item.id}" ${i === items.length - 1 ? 'disabled' : ''}>↓</button></span>` : ''
+        reorder ? `<span class="reorder-arrows"><button type="button" class="i-up" data-item="${escapeHtml(item.id)}" ${i === 0 ? 'disabled' : ''}>↑</button><button type="button" class="i-down" data-item="${escapeHtml(item.id)}" ${i === items.length - 1 ? 'disabled' : ''}>↓</button></span>` : ''
       }</th>
       ${(() => { const best = cheapestVendorId(item, vendors); return vendors.map(v => priceCellHtml(item, v, canEdit, v.id === best)).join(''); })()}
     </tr>`).join('')}</tbody>`;
@@ -4611,7 +4612,7 @@ if (priceShareBtn) priceShareBtn.addEventListener('click', () => {
   priceShareList.innerHTML = employees.length
     ? employees.map(m => `<li class="member-item">
         <label style="display:flex;align-items:center;gap:8px;flex:1;min-width:0;cursor:pointer;">
-          <input type="checkbox" data-uid="${m.uid}" ${shared.includes(m.uid) ? 'checked' : ''} />
+          <input type="checkbox" data-uid="${escapeHtml(m.uid)}" ${shared.includes(m.uid) ? 'checked' : ''} />
           <span class="member-email">${escapeHtml(m.name || m.email || m.uid)}</span>
         </label>
       </li>`).join('')
@@ -5395,7 +5396,7 @@ function renderCrumbs(containerId, crumbs) {
     const last = i === crumbs.length - 1;
     const sep = i > 0 ? '<span class="crumb-sep" aria-hidden="true">›</span>' : '';
     if (last) return `${sep}<span class="crumb crumb-current" aria-current="page">${escapeHtml(c.label)}</span>`;
-    return `${sep}<button type="button" class="crumb crumb-link" data-go="${c.go}"${c.id ? ` data-id="${c.id}"` : ''}>${escapeHtml(c.label)}</button>`;
+    return `${sep}<button type="button" class="crumb crumb-link" data-go="${escapeHtml(c.go)}"${c.id ? ` data-id="${escapeHtml(c.id)}"` : ''}>${escapeHtml(c.label)}</button>`;
   }).join('');
   el.querySelectorAll('.crumb-link').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -5924,7 +5925,7 @@ function renderSectionView(key) {
       const safeTitle = title.trim() ? escapeHtml(title) : '<span style="color:var(--ink-soft);font-style:italic">Untitled</span>';
       const preview = (body.split('\n').find(l => l.trim()) || '').trim();
       return `
-        <article class="note-card home-pinned" data-id="${n.id}">
+        <article class="note-card home-pinned" data-id="${escapeHtml(n.id)}">
           <span class="customer-tag">${escapeHtml(name || 'Unnamed customer')}</span>
           <div class="note-head"><p class="note-title">${safeTitle}</p><span class="note-date">${formatDateTime(n.updated)}</span></div>
           ${preview ? `<p class="note-preview">${escapeHtml(preview)}</p>` : ''}
@@ -6424,7 +6425,7 @@ function renderHomeSearchResults(term) {
       : '<span style="color:var(--ink-soft);font-style:italic">Untitled</span>';
     const firstBodyLine = (body.split('\n').find(l => l.trim() !== '') || '').trim();
     return `
-      <article class="note-card pinned" data-id="${c.id}" data-kind="customer">
+      <article class="note-card pinned" data-id="${escapeHtml(c.id)}" data-kind="customer">
         <div class="note-head">
           <p class="note-title">${safeTitle}</p>
           <span class="note-date">${formatDateTime(c.updated)}</span>
@@ -6449,7 +6450,7 @@ function renderHomeSearchResults(term) {
       customerTag = `<span class="customer-tag">${escapeHtml(name || 'Unnamed customer')}</span>`;
     }
     return `
-      <article class="note-card" data-id="${n.id}" data-kind="note">
+      <article class="note-card" data-id="${escapeHtml(n.id)}" data-kind="note">
         ${customerTag}
         <div class="note-head">
           <p class="note-title">${safeTitle}</p>
@@ -6745,7 +6746,7 @@ function renderNotesList() {
     const safePreview = firstBodyLine ? escapeHtml(firstBodyLine) : '';
     const sharedBadge = sharedPillsHtml(n);
     return `
-      <article class="note-card home-pinned" data-id="${n.id}" data-kind="note">
+      <article class="note-card home-pinned" data-id="${escapeHtml(n.id)}" data-kind="note">
         <span class="customer-tag">${tag}</span>${sharedBadge}
         <div class="note-head">
           <p class="note-title">${safeTitle}</p>
@@ -6964,7 +6965,7 @@ function renderNoteCard(n) {
   // Shared badge for admin/bookkeeper: this note is visible to assigned users
   const sharedBadge = canViewAllRole() ? sharedPillsHtml(n) : '';
   return `
-    <article class="note-card ${pinned}" data-id="${n.id}" data-kind="note">
+    <article class="note-card ${pinned}" data-id="${escapeHtml(n.id)}" data-kind="note">
       ${customerTag}${sharedBadge}
       <div class="note-head">
         <p class="note-title">${safeTitle}</p>
@@ -7066,7 +7067,7 @@ function renderCustomersList() {
     const firstBodyLine = (body.split('\n').find(l => l.trim() !== '') || '').trim();
     const safePreview = firstBodyLine ? escapeHtml(firstBodyLine) : '';
     return `
-      <article class="note-card pinned" data-id="${c.id}" data-kind="customer">
+      <article class="note-card pinned" data-id="${escapeHtml(c.id)}" data-kind="customer">
         <div class="note-head">
           <p class="note-title">${safeTitle}</p>
           <span class="note-date">${formatDateTime(c.updated)}</span>
@@ -8588,10 +8589,10 @@ function openAssignModal() {
   } else {
     assignMembersList.innerHTML = members.map(m => `
       <li class="assign-member-item">
-        <input type="checkbox" id="assign-${m.uid}" data-uid="${m.uid}" ${assigned.includes(m.uid) ? 'checked' : ''} />
-        <label for="assign-${m.uid}" style="flex:1;cursor:pointer">
+        <input type="checkbox" id="assign-${escapeHtml(m.uid)}" data-uid="${escapeHtml(m.uid)}" ${assigned.includes(m.uid) ? 'checked' : ''} />
+        <label for="assign-${escapeHtml(m.uid)}" style="flex:1;cursor:pointer">
           ${escapeHtml(m.email || m.uid)}
-          <span style="font-size:12px;color:var(--ink-soft);margin-left:6px">${m.role}</span>
+          <span style="font-size:12px;color:var(--ink-soft);margin-left:6px">${escapeHtml(m.role)}</span>
         </label>
       </li>
     `).join('');
@@ -8650,7 +8651,7 @@ function renderShareCustomers(filter) {
     return words.every(w => (def ? def.body : '').toLowerCase().includes(w));
   }).slice(0, 40);
   shareCustomerList.innerHTML = customers.length
-    ? customers.map(c => `<li class="member-item share-customer-item" data-id="${c.id}">
+    ? customers.map(c => `<li class="member-item share-customer-item" data-id="${escapeHtml(c.id)}">
         <span class="member-email">${escapeHtml(customerCrumbLabel(c.id))}</span></li>`).join('')
     : '<li class="member-item">No customers found.</li>';
   shareCustomerList.querySelectorAll('.share-customer-item').forEach(li => {
@@ -8737,7 +8738,7 @@ function renderAssignCustomerList(filter) {
     const { title, body } = def ? splitTitleAndBody(def.body) : { title: '', body: '' };
     const name = title.trim() || 'Unnamed customer';
     const secondLine = (body.split('\n').find(l => l.trim()) || '').trim();
-    return `<li class="assign-customer-item" data-id="${c.id}" style="padding:10px 16px;cursor:pointer;border-bottom:1px solid var(--line);">
+    return `<li class="assign-customer-item" data-id="${escapeHtml(c.id)}" style="padding:10px 16px;cursor:pointer;border-bottom:1px solid var(--line);">
       <p style="margin:0;font-size:15px;">${escapeHtml(name)}</p>
       ${secondLine ? `<p style="margin:2px 0 0;font-size:12px;color:var(--ink-soft);">${escapeHtml(secondLine)}</p>` : ''}
     </li>`;
@@ -9525,8 +9526,8 @@ function renderTrashList() {
       : ' · note';
     return `<li class="member-item">
       <span class="member-email">${escapeHtml(it.name)}<em class="setting-check-hint">${escapeHtml(String(left))} day${left === 1 ? '' : 's'} left${extra}</em></span>
-      <button class="trash-restore" data-kind="${it.kind}" data-id="${it.id}">Restore</button>
-      <button class="member-remove-btn trash-purge" data-kind="${it.kind}" data-id="${it.id}" title="Delete forever">✕</button>
+      <button class="trash-restore" data-kind="${escapeHtml(it.kind)}" data-id="${escapeHtml(it.id)}">Restore</button>
+      <button class="member-remove-btn trash-purge" data-kind="${escapeHtml(it.kind)}" data-id="${escapeHtml(it.id)}" title="Delete forever">✕</button>
     </li>`;
   }).join('');
   el.querySelectorAll('.trash-restore').forEach(btn => {
@@ -9737,7 +9738,7 @@ function renderCustomerLinkSearch() {
   list.innerHTML = hits.length ? hits.map(c => {
     const addr = addressCandidates(c.id)[0] || '';
     const linked = links[c.id] ? '<span class="cust-link-tag">linked</span>' : '';
-    return `<li class="member-item job-customer-item" data-pick="${c.id}"><span class="member-email">${escapeHtml(customerCrumbLabel(c.id))}${linked}${addr ? `<em class="setting-check-hint">${escapeHtml(addr)}</em>` : ''}</span></li>`;
+    return `<li class="member-item job-customer-item" data-pick="${escapeHtml(c.id)}"><span class="member-email">${escapeHtml(customerCrumbLabel(c.id))}${linked}${addr ? `<em class="setting-check-hint">${escapeHtml(addr)}</em>` : ''}</span></li>`;
   }).join('') : '<li class="member-item job-crew-empty">No customer matches.</li>';
   list.querySelectorAll('[data-pick]').forEach(li => li.addEventListener('click', () => {
     custLinkPick = li.dataset.pick; renderCustomerLinkSearch();
@@ -9757,7 +9758,7 @@ function renderCustomerLinks() {
   }
   renderCustomerLinkSearch();
   acctSel.innerHTML = accounts.length
-    ? accounts.map(m => `<option value="${m.uid}">${escapeHtml(m.name || m.email || m.uid)}</option>`).join('')
+    ? accounts.map(m => `<option value="${escapeHtml(m.uid)}">${escapeHtml(m.name || m.email || m.uid)}</option>`).join('')
     : '<option value="">No customer accounts yet</option>';
 
   const entries = Object.entries(links);
@@ -10041,11 +10042,11 @@ function renderMemberSharedModal() {
     const sub = n.isDefault ? 'Customer record'
       : (n.customerId ? (customerCrumbLabel(n.customerId) || 'Customer') : 'General note');
     return `<li class="member-item member-shared-item">
-      <button type="button" class="member-shared-open" data-id="${n.id}">
+      <button type="button" class="member-shared-open" data-id="${escapeHtml(n.id)}">
         <span class="member-shared-name">${escapeHtml(title)}</span>
         <span class="member-shared-sub">${escapeHtml(sub)}</span>
       </button>
-      <button type="button" class="secondary member-shared-unshare" data-id="${n.id}">Unshare</button>
+      <button type="button" class="secondary member-shared-unshare" data-id="${escapeHtml(n.id)}">Unshare</button>
     </li>`;
   }).join('') : '<li class="member-item">No notes are shared with them.</li>';
   list.querySelectorAll('.member-shared-unshare').forEach(b => b.addEventListener('click', () => {
@@ -10100,11 +10101,11 @@ function renderMembersList() {
     <li class="member-card">
       <div class="member-card-top">
         <span class="member-card-email">${escapeHtml(m.email || m.uid)}</span>
-        ${m.uid !== currentUid ? `<button class="member-remove-btn" data-uid="${m.uid}" title="Remove">✕</button>` : ''}
+        ${m.uid !== currentUid ? `<button class="member-remove-btn" data-uid="${escapeHtml(m.uid)}" title="Remove">✕</button>` : ''}
       </div>
       <label class="member-field">
         <span class="member-field-label">Role</span>
-        <select class="member-role-select" data-uid="${m.uid}" ${m.uid === currentUid && lastAdmin ? 'disabled' : ''}>
+        <select class="member-role-select" data-uid="${escapeHtml(m.uid)}" ${m.uid === currentUid && lastAdmin ? 'disabled' : ''}>
           <option value="admin" ${m.role === 'admin' ? 'selected' : ''}>Admin</option>
           <option value="employee" ${m.role === 'employee' ? 'selected' : ''}>Employee</option>
           <option value="bookkeeper" ${m.role === 'bookkeeper' ? 'selected' : ''}>Bookkeeper</option>
@@ -10115,7 +10116,7 @@ function renderMembersList() {
         ? '<p class="member-note">You are the only admin, so you cannot change your own role. Make someone else an admin first.</p>'
         : ''}
       ${(m.role === 'employee' || m.role === 'customer')
-        ? `<button class="secondary member-shared-btn" type="button" data-uid="${m.uid}">Shared notes (${memberSharedNotes(m.uid).length})</button>`
+        ? `<button class="secondary member-shared-btn" type="button" data-uid="${escapeHtml(m.uid)}">Shared notes (${memberSharedNotes(m.uid).length})</button>`
         : ''}
     </li>
   `).join('');
@@ -10868,10 +10869,10 @@ async function renderFileGallery(customerId) {
         </div>`;
     }
     return `
-      <li class="gallery-tile" data-open="${r.id}" title="${escapeHtml(r.name)} · ${fmtFileSize(r.size)} · ${formatDateTime(r.addedAt)}">
+      <li class="gallery-tile" data-open="${escapeHtml(r.id)}" title="${escapeHtml(r.name)} · ${fmtFileSize(r.size)} · ${formatDateTime(r.addedAt)}">
         ${preview}
-        <button class="gallery-tile-btn gallery-share-btn" data-share="${r.id}" aria-label="Share file">${ICON_SHARE}</button>
-        <button class="gallery-tile-btn gallery-delete-btn" data-del="${r.id}" aria-label="Delete file">${ICON_TRASH}</button>
+        <button class="gallery-tile-btn gallery-share-btn" data-share="${escapeHtml(r.id)}" aria-label="Share file">${ICON_SHARE}</button>
+        <button class="gallery-tile-btn gallery-delete-btn" data-del="${escapeHtml(r.id)}" aria-label="Delete file">${ICON_TRASH}</button>
       </li>
     `;
   }).join('');
@@ -12318,8 +12319,8 @@ function renderOrphanList() {
     const safePreview = firstLine ? escapeHtml(firstLine) : '';
     return `
       <div class="orphan-item">
-        <input type="checkbox" class="orphan-cb" data-id="${n.id}" />
-        <div class="orphan-item-body" data-id="${n.id}">
+        <input type="checkbox" class="orphan-cb" data-id="${escapeHtml(n.id)}" />
+        <div class="orphan-item-body" data-id="${escapeHtml(n.id)}">
           <p class="note-title" style="margin:0;font-size:15px;">${safeTitle}</p>
           ${safePreview ? `<p class="note-preview" style="margin:2px 0 0;">${safePreview}</p>` : ''}
         </div>
