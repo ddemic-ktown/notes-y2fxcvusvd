@@ -20,7 +20,11 @@ service cloud.firestore {
         request.auth.token.email.lower() == 'davor.demic@gmail.com';
     }
 
-    // Invite lookup — readable by any authenticated user (needed at sign-in).
+    // Invite lookup — each row is readable ONLY by the person it is for (their
+    // own email key, which is all sign-in needs) and by the founder. It used to
+    // be readable — and LISTABLE — by any signed-in account, which exposed every
+    // invited email, role, org id and new-company name to anyone with a Google
+    // login (security review Nov 2026, item 1). `get`, not `read`: no listing.
     // Two kinds of row live here:
     //   · a JOIN invite  — { orgId, role, email }: sign in and you become a
     //     member of that org with that role. Written only by an admin OF THAT
@@ -43,7 +47,7 @@ service cloud.firestore {
           emailKey == request.auth.token.email.lower().replace('\\.', ',');
       }
       function isNewOrgRow(data) { return data.get('kind', '') == 'newOrg'; }
-      allow read: if request.auth != null;
+      allow get: if isOwnEmailKey() || isFounder();
       // .get(key, default) throughout: a founder row carries no orgId and a
       // join row carries no kind, so reading either field directly would throw
       // on the other shape — and an error in a rule is a denial.
