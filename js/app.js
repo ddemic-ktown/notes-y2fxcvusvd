@@ -20,6 +20,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 100, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.11.10-2025', 'Security: customer files accept only safe types (photos, video, audio, PDF, text, Office); anything else is refused, and only safe types open in a tab'],
   ['v2026.11.10-2015', 'Security: new passwords need 10 characters, price CSV exports are safe to open in Excel, clearer message when an email is already invited elsewhere'],
   ['v2026.11.10-2012', 'Security: removing a member also clears any leftover invite for their email'],
   ['v2026.11.10-2008', 'Security: record ids are cleaned before they are written into the page, and the page now has a content security policy'],
@@ -8670,9 +8671,12 @@ async function acceptShare(customerId) {
   await clearSharePayload();
   if (!p || !customerId) return;
   // Files are LOCAL to this device by design (see files.js) — they don't sync.
+  const refusedShare = [];
   for (const f of p.files) {
+    if (!isSafeFileType(f.type, f.name)) { refusedShare.push(f.name || 'file'); continue; }
     try { await LocalFiles.add(customerId, f); } catch (e) { console.warn('share file', e); }
   }
+  tellRefusedFiles(refusedShare);
   // Text and links go into the customer's default note, which DOES sync.
   const txt = [p.title, p.text, p.url].filter(Boolean).join('\n').trim();
   if (txt) {
@@ -10897,6 +10901,13 @@ async function renderFileGallery(customerId) {
       fileObjectUrls.push(url);
       if ((rec.type || '').startsWith('image/')) {
         openFileLightbox(url, rec.id);
+      } else if (!opensInTab(rec.type) || !isSafeFileType(rec.type, rec.name)) {
+        // Never open anything else in a tab — it would run in the app's origin.
+        // Covers files stored before the type check existed. (v2026.11.10-2025)
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = rec.name;
+        a.click();
       } else {
         // View in a new tab (phone's built-in viewer); no copy saved to Downloads.
         const win = window.open(url, '_blank');
@@ -10956,11 +10967,46 @@ if (filesToggle) filesToggle.addEventListener('click', () => {
   if (activeCustomerId) openFileGallery(activeCustomerId);
 });
 
+// SAFE FILE TYPES ONLY (v2026.11.10-2025, security review item 9). A stored file is opened
+// from a blob: URL, which runs in the APP'S OWN origin — so an HTML or SVG file
+// would run script with the app's access. Only types that cannot do that are
+// stored: photos, video, audio, PDF, plain text/CSV and Office documents.
+// Both the type the browser reports and the file name must pass — either can be
+// missing or wrong. SVG is refused although it is an image: it can carry script.
+const SAFE_FILE_EXT = /\.(jpe?g|png|gif|webp|heic|heif|bmp|tiff?|avif|mp4|mov|m4v|webm|avi|mkv|3gp|mp3|m4a|wav|aac|ogg|oga|flac|pdf|txt|csv|docx?|xlsx?|pptx?)$/i;
+const UNSAFE_FILE_EXT = /\.(html?|xhtml|xht|xml|svgz?|js|mjs|mht|mhtml)$/i;
+function isSafeFileType(type, name) {
+  const t = String(type || '').toLowerCase().split(';')[0].trim();
+  const n = String(name || '');
+  if (UNSAFE_FILE_EXT.test(n) || t === 'image/svg+xml') return false;
+  if (/^(image|video|audio)\//.test(t)) return true;
+  if (t === 'application/pdf' || t === 'text/plain' || t === 'text/csv') return true;
+  if (t === 'application/msword' || t === 'application/vnd.ms-excel' || t === 'application/vnd.ms-powerpoint'
+    || t.startsWith('application/vnd.openxmlformats-officedocument.')) return true;
+  // No usable type from the browser: go by the name alone.
+  if (!t || t === 'application/octet-stream') return SAFE_FILE_EXT.test(n);
+  return false;
+}
+// Only these open in a tab. Office files are stored but always download.
+function opensInTab(type) {
+  const t = String(type || '').toLowerCase().split(';')[0].trim();
+  return t === 'application/pdf' || t === 'text/plain' || /^(video|audio)\//.test(t);
+}
+function tellRefusedFiles(names) {
+  if (!names.length) return;
+  showActionToast(names.length === 1
+    ? `${names[0]} wasn’t added — this file type isn’t allowed`
+    : `${names.length} files weren’t added — their file type isn’t allowed`);
+}
+
 async function addFilesFromInput(input) {
   if (!activeCustomerId || !input.files || input.files.length === 0) return;
+  const refused = [];
   for (const f of input.files) {
+    if (!isSafeFileType(f.type, f.name)) { refused.push(f.name || 'file'); continue; }
     try { await LocalFiles.add(activeCustomerId, f); } catch (e) { console.warn('file add', e); }
   }
+  tellRefusedFiles(refused);
   input.value = '';
   renderCustomerFiles(activeCustomerId);
   if (galleryView && !galleryView.hidden) renderFileGallery(activeCustomerId);
