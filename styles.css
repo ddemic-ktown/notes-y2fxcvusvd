@@ -1670,9 +1670,12 @@ body.vv-zoomed .sync-toast { display: none !important; }
 .customers-header-bottom > .search-wrap { flex: 1 1 auto; min-width: 0; }
 .customers-header-bottom > .app-back-btn, .customers-header-bottom > .price-zoom,
 .customers-header-bottom > .editor-more-wrap { flex-shrink: 0; }
-/* Day view and Settings keep a row only for Back — gone where Back isn't shown. */
-body:not(.show-app-back) #calendar-day-view .customers-header-top,
+/* Settings keeps a row only for Back — gone where Back isn't shown. */
 body:not(.show-app-back) #settings-view .customers-header-top { display: none; }
+/* Day view's row now carries its own ⋯ (v2026.11.10-2054), so it stays; ⋯ sits at the right. */
+#calendar-day-view .customers-header-top > .editor-more-wrap { margin-left: auto; }
+.zoom-btn { font-size: 13px; font-weight: 700; white-space: nowrap; }
+.signin-link-hint { margin: 2px 0 6px; text-align: center; }
 /* One top line: Back, nav bar, the screen's own buttons (v2026.10.02-1913) */
 .nav-line { display: flex; align-items: center; gap: 6px; width: 100%; min-width: 0; flex-basis: 100%; }
 .nav-line > .home-nav { flex: 1 1 auto; min-width: 0; }

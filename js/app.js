@@ -20,6 +20,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 100, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.11.10-2054', 'Tidy-up: consistent wording (vendor, Job note, Turn filter off, How long), day view gets a ⋯ menu, Text button on the job menu, price sort as three choices, A−/A+ zoom, Trash under Backup, one sign-in link button'],
   ['v2026.11.10-2040', 'Tour tidy-up: job menu, + button and files steps brought up to date, repeats removed, Install moved to the last part (Calendar, Jobs, Hours and Running your company each move up one)'],
   ['v2026.11.10-2025', 'Security: customer files accept only safe types (photos, video, audio, PDF, text, Office); anything else is refused, and only safe types open in a tab'],
   ['v2026.11.10-2015', 'Security: new passwords need 10 characters, price CSV exports are safe to open in Excel, clearer message when an email is already invited elsewhere'],
@@ -1675,6 +1676,8 @@ function openCalFilter() {
   const btn = document.getElementById('cal-filter-btn');
   const modal = document.getElementById('cal-filter-modal');
   if (btn) btn.addEventListener('click', openCalFilter);
+  const dayBtn = document.getElementById('calday-filter-btn');   // day view's ⋯
+  if (dayBtn) dayBtn.addEventListener('click', openCalFilter);
   const close = () => { if (modal) modal.hidden = true; };
   const closeBtn = document.getElementById('cal-filter-close');
   if (closeBtn) closeBtn.addEventListener('click', close);
@@ -2500,6 +2503,13 @@ function wireDayInteractions(canEdit) {
   });
 }
 
+// Day view's own Jump to today (v2026.11.10-2054): re-renders in place, no new history entry.
+const calDayToday = document.getElementById('calday-today');
+if (calDayToday) calDayToday.addEventListener('click', () => {
+  calSelectedDate = ymd(new Date());
+  Storage.ensureJobMonth(calSelectedDate);
+  renderCalendarDay();
+});
 const calToday = document.getElementById('cal-today');
 if (calToday) calToday.addEventListener('click', () => {
   if (calScrollOn()) { calScrollJumpTo(new Date()); return; }   // v2026.10.28-2305
@@ -2964,6 +2974,11 @@ function openJobMenu(jobId, opts = {}) {
   call.hidden = !jobMenuPhones.length;
   if (jobMenuPhones.length === 1) call.href = `tel:${jobMenuPhones[0].tel}`;
   else call.removeAttribute('href');
+  // Text, same numbers (v2026.11.10-2054). A text goes to the number alone, no extension.
+  const text = document.getElementById('job-menu-text');
+  text.hidden = !jobMenuPhones.length;
+  if (jobMenuPhones.length === 1) text.href = `sms:+1${jobMenuPhones[0].digits}`;
+  else text.removeAttribute('href');
   const gcal = document.getElementById('job-menu-gcal');
   const ics = document.getElementById('job-menu-ics');
   const apple = isAppleMobile();
@@ -2992,14 +3007,17 @@ function openJobMenu(jobId, opts = {}) {
   const closePick = () => { callPick.hidden = true; };
   document.getElementById('job-call-close').addEventListener('click', closePick);
   callPick.addEventListener('click', (e) => { if (e.target === callPick) closePick(); else if (e.target.closest('a')) setTimeout(closePick, 0); });
-  document.getElementById('job-menu-call').addEventListener('click', (e) => {
+  const pickNumber = (title, hrefOf) => (e) => {
     if (jobMenuPhones.length === 1) { setTimeout(close, 0); return; }
     e.preventDefault();
+    document.getElementById('job-call-title').textContent = title;
     document.getElementById('job-call-list').innerHTML = jobMenuPhones.map(p =>
-      `<a class="secondary setting-wide-btn job-menu-link" href="tel:${escapeHtml(p.tel)}">${escapeHtml(p.display)}</a>`).join('');
+      `<a class="secondary setting-wide-btn job-menu-link" href="${escapeHtml(hrefOf(p))}">${escapeHtml(p.display)}</a>`).join('');
     close();
     callPick.hidden = false;
-  });
+  };
+  document.getElementById('job-menu-call').addEventListener('click', pickNumber('Call', p => `tel:${p.tel}`));
+  document.getElementById('job-menu-text').addEventListener('click', pickNumber('Text', p => `sms:+1${p.digits}`));
   document.getElementById('job-menu-ics').addEventListener('click', () => {
     const j = Storage.getJob(jobMenuId);
     if (!j) return;
@@ -3998,14 +4016,11 @@ function renderPriceTable() {
   const importBtn = document.getElementById('price-import');
   const exportBtn = document.getElementById('price-export');
   if (reorderBtn) reorderBtn.hidden = !canEdit;
-  const sortBtn = document.getElementById('price-sort');
-  if (sortBtn) {
-    // Reads as a STATE, not an instruction. "Sort: Latest" was taken as "press
-    // me to sort by latest", so pressing it looked like it did the opposite.
-    sortBtn.hidden = !Storage.canViewPriceTable();
-    sortBtn.textContent = PRICE_SORT_LABEL[priceSort] || PRICE_SORT_LABEL[''];
-    sortBtn.classList.toggle('active', !!priceSort);
-  }
+  // One item per order; the current one is pressed (bold). (v2026.11.10-2054)
+  document.querySelectorAll('[data-price-sort]').forEach(b => {
+    b.hidden = !Storage.canViewPriceTable();
+    b.setAttribute('aria-pressed', String((b.dataset.priceSort || '') === priceSort));
+  });
   if (importBtn) importBtn.hidden = !canEdit;
   if (exportBtn) exportBtn.hidden = !Storage.canViewPriceTable();
   const filterStart = document.getElementById('price-filter-start');
@@ -4885,6 +4900,7 @@ document.addEventListener('click', (e) => {
 // on navigation and on an outside tap has to be wired by hand.
 const moreMenus = [
   ['cal-more-btn', 'cal-more-dropdown'],
+  ['calday-more-btn', 'calday-more-dropdown'],   // v2026.11.10-2054
   ['hours-more-btn', 'hours-more-dropdown'],
   // v2026.09.21-2300: the customers list (sort) and one customer (delete).
   ['customers-more-btn', 'customers-more-dropdown'],
@@ -4923,17 +4939,15 @@ let priceReorderMode = false;
 // Rows/columns ticked in layout mode, to be moved to the top/front in one go
 const priceSelItems = new Set();
 const priceSelVendors = new Set();
-const priceSortBtn = document.getElementById('price-sort');
-if (priceSortBtn) priceSortBtn.addEventListener('click', () => {
-  // Custom → A–Z → Latest → Custom
-  priceSort = priceSort === '' ? 'az' : (priceSort === 'az' ? 'latest' : '');
+document.querySelectorAll('[data-price-sort]').forEach(b => b.addEventListener('click', () => {
+  priceSort = b.dataset.priceSort || '';
   if (priceSort) localStorage.setItem('na-price-sort', priceSort);
   else localStorage.removeItem('na-price-sort');
   // Leaving Layout mode on while the rows resort would show drag handles for
   // an order that isn't the one being displayed.
   if (priceSort && priceReorderMode) exitPriceReorderMode();
   renderPriceTable();
-});
+}));
 // Shared by the Layout button and the sort toggle, so the button's label,
 // pressed state and the mode flag can't drift apart.
 function exitPriceReorderMode() {
@@ -5488,7 +5502,7 @@ function hideAllScreens() {
   if (pfm) pfm.hidden = true;
   // The calendar and hours ⋯ menus, same reason — a dropdown left open would
   // reappear over whatever screen you came back to.
-  ['cal-more-dropdown', 'hours-more-dropdown',
+  ['cal-more-dropdown', 'calday-more-dropdown', 'hours-more-dropdown',
    'customers-more-dropdown', 'customer-more-dropdown',
    'orphan-more-dropdown'].forEach(id => {
     const d = document.getElementById(id);
@@ -6808,10 +6822,10 @@ function renderNotesList() {
   const orphanCard = `
     <article class="note-card orphan-nav-card" data-nav="orphans" style="opacity:${orphanCount > 0 ? '1' : '0.45'};">
       <div class="note-head">
-        <p class="note-title">Orphaned Notes</p>
+        <p class="note-title">Notes without a customer</p>
         <span class="note-date">${orphanCount}</span>
       </div>
-      <p class="note-preview">${orphanCount > 0 ? 'Tap to review notes with no customer' : 'No orphaned notes'}</p>
+      <p class="note-preview">${orphanCount > 0 ? 'Tap to review them' : 'None right now'}</p>
     </article>`;
   // Customers and Price Table sit side by side at the top of the home screen;
   // Calendar and Hours pair up on the row beneath. A lone card fills the row.
@@ -9692,6 +9706,8 @@ function applyRoleUI(role) {
     if (!on) clearCalSearch();
     const filterBtn = document.getElementById('cal-filter-btn');
     if (filterBtn) filterBtn.hidden = !on;
+    const dayFilterBtn = document.getElementById('calday-filter-btn');
+    if (dayFilterBtn) dayFilterBtn.hidden = !on;
     renderCalFilterBars();
   }
   // Layout button only for roles that see the home sections at all
@@ -12364,7 +12380,7 @@ function renderOrphanList() {
   const orphans = sortOrphans(Storage.listOrphanedNotes());
   updateOrphanSortButtons();
   if (orphans.length === 0) {
-    orphanList.innerHTML = '<p class="empty-state">No orphaned notes.</p>';
+    orphanList.innerHTML = '<p class="empty-state">No notes without a customer.</p>';
     if (orphanDeleteSelectedBtn) orphanDeleteSelectedBtn.disabled = true;
     return;
   }
@@ -12406,7 +12422,7 @@ function updateOrphanDeleteBtn() {
 function showOrphanNotes() {
   hideAllScreens();
   orphanView.classList.add('active');
-  renderCrumbs('crumbs-orphans', [{ label: 'Home', go: 'home' }, { label: 'Orphaned Notes' }]);
+  renderCrumbs('crumbs-orphans', [{ label: 'Home', go: 'home' }, { label: 'Notes without a customer' }]);
   restoreScroll('orphans');
   if (!handlingPopstate) history.pushState({ screen: 'orphans' }, '');
   renderOrphanList();
@@ -12568,8 +12584,8 @@ function tutorialSteps(part) {
       requires: () => Storage.listCustomers().length > 0,
       target: () => document.getElementById('customer-more-btn'),
       text: isAdminRole()
-        ? 'The ⋯ menu has See customer in calendar — the calendar showing only this customer’s jobs, until you tap the ✕ on its bar — and See hours, the Hours chart for just this customer from when their job started (or their first recorded hours) to today. Job started… sets that date. It also deletes a customer: they and all their notes go to Trash, in Settings, where you can put them back for 30 days.'
-        : 'The ⋯ menu has See customer in calendar — the calendar showing only this customer’s jobs, until you tap the ✕ on its bar — and See hours, the Hours chart for just this customer from their first recorded hours to today.',
+        ? 'The ⋯ menu has See customer in calendar — the calendar showing only this customer’s jobs, until you tap Turn filter off on its bar — and See hours, the Hours chart for just this customer from when their job started (or their first recorded hours) to today. Job started… sets that date. It also deletes a customer: they and all their notes go to Trash, in Settings, where you can put them back for 30 days.'
+        : 'The ⋯ menu has See customer in calendar — the calendar showing only this customer’s jobs, until you tap Turn filter off on its bar — and See hours, the Hours chart for just this customer from their first recorded hours to today.',
     },
     {
       // Hidden when the first note has no address, phone or email — and
@@ -12669,7 +12685,7 @@ function tutorialSteps(part) {
       screen: 'price',
       setup: () => { showPriceTable(); return true; },
       target: () => document.getElementById('price-fab'),
-      text: 'The + adds a supplier as a column, or a thing you buy as a row. Tap a name later to rename it.',
+      text: 'The + adds a vendor as a column, or a thing you buy as a row. Tap a name later to rename it.',
     },
     {
       screen: 'price',
@@ -12813,7 +12829,7 @@ function tutorialSteps(part) {
         screen: 'calendar',
         requires: () => isAdminRole() || isBookkeeperRole(),
         target: () => document.getElementById('cal-more-btn'),
-        text: 'Filter, in this ⋯ menu, shows just one employee’s or one customer’s jobs. A bar above the calendar says what you’re looking at, and the filter stays on until you tap the ✕ on that bar.',
+        text: 'Filter, in this ⋯ menu, shows just one employee’s or one customer’s jobs. A bar above the calendar says what you’re looking at, and the filter stays on until you tap Turn filter off on that bar.',
       },
       {
         screen: 'calendar-day',
@@ -12834,6 +12850,16 @@ function tutorialSteps(part) {
         setup: goDay,
         target: () => document.querySelector('#calendar-day-view .cal-day-cues .cal-cue-side'),
         text: 'Swipe sideways for the next or previous day. The cue on each side names the day you’re going to.',
+      },
+      {
+        screen: 'calendar-day',
+        group: 'caljobs',
+        requires: () => Storage.listJobs().length > 0,
+        setup: goDay,
+        target: () => document.getElementById('calday-more-btn'),
+        text: (isAdminRole() || isBookkeeperRole())
+          ? 'The day has its own ⋯ menu: Jump to today, and the same Filter as the month.'
+          : 'The day has its own ⋯ menu, with Jump to today.',
       },
       {
         screen: 'calendar-day',
@@ -13080,7 +13106,7 @@ function tutorialSteps(part) {
         'Appearance & editing: light or dark, 12- or 24-hour time, where the Back button sits, which way the calendar swipes, and two editing options. These are for this device only.'),
       step(row('backup-btn'),
         'Downloads everything — including jobs and hours — as one file you can keep. Worth doing before anything drastic. Photos and documents are NOT in it; those live on the device. Restore from backup adds back anything that has gone missing, and never changes or deletes what is already here.'),
-      step(row('trash-open-btn'),
+      step(() => document.getElementById('trash-open-btn'),
         'Deleting is not final. Notes and customers go here for 30 days and can be put back — including a customer with all their notes.'),
       step(row('import-csv-btn'),
         'Already have your customers in a spreadsheet? Paste the rows here and each one becomes a customer with their details as their first note.'),
@@ -13392,7 +13418,7 @@ async function showTutorialBubble(target, text, index, stepCount) {
   // solo run, which ends on its own part.
   if (tutorialNext) {
     const last = index === stepCount - 1;
-    tutorialNext.textContent = !last ? 'Got it \u2192'
+    tutorialNext.textContent = !last ? 'Next \u2192'
       : ((!tutorialSolo && tutorialHasNext(tutorialPart)) ? 'Next part \u2192' : 'Done \u2713');
     tutorialNext.disabled = false;
   }
