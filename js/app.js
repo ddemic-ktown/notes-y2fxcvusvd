@@ -20,6 +20,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 100, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.11.10-2103', 'Fix: the price table was blank after the last update'],
   ['v2026.11.10-2054', 'Tidy-up: consistent wording (vendor, Job note, Turn filter off, How long), day view gets a ⋯ menu, Text button on the job menu, price sort as three choices, A−/A+ zoom, Trash under Backup, one sign-in link button'],
   ['v2026.11.10-2040', 'Tour tidy-up: job menu, + button and files steps brought up to date, repeats removed, Install moved to the last part (Calendar, Jobs, Hours and Running your company each move up one)'],
   ['v2026.11.10-2025', 'Security: customer files accept only safe types (photos, video, audio, PDF, text, Office); anything else is refused, and only safe types open in a tab'],
@@ -4042,7 +4043,7 @@ function renderPriceTable() {
   // Hide the ⋯ button when every item inside it is hidden
   const moreWrap = priceMoreBtn ? priceMoreBtn.closest('.editor-more-wrap') : null;
   if (moreWrap) {
-    const anyVisible = [reorderBtn, importBtn, exportBtn, shareBtn, sortBtn, filterStart].some(b => b && !b.hidden);
+    const anyVisible = [reorderBtn, importBtn, exportBtn, shareBtn, filterStart, ...document.querySelectorAll('[data-price-sort]')].some(b => b && !b.hidden);
     moreWrap.style.display = anyVisible ? '' : 'none';
   }
 
