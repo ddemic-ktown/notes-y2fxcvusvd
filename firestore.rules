@@ -99,6 +99,14 @@ service cloud.firestore {
         return get(/databases/$(database)/documents/inviteLookup/$(request.auth.token.email.lower().replace('\\.', ',')));
       }
 
+      // An invite is SINGLE-USE, enforced here rather than trusted to the app
+      // (security review Nov 2026, item 4): the write that makes you a member
+      // must delete your inviteLookup row in the same batch. Before this a
+      // tampered client could keep its row and re-join after being removed.
+      function inviteUsedUp() {
+        return !existsAfter(/databases/$(database)/documents/inviteLookup/$(request.auth.token.email.lower().replace('\\.', ',')));
+      }
+
       // Org doc — still no self-signup: the ONLY way to create an org is to be
       // holding a founder invite. Members can read, admins can update.
       // (To open this up to anyone, change create to: if request.auth != null —
@@ -129,7 +137,8 @@ service cloud.firestore {
           request.auth.uid == memberId &&
           hasVerifiedEmail() &&
           inviteFor().data.get('orgId', '') == orgId &&
-          request.resource.data.role == inviteFor().data.get('role', '');
+          request.resource.data.role == inviteFor().data.get('role', '') &&
+          inviteUsedUp();
         // Founding a new company: the holder of a founder invite may make
         // themselves ADMIN of the org they are creating in the same batch.
         // Same two guards as the org doc above — the org must be the exact one
@@ -141,7 +150,8 @@ service cloud.firestore {
           inviteFor().data.get('kind', '') == 'newOrg' &&
           orgId == inviteFor().data.get('newOrgId', '') &&
           request.time.toMillis() < inviteFor().data.get('expiresAt', 0) &&
-          request.resource.data.role == 'admin';
+          request.resource.data.role == 'admin' &&
+          inviteUsedUp();
       }
 
       // Invites subcollection — admin only, except the invited user may
@@ -259,11 +269,15 @@ service cloud.firestore {
           request.resource.data.customerId == null &&
           request.resource.data.assignedTo is list &&
           request.auth.uid in request.resource.data.assignedTo;
-        // Employee can update notes assigned to them, but not change the assignment
+        // Employee can update notes assigned to them — but ONLY the text, its
+        // edited time and the trash flag (backing out of an empty new note
+        // trashes it). Customer, assignment, isDefault and everything else are
+        // locked (security review Nov 2026, item 6). If the app starts letting
+        // employees change another note field, add it to this list.
         allow update: if isEmployee() &&
           ('assignedTo' in resource.data) &&
           request.auth.uid in resource.data.assignedTo &&
-          request.resource.data.assignedTo == resource.data.assignedTo;
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['body', 'updated', 'deletedAt']);
         // Employees and customers can never delete
       }
     }

@@ -2350,7 +2350,16 @@ export const Storage = {
   },
 
   async removeMember(memberUid) {
+    const gone = _cache.members.find(m => m.uid === memberUid);
     await deleteDoc(doc(membersCol(), memberUid));
+    // Clear any invite still on file for their email (v2026.11.10-2012), or they
+    // could use it to walk back in. Not awaited and allowed to fail: with no
+    // row there the rules refuse the delete, which is the normal case.
+    if (gone && gone.email) {
+      const key = emailKeyOf(gone.email);
+      deleteDoc(doc(db, `inviteLookup/${key}`)).catch(() => {});
+      deleteDoc(doc(invitesCol(), key)).catch(() => {});
+    }
     // Un-share: strip their uid from all notes' assignedTo (edits the field only — nothing is deleted)
     this.unassignUidFromAllNotes(memberUid);
     // Best-effort: clear their user pointer if it points to this org.

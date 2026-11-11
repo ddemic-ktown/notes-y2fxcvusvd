@@ -20,6 +20,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 100, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.11.10-2012', 'Security: removing a member also clears any leftover invite for their email'],
   ['v2026.11.10-2008', 'Security: record ids are cleaned before they are written into the page, and the page now has a content security policy'],
   ['v2026.11.09-1731', 'Calendar moves its today circle to the new day after midnight or when the phone wakes, without leaving the screen'],
   ['v2026.11.09-1723', 'Job menu: bigger text, crew tags and the full note; new Call button (picks a number when the customer has several)'],
