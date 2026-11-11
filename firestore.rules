@@ -10,13 +10,24 @@ service cloud.firestore {
       allow read, write: if request.auth != null && request.auth.uid == userId;
     }
 
+    // An email only counts once the account has PROVED it owns the address
+    // (security review Nov 2026, item 2). Anyone can create a password account
+    // for any email through the public API without verifying it; matching
+    // invites — or the founder — on the bare email let such an account take an
+    // invite meant for someone else. Google sign-in and the emailed link are
+    // always verified, so real users are unaffected.
+    function hasVerifiedEmail() {
+      return request.auth != null && request.auth.token.email != null &&
+        request.auth.token.email_verified == true;
+    }
+
     // THE FOUNDER — the one account allowed to hand someone a whole new company
     // (a `newOrg` invite, see below). Deliberately a hardcoded email rather than
     // a role: an admin is admin OF AN ORG, and a new company's owner is an admin
     // too, so keying this on a role would let every company you start spawn
     // further companies without limit. Change this string to move the power.
     function isFounder() {
-      return request.auth != null && request.auth.token.email != null &&
+      return request.auth != null && hasVerifiedEmail() &&
         request.auth.token.email.lower() == 'davor.demic@gmail.com';
     }
 
@@ -43,7 +54,7 @@ service cloud.firestore {
           get(/databases/$(database)/documents/orgs/$(orgId)/members/$(request.auth.uid)).data.role == 'admin';
       }
       function isOwnEmailKey() {
-        return request.auth != null && request.auth.token.email != null &&
+        return request.auth != null && hasVerifiedEmail() &&
           emailKey == request.auth.token.email.lower().replace('\\.', ',');
       }
       function isNewOrgRow(data) { return data.get('kind', '') == 'newOrg'; }
@@ -98,7 +109,7 @@ service cloud.firestore {
       // was consumed; without the time check a forgotten invite stays a live key
       // to a new company forever. Both defaults ('' and 0) fail closed.
       allow create: if request.auth != null &&
-        request.auth.token.email != null &&
+        hasVerifiedEmail() &&
         inviteFor().data.get('kind', '') == 'newOrg' &&
         orgId == inviteFor().data.get('newOrgId', '') &&
         request.time.toMillis() < inviteFor().data.get('expiresAt', 0) &&
@@ -116,7 +127,7 @@ service cloud.firestore {
         // for this org, and ONLY with the role the admin chose in that invite.
         allow create: if request.auth != null &&
           request.auth.uid == memberId &&
-          request.auth.token.email != null &&
+          hasVerifiedEmail() &&
           inviteFor().data.get('orgId', '') == orgId &&
           request.resource.data.role == inviteFor().data.get('role', '');
         // Founding a new company: the holder of a founder invite may make
@@ -126,7 +137,7 @@ service cloud.firestore {
         // buys exactly one org, once, within its window.
         allow create: if request.auth != null &&
           request.auth.uid == memberId &&
-          request.auth.token.email != null &&
+          hasVerifiedEmail() &&
           inviteFor().data.get('kind', '') == 'newOrg' &&
           orgId == inviteFor().data.get('newOrgId', '') &&
           request.time.toMillis() < inviteFor().data.get('expiresAt', 0) &&
@@ -139,7 +150,7 @@ service cloud.firestore {
       match /invites/{inviteId} {
         allow read, create, update: if isAdmin();
         allow delete: if isAdmin() ||
-          (request.auth != null && request.auth.token.email != null &&
+          (request.auth != null && hasVerifiedEmail() &&
            inviteId == request.auth.token.email.lower().replace('\\.', ','));
       }
 
