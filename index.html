@@ -282,8 +282,8 @@
             <button id="cal-filter-btn" class="editor-more-item" type="button">Filter…</button>
             <!-- Hours feature on + admin/bookkeeper only; set as the menu opens. (v2026.10.01-2308) -->
             <button id="cal-hours-btn" class="editor-more-item" type="button" hidden>Hours</button>
-            <button class="editor-more-item" type="button" data-tutorial-part="6" data-tutorial-skip-home data-tutorial-solo>How the calendar works</button>
-            <button class="editor-more-item" type="button" data-tutorial-part="7" data-tutorial-skip-home data-tutorial-solo>How jobs work</button>
+            <button class="editor-more-item" type="button" data-tutorial-part="5" data-tutorial-skip-home data-tutorial-solo>How the calendar works</button>
+            <button class="editor-more-item" type="button" data-tutorial-part="6" data-tutorial-skip-home data-tutorial-solo>How jobs work</button>
           </div>
         </div>
       </div>
@@ -644,7 +644,7 @@
         <div class="editor-more-wrap">
           <button id="hours-more-btn" class="icon-btn date-btn editor-more-btn" type="button" aria-label="More hours options">⋯</button>
           <div id="hours-more-dropdown" class="editor-more-dropdown" hidden>
-            <button class="editor-more-item" type="button" id="editor-help-hours" data-tutorial-part="8" data-tutorial-skip-home data-tutorial-solo>How the hours chart works</button>
+            <button class="editor-more-item" type="button" id="editor-help-hours" data-tutorial-part="7" data-tutorial-skip-home data-tutorial-solo>How the hours chart works</button>
           </div>
         </div>
       </div>
@@ -926,16 +926,13 @@
           <button id="tutorial-btn-2" class="secondary" data-tutorial-part="2">Tutorial 2 — Home screen &amp; search</button>
           <button id="tutorial-btn-3" class="secondary" data-tutorial-part="3">Tutorial 3 — Editor &amp; extras</button>
           <button id="tutorial-btn-4" class="secondary" data-tutorial-part="4">Tutorial 4 — Price table</button>
-          <button id="tutorial-btn-5" class="secondary" data-tutorial-part="5">Tutorial 5 — Install on your phone</button>
-          <!-- 6 and 7 are OUTSIDE the 1→5 chain: they cover one screen each and
-               aren't daily-use for every role, so they always end on their own
-               part rather than rolling into the next. -->
-          <!-- 6 has NO: it rolls into 7, because a job is
-               what you opened the calendar to make. 7–9 end on themselves. -->
-          <button id="tutorial-btn-6" class="secondary" data-role-cal data-tutorial-part="6">Tutorial 6 — Calendar</button>
-          <button id="tutorial-btn-7" class="secondary" data-role-cal data-tutorial-part="7">Tutorial 7 — Jobs</button>
-          <button id="tutorial-btn-8" class="secondary" data-role-iif data-tutorial-part="8">Tutorial 8 — Hours</button>
-          <button id="tutorial-btn-9" class="secondary" data-staff-only data-tutorial-part="9">Tutorial 9 — Running your company</button>
+          <!-- Renumbered v2026.11.10-2040: Install is LAST (9). These numbers must match
+               tutorialSteps() / tutorialPartApplies() in app.js. -->
+          <button id="tutorial-btn-5" class="secondary" data-role-cal data-tutorial-part="5">Tutorial 5 — Calendar</button>
+          <button id="tutorial-btn-6" class="secondary" data-role-cal data-tutorial-part="6">Tutorial 6 — Jobs</button>
+          <button id="tutorial-btn-7" class="secondary" data-role-iif data-tutorial-part="7">Tutorial 7 — Hours</button>
+          <button id="tutorial-btn-8" class="secondary" data-staff-only data-tutorial-part="8">Tutorial 8 — Running your company</button>
+          <button id="tutorial-btn-9" class="secondary" data-tutorial-part="9">Tutorial 9 — Install on your phone</button>
         </div>
       </div>
 

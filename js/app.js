@@ -20,6 +20,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 100, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.11.10-2040', 'Tour tidy-up: job menu, + button and files steps brought up to date, repeats removed, Install moved to the last part (Calendar, Jobs, Hours and Running your company each move up one)'],
   ['v2026.11.10-2025', 'Security: customer files accept only safe types (photos, video, audio, PDF, text, Office); anything else is refused, and only safe types open in a tab'],
   ['v2026.11.10-2015', 'Security: new passwords need 10 characters, price CSV exports are safe to open in Excel, clearer message when an email is already invited elsewhere'],
   ['v2026.11.10-2012', 'Security: removing a member also clears any leftover invite for their email'],
@@ -716,9 +717,8 @@ function applyFeatureVisibility() {
   // Employees and customer accounts are NOT part of either — the calendar
   // schedules against that list, so it has to survive.
   const hoursOn = isFeatureOn('hours');
-  // tutorial-btn-8 is the HOURS tour — it was btn-7 until the tutorial parts
-  // were renumbered in v2026.09.18-2129 and 7 became Jobs.
-  ['hours-export-block', 'qb-items-block', 'tutorial-btn-8', 'editor-help-hours']
+  // tutorial-btn-7 is the HOURS tour (renumbered again v2026.11.10-2040: Install went last).
+  ['hours-export-block', 'qb-items-block', 'tutorial-btn-7', 'editor-help-hours']
     .forEach(id => { const el = document.getElementById(id); if (el) el.hidden = !hoursOn; });
   // QuickBooks export is its own section since v2026.10.03-2129 — nothing left in it
   // without Hours, so it goes as a whole. (Crew and customer accounts live
@@ -728,8 +728,8 @@ function applyFeatureVisibility() {
   // Screen switches (v2026.10.02-1840)
   const show = (id, on) => { const el = document.getElementById(id); if (el) el.hidden = !on; };
   show('tutorial-btn-4', isFeatureOn('price'));
+  show('tutorial-btn-5', isFeatureOn('calendar'));
   show('tutorial-btn-6', isFeatureOn('calendar'));
-  show('tutorial-btn-7', isFeatureOn('calendar'));
   show('customer-cal-btn', isFeatureOn('calendar'));
   show('customer-hours-btn', isFeatureOn('hours'));
 }
@@ -12481,9 +12481,12 @@ const TUTORIAL_PARTS = 9;
 function tutorialPartApplies(part) {
   const role = Storage.getRole();
   if (part === 4) return Storage.canViewPriceTable();
-  if (part === 6 || part === 7) return role !== 'customer';
-  if (part === 8) return isAdminRole() || isBookkeeperRole();
-  if (part === 9) return isAdminRole();
+  // RENUMBERED v2026.11.10-2040: Install moved from 5 to 9 (last); Calendar, Jobs, Hours
+  // and Running your company each moved up one. 5 Calendar, 6 Jobs, 7 Hours,
+  // 8 admin, 9 Install. The buttons in index.html carry the same numbers.
+  if (part === 5 || part === 6) return role !== 'customer';
+  if (part === 7) return isAdminRole() || isBookkeeperRole();
+  if (part === 8) return isAdminRole();
   return true;
 }
 // The next/previous part this person can actually use, or null at the ends.
@@ -12577,6 +12580,22 @@ function tutorialSteps(part) {
       target: () => document.getElementById('customer-contact-strip'),
       text: 'An address, phone number or email in the customer’s first note becomes a button here: 📍 Navigate opens your maps app with directions, and 📞 Call, 💬 Text and ✉️ Email do what they say.',
     },
+    {
+      // Moved here from the editor part (v2026.11.10-2040): it is on this screen.
+      screen: 'customer-notes',
+      group: 'customer',
+      requires: () => Storage.listCustomers().length > 0,
+      // Only navigates when arriving from elsewhere (Back out of the next part).
+      setup: () => {
+        if (customerNotesView.classList.contains('active')) return true;
+        const customers = Storage.listCustomers();
+        if (!customers.length) return false;
+        showCustomerNotes(customers[0].id);
+        return true;
+      },
+      target: () => document.getElementById('customer-files-section'),
+      text: 'Photos and documents for this customer — photos, videos, PDFs, text and Office files; other file types are refused. They stay on this device only — not synced or backed up.',
+    },
   ];
 
   if (part === 2) {
@@ -12591,7 +12610,10 @@ function tutorialSteps(part) {
         {
           screen: 'home',
           target: () => document.getElementById('fab'),
-          text: 'Tap + to start something new — a general note, a customer, or a job on the calendar.',
+          // Only admins get the menu; for anyone else + goes straight to a note.
+          text: isAdminRole()
+            ? 'Tap + to start something new — a general note, a customer, or a job on the calendar.'
+            : 'Tap + to start a new general note.',
         },
       ],
       aggregator: [
@@ -12624,12 +12646,9 @@ function tutorialSteps(part) {
     ordered.push({
       screen: 'home',
       target: () => document.getElementById('home-more-btn'),
-      text: 'The ⋯ menu has Refresh — it fetches the latest from the server and picks up an app update if there is one — and Layout, below.',
-    });
-    ordered.push({
-      screen: 'home',
-      target: () => document.querySelector('#notes-list .section-ctrls'),
-      text: 'Tap ⋯ › Layout at the top to show these controls (Done puts them away): − and + change how many items a section shows, ↑ and ↓ reorder the sections.',
+      // Layout is explained HERE (v2026.11.10-2040): its controls are hidden until Layout is
+      // on, so a step pointing at them was always skipped.
+      text: 'The ⋯ menu has Refresh — it fetches the latest from the server and picks up an app update if there is one — and Layout, which puts controls on each section: − and + change how many items it shows, ↑ and ↓ reorder the sections. Done puts them away.',
     });
     ordered.push({
       screen: 'home',
@@ -12662,15 +12681,7 @@ function tutorialSteps(part) {
       },
       setup: () => { showPriceTable(); return true; },
       target: () => document.querySelector('#price-table .price-cell'),
-      text: 'Tap any cell to record a price: the amount, the date you got it, and whether it’s in stock. Each tap ADDS a price for today, starting from the last one, which is shown above the boxes. To fix a wrong entry, press and hold the cell and delete it from the history. Leaving the price empty is fine — a date and “not available” on its own records that you asked and they had none. Each cell keeps every price you’ve entered.',
-    },
-    {
-      screen: 'price',
-      group: 'pricecells',
-      requires: () => Storage.listPriceItems().length > 0 && Storage.getPriceConfig().vendors.length > 0,
-      setup: () => { showPriceTable(); return true; },
-      target: () => document.getElementById('price-more-btn'),
-      text: 'The dot shows availability: green now, amber 2–3 days, grey longer, red not available. A red dot with a dash means they had none and quoted no price. A ✓ marks the lowest price you can get today. “What the colours mean” in this menu says the same thing whenever you need it.',
+      text: 'Tap any cell to record a price: the amount, the date you got it, and whether it’s in stock. Each tap ADDS a price for today, starting from the last one, which is shown above the boxes. Press and hold a cell to see every price you’ve recorded for it, with dates — and to delete a wrong one. Leaving the price empty is fine — a date and “not available” on its own records that you asked and they had none. Each cell keeps every price you’ve entered.',
     },
     {
       screen: 'price',
@@ -12678,27 +12689,33 @@ function tutorialSteps(part) {
       requires: () => Storage.listPriceItems().length > 0 && Storage.getPriceConfig().vendors.length > 0,
       setup: () => { showPriceTable(); return true; },
       target: () => document.querySelector('#price-table .price-cell'),
-      text: 'Press and hold a cell to see every price you’ve recorded for it, with dates — handy when a supplier says the price “hasn’t changed”.',
+      text: 'The dot shows availability: green now, amber 2–3 days, grey longer, red not available. A red dot with a dash means they had none and quoted no price. A ✓ marks the lowest price you can get today. “What the colours mean” in the ⋯ menu says the same thing whenever you need it.',
     },
     {
       screen: 'price',
       setup: () => { showPriceTable(); return true; },
       target: () => document.getElementById('price-more-btn'),
-      text: 'The ⋯ menu holds the rest: sort A–Z or by most recently priced, Layout to reorder rows and columns (tick several to move them to the top together), Filter, export to a spreadsheet (latest prices, or the full price history), import prices from a file or a pasted table (repeats are skipped), Share / unshare to let an employee see it (the number is how many can), and (admins) reset it to start over.',
-    },
-    {
-      screen: 'price',
-      target: () => document.getElementById('price-more-btn'),
-      text: 'Filter is for when the table has grown past what you need today. Tick the rows and columns you want, press Apply filter, and only those stay — on this device, until you press Turn filter off. Your prices are untouched either way.',
+      text: 'The ⋯ menu holds the rest: sort A–Z or by most recently priced, Layout to reorder rows and columns (tick several to move them to the top together), Filter to show only the rows and columns you tick — on this device, until you turn it off — export to a spreadsheet (latest prices, or the full price history), import prices from a file or a pasted table (repeats are skipped), Share / unshare to let an employee see it (the number is how many can), and (admins) reset it to start over.',
     },
   ];
 
-  if (part === 5) {
+  if (part === 9) {
     const iOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
     const android = /android/i.test(navigator.userAgent);
     // Was '.home-header-top h1' — that title went in the v2026.10.02-2217 header
     // rework, which left every part-5 bubble with nothing to point at.
     const homeTarget = () => document.getElementById('home-nav');
+    // The very last bubble of the whole tour (v2026.11.10-2040) — it used to close part 3,
+    // from when the tour had three parts.
+    const replayStep = {
+      screen: 'settings',
+      setup: () => { if (!settingsView.classList.contains('active')) showSettings(); return true; },
+      target: () => {
+        const el = document.getElementById('tutorial-btn-1');
+        return el ? el.closest('.setting-row') : null;
+      },
+      text: 'That’s the tour. Replay any part of it from here any time.',
+    };
     if (isStandaloneApp) return [
       {
         screen: 'home',
@@ -12706,6 +12723,7 @@ function tutorialSteps(part) {
         target: homeTarget,
         text: 'You’re already running JobPilot as an installed app — that’s why there’s no browser bar. Nothing to do here.',
       },
+      replayStep,
     ];
     const installText = iOS
       ? 'Install JobPilot on your iPhone: tap the Share button in Safari’s toolbar (the square with an arrow), scroll to “Add to Home Screen”, then tap Add.'
@@ -12724,12 +12742,12 @@ function tutorialSteps(part) {
         target: homeTarget,
         text: 'Once installed it opens full screen from your home screen, works with no signal, and keeps you signed in — the same notes, just quicker to reach.',
       },
+      replayStep,
     ];
   }
 
-  // part 6 — the calendar. OUTSIDE the 1→5 chain: one screen, and not daily
-  // reading for every role. Reached from the calendar's own ⋯ menu or Settings.
-  if (part === 6) {
+  // part 5 — the calendar. Reached from the calendar's own ⋯ menu or Settings.
+  if (part === 5) {
     const canEditJobs = () => Storage.getRole() === 'admin';
     const aDayWithJobs = () => {
       const jobs = Storage.listJobs();
@@ -12807,7 +12825,7 @@ function tutorialSteps(part) {
         },
         setup: goDay,
         target: () => document.querySelector('#calendar-day-view .cal-block'),
-        text: 'Tap a day to open it as a timeline. Each job sits at its start time and is as tall as it is long, so a clash is something you can see rather than work out.',
+        text: 'This is one day as a timeline — tap any day in the month to open it. Each job sits at its start time and is as tall as it is long, so a clash is something you can see rather than work out.',
       },
       {
         screen: 'calendar-day',
@@ -12823,7 +12841,7 @@ function tutorialSteps(part) {
         requires: () => Storage.listJobs().length > 0 && canEditJobs(),
         setup: goDay,
         target: () => document.querySelector('#calendar-day-view .cal-block'),
-        text: 'Press and hold a job to pick it up and drag it to a new time; drag the corner to change how long it runs. Both snap to quarter hours. A quick tap opens the job menu, with Edit job, Duplicate to next day and Delete job.',
+        text: 'Press and hold a job to pick it up and drag it to a new time; drag the corner to change how long it runs. Both snap to quarter hours.',
       },
       {
         screen: 'calendar-day',
@@ -12831,18 +12849,23 @@ function tutorialSteps(part) {
         requires: () => Storage.listJobs().length > 0,
         setup: goDay,
         target: () => document.querySelector('#calendar-day-view .cal-block'),
-        text: 'Tap a job for its menu: add it to your own phone or Google calendar, get directions to the address, and — for admins — edit it.',
+        // One step for the job menu (v2026.11.10-2040); the wording follows the role.
+        text: (isCustomerRole()
+            ? 'Tap a job for its menu. The top shows the job and who is coming.'
+            : 'Tap a job for its menu. The top shows the job, who is on it and its full note.')
+          + ' Below that: add it to your own calendar, get directions to the address, and call the customer.'
+          + (canEditJobs() ? ' As an admin you also get Edit job, Duplicate to next day and Delete job.' : ''),
       },
     ];
   }
 
-  // part 7 — JOBS. Split out of part 6 (v2026.09.18-2129): the calendar is
+  // part 6 — JOBS. Split out of the calendar part (v2026.09.18-2129): the calendar is
   // where you look, a job is what you make, and one part covering both ran to
-  // fifteen bubbles. Part 6 rolls straight into this one (TUTORIAL_NEXT),
+  // fifteen bubbles. The calendar part rolls straight into this one,
   // because a job is the thing you opened the calendar to create.
-  if (part === 7) {
+  if (part === 6) {
     const canEditJobs = () => Storage.getRole() === 'admin';
-    // Same guard as part 6's: showCalendar pushes history, so only navigate
+    // Same guard as the calendar part's: showCalendar pushes history, so only navigate
     // when we are not already on the month view.
     const goMonth = () => {
       if (!calendarView.classList.contains('active')) showCalendar();
@@ -12854,21 +12877,24 @@ function tutorialSteps(part) {
         // sees this part sees the trail, so the route survives the + step
         // being skipped for a non-admin.
         screen: 'calendar',
-        setup: goMonth,
+        // Only when this part is where you came in (v2026.11.10-2040) — straight after the
+        // calendar part it just repeats that part's opening.
+        setup: () => (tutorialStartPart === 6 ? goMonth() : false),
         target: () => document.querySelector('#calendar-view .screen-nav [data-nav="calendar"]'),
         text: 'You’re on the Calendar. To get here yourself, tap Calendar on the Home screen.',
       },
       {
         screen: 'calendar',
         requires: canEditJobs,
-        setup: goMonth,
+        // Back out of the job-editor steps must not leave it open over the +.
+        setup: () => { if (jobModal && !jobModal.hidden) jobModal.hidden = true; return goMonth(); },
         target: () => document.getElementById('cal-fab'),
         text: 'Add a job with +. Only the date is required — customer, address, times and who’s going can all come later. Tapping an empty day starts one on that day.',
       },
       {
         // THE STEP THIS TOUR WAS MISSING. The Hours chart is built entirely
         // from these numbers, and until v2026.08.19-0033 the only mention of
-        // them was part 8's fallback — the step that DISAPPEARS as soon as you
+        // them was the hours part's fallback — the step that DISAPPEARS as soon as you
         // have jobs, so anyone with a calendar never saw it.
         screen: 'calendar',
         group: 'jobhours',
@@ -12911,7 +12937,7 @@ function tutorialSteps(part) {
         group: 'jobhours',
         requires: () => canEditJobs() && Storage.listJobs().length > 0,
         target: () => document.getElementById('job-customer-chosen'),
-        text: 'Once picked, the customer shows as a chip — tap its ✕ to choose someone else. Close it without saving and a bubble lets you tap straight back in with your edits intact; Delete job works the same way, with a tap to undo.',
+        text: 'Once picked, the customer shows as a chip — tap its ✕ to choose someone else.',
       },
       {
         screen: 'calendar',
@@ -12921,18 +12947,18 @@ function tutorialSteps(part) {
         text: 'Duplicate to next day copies everything on screen onto tomorrow. Nothing is written until you Save, so you can change the date or the crew first — handy for a job that runs several days.',
       },
       {
-        screen: 'settings',
-        requires: () => Storage.getRole() === 'admin',
-        setup: () => { showSettings(); return true; },
-        target: () => document.getElementById('employee-list'),
-        text: 'Names you schedule come from this list. Link a name to someone’s account and they can open JobPilot and see their own jobs — leave it unlinked for a subcontractor who doesn’t use the app.',
+        screen: 'calendar',
+        group: 'jobhours',
+        requires: () => canEditJobs() && Storage.listJobs().length > 0,
+        target: () => document.getElementById('job-delete'),
+        text: 'Delete job removes it at once and shows a bubble — tap that to undo. Closing the editor without saving works the same way: a bubble lets you tap straight back in with your edits intact.',
       },
     ];
   }
 
-  // part 8 — the hours chart. Outside the chain, and admin/bookkeeper only in
+  // part 7 — the hours chart. Admin/bookkeeper only in
   // practice: the home card and Settings entry are already gated.
-  if (part === 8) {
+  if (part === 7) {
     // Since v2026.08.18-2325 the chart reads CALENDAR JOBS, so the thing that
     // has to exist is a job in the range, not a note.
     const hasJobs = () => Storage.listJobs().length > 0;
@@ -12959,7 +12985,7 @@ function tutorialSteps(part) {
         screen: 'settings',
         setup: () => { if (!settingsView.classList.contains('active')) showSettings(); return true; },
         target: () => document.getElementById('iif-btn'),
-        text: 'Hours is in Settings, under QuickBooks export, and in the calendar’s ⋯ menu. Long-press anyone’s hours, here or in the job editor, to see every value entered, when and by whom. It collects what everyone actually worked — the hours you enter on each calendar job — so you can check it and send it to QuickBooks.',
+        text: 'Hours collects what everyone actually worked — the hours you enter on each calendar job — so you can check it and send it to QuickBooks. It is here in Settings, under QuickBooks export, and in the calendar’s ⋯ menu. Long-press anyone’s hours, there or in the job editor, to see every value entered, when and by whom.',
       },
       {
         screen: 'hours',
@@ -13005,7 +13031,7 @@ function tutorialSteps(part) {
     ];
   }
 
-  // part 9 — administration. Solo, admin-only, and entirely on the Settings
+  // part 8 — administration. Admin-only, and entirely on the Settings
   // screen. This was the whole missing category: the tour covered notes,
   // customers, prices, the calendar and hours, and said nothing about users,
   // roles, invites, trash, backup or sample data — which are most of what a new
@@ -13016,7 +13042,7 @@ function tutorialSteps(part) {
   // (the new-company block only exists for the founder). Letting that do the
   // work keeps the conditions in ONE place rather than duplicating each row's
   // visibility rule as a predicate that could drift out of step with it.
-  if (part === 9) {
+  if (part === 8) {
     // showSettings pushes history, so only call it when we aren't there —
     // otherwise the back button is buried under one entry per bubble.
     const goSettings = () => {
@@ -13035,7 +13061,7 @@ function tutorialSteps(part) {
       step(() => document.getElementById('org-name-input'),
         'Your company name, shown at the top of this Signed in as section. Change it whenever you like.'),
       step(() => document.getElementById('employee-list'),
-        'Your crew. Apprentice or journeyman is not just a label — it picks which QuickBooks item their hours are billed against, so getting it wrong makes the import land in the wrong place. Anyone on payroll needs their QuickBooks payroll item typed in exactly, or QuickBooks rejects their hours — and an overtime item if they get it: hours past 8 in a day go there. Rename fixes a spelling everywhere at once, including on jobs from last year.'),
+        'Your crew — the names you schedule on jobs. Link a name to someone’s account and they can open JobPilot and see their own jobs; leave it unlinked for a subcontractor who doesn’t use the app. Apprentice or journeyman is not just a label — it picks which QuickBooks item their hours are billed against, so getting it wrong makes the import land in the wrong place. Anyone on payroll needs their QuickBooks payroll item typed in exactly, or QuickBooks rejects their hours — and an overtime item if they get it: hours past 8 in a day go there. Rename fixes a spelling everywhere at once, including on jobs from last year.'),
       step(() => document.getElementById('members-list'),
         'Everyone with access to this company, and what each can do. Admin does everything. Bookkeeper sees everything but changes nothing. Employee sees only the notes and jobs given to them. Customer sees only their own. You can change your own role too, as long as somebody else is an admin — the last admin is locked so the company can never be left without one.'),
       step(() => document.getElementById('invites-list'),
@@ -13045,9 +13071,9 @@ function tutorialSteps(part) {
       step(() => document.getElementById('customer-link-list'),
         'Link a customer to an app account and they can sign in to see the jobs you have booked for them — the date, the time, the address and who is coming. Tick Can see hours to also show them their hours — billable and no-charge time, marked as such, but never crew notes — and set Job started so those hours count from the start of their job.'),
       step(() => document.getElementById('qb-export-row'),
-        'QuickBooks export: the Service item each classification bills against — typed exactly as it is in QuickBooks, or the import fails — and the Hours button, which opens the chart you check and send to QuickBooks as an .iif file.'),
+        'QuickBooks export: the Service item each classification bills against — typed exactly as it is in QuickBooks, or the import fails. The Hours button opens the hours chart.'),
       step(row('keyword-input'),
-        'Note keywords. Start a paragraph in any note with one — todo, materials — and the home screen gathers it with every other paragraph like it, from every note. Add your own here.'),
+        'Note keywords — the words the Home screen gathers paragraphs under. Add your own here.'),
       step(() => document.getElementById('feature-toggle-list'),
         'Switch off what you do not use and it disappears from the app — nothing is deleted, and turning it back on puts everything where it was. This is your account only; it follows you to your other devices and changes nothing for anyone else. If part of the app has vanished, look here first.'),
       step(() => { const el = document.getElementById('theme-cycle-btn'); return el ? el.closest('.setting-row') : null; },
@@ -13123,19 +13149,6 @@ function tutorialSteps(part) {
       text: 'Find text in this note. Arrows appear when there’s more than one match.',
     },
     {
-      screen: 'customer-notes',
-      group: 'customer',
-      requires: () => Storage.listCustomers().length > 0,
-      setup: () => {
-        const customers = Storage.listCustomers();
-        if (!customers.length) return false;
-        showCustomerNotes(customers[0].id);
-        return true;
-      },
-      target: () => document.getElementById('customer-files-section'),
-      text: 'Photos and documents for this customer. They stay on this device only — not synced or backed up.',
-    },
-    {
       screen: 'settings',
       setup: () => { showSettings(); return true; },
       target: () => {
@@ -13143,15 +13156,6 @@ function tutorialSteps(part) {
         return el ? el.closest('.setting-row') : null;
       },
       text: 'Optional: checked-off items sink to the bottom of their paragraph.',
-    },
-    {
-      screen: 'settings',
-      setup: () => { showSettings(); return true; },
-      target: () => {
-        const el = document.getElementById('tutorial-btn-1');
-        return el ? el.closest('.setting-row') : null;
-      },
-      text: 'Replay any part of this tour any time.',
     },
   ];
 }
@@ -13326,6 +13330,10 @@ async function runTutorialStep(index) {
     showTutorialBubble(fbTarget, step.fallback.text, index, steps.length);
     return;
   }
+
+  // A lone step (no group) whose condition fails is simply skipped (v2026.11.10-2040) —
+  // before this an ungrouped `requires` was never looked at.
+  if (!step.group && step.requires && !step.requires()) { tutorialSkipStep(index); return; }
 
   // Navigate if needed. Awaited, so a setup may wait for an async render
   // (the hours grid parses before it draws) — a plain setup returning false
