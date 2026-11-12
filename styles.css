@@ -680,15 +680,6 @@ select.iif-date-input { appearance: none; -webkit-appearance: none; padding-righ
 .cal-job-line { flex-wrap: nowrap; }
 .cal-job-line .cal-job-who { flex: 1; min-width: 0; }
 
-.cal-grid-week .cal-cells { grid-auto-rows: minmax(0, 1fr); }
-.cal-grid-week .cal-cell { padding: 5px 6px; gap: 3px; overflow-y: auto; }
-.cal-grid-week .cal-daynum { font-size: 13px; }
-.cal-grid-week .cal-chip { font-size: 10px; padding: 1px 6px; }
-.cal-grid-week .cal-job-who { font-size: 11px; white-space: normal; }
-/* WEEK TIMELINE (v2026.09.30-2312) — an hour gutter plus seven day columns. Cell padding
-   (5px) + border (1px) is mirrored by the gutter's 6px so the tracks line up.
-   Today is marked with an inset ring rather than a 2px border for the same
-   reason: a thicker border would push its track 1px out of line. */
 /* Continuous scroll of months (v2026.10.28-2305). The months scroll in .cal-scroll; each
    month's own cells don't. The month at the top is outlined. */
 .cal-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior-y: contain; position: relative; padding: 2px; }
@@ -701,38 +692,6 @@ select.iif-date-input { appearance: none; -webkit-appearance: none; padding-righ
    about 30% of the screen — past that it scrolls inside its own box. */
 .cal-scroll .cal-cell { max-height: calc(var(--app-vh, 100vh) * 0.3); overflow-y: auto; }
 .cal-cell.cal-blank { background: transparent; border-color: transparent; cursor: default; }
-.cal-grid-wktl .cal-headrow, .cal-grid-wktl .cal-cells { grid-template-columns: 34px repeat(7, minmax(0, 1fr)); gap: 1px; }
-.cal-grid-wktl .cal-cells { overflow: hidden; }
-/* Tighter than the month cells (v2026.09.30-2326): 3px top/bottom, 1px sides. The gutter's
-   4px top/bottom padding mirrors 3px + the 1px border. */
-.cal-grid-wktl .cal-cell.cal-wk-col { overflow: hidden; gap: 3px; padding: 3px 1px; border-radius: 4px; }
-.cal-grid-wktl .cal-cell.cal-today { border-width: 1px; box-shadow: inset 0 0 0 1px var(--accent); }
-.cal-wk-col .cal-daynum { padding-left: 3px; }
-.cal-wk-gutter { display: flex; flex-direction: column; gap: 3px; padding: 4px 0; min-width: 0; }
-.cal-wk-top { flex-shrink: 0; overflow: hidden; display: flex; flex-direction: column; gap: 2px; }
-.cal-wk-track { position: relative; flex: 1; min-height: 0; }
-.cal-wk-line { position: absolute; left: 0; right: 0; border-top: 1px dashed var(--line); }
-.cal-wk-hour {
-  position: absolute; right: 3px; transform: translateY(-50%);
-  font-size: 9px; color: var(--ink-soft); white-space: nowrap;
-}
-.cal-wk-job {
-  position: absolute; box-sizing: border-box; overflow: hidden;
-  display: flex; flex-direction: column; gap: 1px;
-  padding: 1px 3px; font-size: 10px; line-height: 1.2;
-  background: var(--surface); border: 1px solid var(--job-ok); border-left-width: 3px; border-radius: 4px;
-}
-.cal-wk-job.cal-nowork { border-color: var(--job-off); }
-.cal-wk-who {
-  font-weight: 600; color: var(--ink); overflow-wrap: anywhere;
-  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; line-clamp: 3; overflow: hidden;
-}
-.cal-wk-chips { display: flex; flex-wrap: wrap; gap: 1px; }
-.cal-wk-untimed {
-  height: 16px; line-height: 14px; font-size: 10px; padding: 0 3px;
-  border: 1px dashed var(--line); border-radius: 4px;
-  overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
-}
 .cal-job-who { font-size: 10px; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Desktop grid: one entry per job, customer on its own line with the crew
    underneath. `column` is the whole difference from the phone's single row —
@@ -1737,7 +1696,6 @@ body.dark-mode input[type="date"], body.dark-mode input[type="time"] { color-sch
   background: #2563eb; color: #fff; border-radius: 4px;
   font-size: 10px; font-weight: 600; line-height: 16px; padding: 0 4px; white-space: nowrap;
 }
-.cal-now-label-wk { left: 0; font-size: 9px; line-height: 14px; top: -8px; padding: 0 3px; }
 .customers-header { flex-direction: column; align-items: stretch; gap: 4px; }
 .customers-header-top { display: flex; align-items: center; gap: 8px; }
 .customers-header-bottom { display: flex; align-items: center; gap: 8px; }

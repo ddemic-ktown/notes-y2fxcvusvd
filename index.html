@@ -279,7 +279,8 @@
             <!-- Admin/bookkeeper only, same as search. (v2026.09.30-2042) -->
             <!-- Moved here from the top line (v2026.10.02-2126). Same ids, same wiring. -->
             <button id="cal-today" class="editor-more-item" type="button">Jump to today</button>
-            <button id="cal-mode" class="editor-more-item" type="button">Week view</button>
+            <!-- Replaced Week view (v2026.11.11-1914). Label set by applyCalSwipeButton. -->
+            <button id="cal-scroll-btn" class="editor-more-item" type="button">Scroll view</button>
             <button id="cal-filter-btn" class="editor-more-item" type="button">Filter…</button>
             <!-- Hours feature on + admin/bookkeeper only; set as the menu opens. (v2026.10.01-2308) -->
             <button id="cal-hours-btn" class="editor-more-item" type="button" hidden>Hours</button>
@@ -897,7 +898,7 @@
         <div class="setting-btn-row">
           <button id="cal-swipe-cycle-btn" class="theme-btn secondary cycle-btn">Sideways</button>
         </div>
-        <p class="setting-check-hint">How you change month or week: swipe sideways, swipe up and down, or Scroll — months scroll continuously (month view only; week view then swipes sideways). The day view always swipes sideways, since its timeline scrolls up and down. This device only.</p>
+        <p class="setting-check-hint">How you change month: swipe sideways, swipe up and down, or Scroll — months scroll continuously. Scroll is also in the calendar’s ⋯ menu. The day view always swipes sideways, since its timeline scrolls up and down. This device only.</p>
         <label class="setting-check" data-editor-pref>
           <input id="setting-move-checked" type="checkbox" />
           <span>

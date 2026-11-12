@@ -20,6 +20,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 100, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.11.11-1914', 'Calendar: week view removed; the ⋯ menu has Scroll view / Swipe view to switch how months change'],
   ['v2026.11.10-2103', 'Fix: the price table was blank after the last update'],
   ['v2026.11.10-2054', 'Tidy-up: consistent wording (vendor, Job note, Turn filter off, How long), day view gets a ⋯ menu, Text button on the job menu, price sort as three choices, A−/A+ zoom, Trash under Backup, one sign-in link button'],
   ['v2026.11.10-2040', 'Tour tidy-up: job menu, + button and files steps brought up to date, repeats removed, Install moved to the last part (Calendar, Jobs, Hours and Running your company each move up one)'],
@@ -1270,12 +1271,11 @@ function groupByCrew(jobs) {
 }
 
 const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December'];
-const MAX_CHIPS = 3; // then "+N"
 let calCursor = new Date();      // any date inside the displayed month
 let calSelectedDate = null;      // 'YYYY-MM-DD' for the day view
 
 // The current-time line's label (v2026.10.03-1636). Follows the 12/24-hour setting;
-// compact drops AM/PM for the narrow week columns.
+// compact drops AM/PM (was for the week columns, removed in v2026.11.11-1914).
 function nowTimeLabel(compact) {
   const t = new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: !getClock24() });
   return compact ? t.replace(/\s?[AaPp]\.?\s?[Mm]\.?$/, '') : t;
@@ -1325,13 +1325,10 @@ function prettyDate(s) {
 }
 // Days shown in the grid: the 1st back to Sunday, through the last day forward
 // to Saturday, so every week row is complete.
-// Month or week. A month of cells on a phone gives each day about a thumbnail's
-// worth of space, which is why the pills had to shrink to initials — week view
-// is the other half of that answer: same grid, same columns, seven cells
-// instead of thirty-five, so each one is big enough to actually read.
-let calMode = localStorage.getItem('na-cal-mode') === 'week' ? 'week' : 'month';
+// Week view was removed in v2026.11.11-1914; forget a saved choice of it.
+try { localStorage.removeItem('na-cal-mode'); } catch (e) {}
 // Settings › Calendar swipe (v2026.09.30-2127): 'sideways' (default) or 'vertical', for the
-// month and week grid only. This device only.
+// month grid only. This device only.
 function calSwipeVertical() {
   try { return localStorage.getItem('na-cal-swipe') === 'vertical'; } catch (e) { return false; }
 }
@@ -1339,45 +1336,52 @@ function calSwipeVertical() {
 function calSwipeScroll() {
   try { return localStorage.getItem('na-cal-swipe') === 'scroll'; } catch (e) { return false; }
 }
-function calScrollOn() { return calMode === 'month' && calSwipeScroll(); }
+function calScrollOn() { return calSwipeScroll(); }
+// Turning Scroll on remembers the swipe direction it replaced (na-cal-swipe-prev), so
+// turning it off from the calendar's ⋯ menu goes back to that. (v2026.11.11-1914)
+function setCalSwipe(mode) {
+  try {
+    const cur = localStorage.getItem('na-cal-swipe');
+    if (mode === 'scroll' && cur !== 'scroll') {
+      if (cur === 'vertical') localStorage.setItem('na-cal-swipe-prev', 'vertical');
+      else localStorage.removeItem('na-cal-swipe-prev');
+    }
+    if (mode === 'sideways') localStorage.removeItem('na-cal-swipe');
+    else localStorage.setItem('na-cal-swipe', mode);
+  } catch (e) {}
+  calScrollAnchor = null; calScrollStart = null;
+  applyCalSwipeButton();
+}
 function applyCalSwipeButton() {
   const btn = document.getElementById('cal-swipe-cycle-btn');
-  if (!btn) return;
   const label = calSwipeScroll() ? 'Scroll' : (calSwipeVertical() ? 'Up and down' : 'Sideways');
-  btn.textContent = label;
-  btn.setAttribute('aria-label', `Calendar swipe: ${label}. Tap to change.`);
+  if (btn) {
+    btn.textContent = label;
+    btn.setAttribute('aria-label', `Calendar swipe: ${label}. Tap to change.`);
+  }
+  // Calendar ⋯ menu row (v2026.11.11-1914): says where it GOES, like the old Week view row.
+  const menuBtn = document.getElementById('cal-scroll-btn');
+  if (menuBtn) menuBtn.textContent = calSwipeScroll() ? 'Swipe view' : 'Scroll view';
 }
 (() => {
   const btn = document.getElementById('cal-swipe-cycle-btn');
   if (btn) btn.addEventListener('click', () => {
     try {
       // Sideways → Up and down → Scroll → Sideways
-      if (calSwipeScroll()) localStorage.removeItem('na-cal-swipe');
-      else if (calSwipeVertical()) localStorage.setItem('na-cal-swipe', 'scroll');
-      else localStorage.setItem('na-cal-swipe', 'vertical');
-      calScrollAnchor = null;
+      setCalSwipe(calSwipeScroll() ? 'sideways' : (calSwipeVertical() ? 'scroll' : 'vertical'));
     } catch (e) {}
-    applyCalSwipeButton();
+  });
+  const menuBtn = document.getElementById('cal-scroll-btn');
+  if (menuBtn) menuBtn.addEventListener('click', () => {
+    let back = 'sideways';
+    try { back = localStorage.getItem('na-cal-swipe-prev') === 'vertical' ? 'vertical' : 'sideways'; } catch (e) {}
+    setCalSwipe(calSwipeScroll() ? back : 'scroll');
+    calCursor = new Date(calCursor.getFullYear(), calCursor.getMonth(), 1);
+    renderCalendar();
   });
   applyCalSwipeButton();
 })();
 
-// The Sunday of the week `cursor` falls in — the grid's columns start on Sunday,
-// so a week has to as well or the day names would sit above the wrong dates.
-function weekStart(d) {
-  const s = new Date(d.getFullYear(), d.getMonth(), d.getDate());
-  s.setDate(s.getDate() - s.getDay());
-  return s;
-}
-function weekGridDays(cursor) {
-  const start = weekStart(cursor);
-  const days = [];
-  for (let i = 0; i < 7; i++) days.push(new Date(start.getFullYear(), start.getMonth(), start.getDate() + i));
-  return days;
-}
-function calGridDays(cursor) {
-  return calMode === 'week' ? weekGridDays(cursor) : monthGridDays(cursor);
-}
 function monthGridDays(cursor) {
   const first = new Date(cursor.getFullYear(), cursor.getMonth(), 1);
   const start = new Date(first);
@@ -1712,13 +1716,10 @@ function openCalFilter() {
 function calCellHtml(d, refMonth, shortPills, todayStr, noCap) {
   // noCap (v2026.10.28-2322): Scroll view lists every job — its rows grow to fit instead.
   // Phone month: up to 8 jobs; the week row grows to fit (v2026.11.09-1718).
-  const phoneCap = noCap ? Infinity : (calMode === 'month' ? 8 : MAX_CHIPS);
+  const phoneCap = noCap ? Infinity : 8;
     const s = ymd(d);
     const jobs = calJobsByDate(s);
-    // In week view every cell is 'this week', so nothing is greyed as an
-    // adjacent month — a week that straddles two months is one week, not a
-    // week with four faded days in it.
-    const otherMonth = calMode === 'month' && d.getMonth() !== refMonth.getMonth();
+    const otherMonth = d.getMonth() !== refMonth.getMonth();
     const classes = ['cal-cell'];
     if (otherMonth) classes.push('cal-other');
     if (!jobs.length) classes.push('cal-empty');   // greyed when nobody is on
@@ -1729,11 +1730,9 @@ function calCellHtml(d, refMonth, shortPills, todayStr, noCap) {
     // the grouped layout below: a thumbnail-sized cell cannot carry two lines
     // per job, and there the colour is what you read a week by anyway.
     // The desktop month grid grows its rows to fit, so there is nothing to
-    // hide behind a +N — it lists every job. Week view keeps the cap: its rows
-    // are a fixed share of one screen.
-    const deskCap = (calMode === 'month') ? Infinity : MAX_CHIPS;
+    // hide behind a +N — it lists every job.
     let shown = 0;
-    const lines = shortPills ? '' : jobs.slice(0, deskCap).map(j => {
+    const lines = shortPills ? '' : jobs.map(j => {
       shown++;
       const who = calHeadLabel(j) || '—';
       const jcrew = jobCrew(j);
@@ -1784,8 +1783,8 @@ function calCellHtml(d, refMonth, shortPills, todayStr, noCap) {
 
 // CONTINUOUS SCROLL (v2026.10.28-2305). Settings › Calendar swipe › Scroll: the month
 // view is months stacked one under another in their own scroller. The month at
-// the top of the screen names the breadcrumb and is the calCursor (so week view,
-// + and Jump to today all start from it). This month (today's) gets a blue outline. More months
+// the top of the screen names the breadcrumb and is the calCursor (so + and
+// Jump to today start from it). This month (today's) gets a blue outline. More months
 // are added when you get near either end; each month's jobs load as it is drawn.
 let calScrollStart = null;     // 1st of the first month drawn
 let calScrollCount = 0;        // how many months are drawn
@@ -1835,13 +1834,10 @@ function renderCalendarScroll() {
     return `<section class="cal-mblock${ym === calYm(new Date()) ? ' cal-mblock-active' : ''}" data-ym="${ym}">`
       + `<div class="cal-mtitle">${escapeHtml(title)}</div><div class="cal-cells">${cells}</div></section>`;
   }).join('');
-  calGrid.classList.remove('cal-grid-wktl', 'cal-grid-week');
   calGrid.classList.toggle('cal-grid-tall', !shortPills);
   calGrid.classList.add('cal-grid-scroll');
   calGrid.innerHTML = `<div class="cal-headrow">${head}</div><div class="cal-scroll">${blocks}</div>`;
   renderCalSearchResults();
-  const modeBtn = document.getElementById('cal-mode');
-  if (modeBtn) { modeBtn.textContent = 'Week view'; modeBtn.setAttribute('aria-label', 'Switch to week view'); }
   wireCalCells(calGrid);
   const sc = calGrid.querySelector('.cal-scroll');
   // Put the anchor month back exactly where it was (or at the top on a jump).
@@ -1887,11 +1883,7 @@ function calScrollTick(sc) {
 }
 function wireCalCells(root) {
   root.querySelectorAll('.cal-cell[data-date]').forEach(cell => {
-    cell.addEventListener('click', (e) => {
-      // A job drawn in the week view opens its menu (v2026.10.04-1840); the rest of the
-      // column still opens the day.
-      const jobEl = e.target.closest('[data-job]');
-      if (jobEl && cell.contains(jobEl)) { openJobMenu(jobEl.dataset.job); return; }
+    cell.addEventListener('click', () => {
       const date = cell.dataset.date;
       const jobs = Storage.listJobsByDate(date);
       // Spec: tapping an EMPTY day goes straight to the new-job screen
@@ -1925,9 +1917,9 @@ function renderCalendar() {
   const calFab = document.getElementById('cal-fab');
   if (calFab) calFab.style.display = canEdit ? '' : 'none';
 
-  const days = calGridDays(calCursor);
+  const days = monthGridDays(calCursor);
   const todayStr = ymd(new Date());
-  // On a phone a pill shows the INITIAL only, in both month and week view —
+  // On a phone a pill shows the INITIAL only —
   // the colour is what you actually read a week by, and the names ate the room
   // the customer needed. Full name stays in the title attribute and the day view.
   const shortPills = isPhoneWidth();
@@ -1937,13 +1929,6 @@ function renderCalendar() {
   // Cues so it's obvious there's more either side — naming the month beats
   // a bare arrow, and both are tappable for people who'd rather not swipe.
   const cueLabel = (delta) => {
-    if (calMode === 'week') {
-      const s = weekStart(calCursor);
-      const w = new Date(s.getFullYear(), s.getMonth(), s.getDate() + delta * 7);
-      const e = new Date(w.getFullYear(), w.getMonth(), w.getDate() + 6);
-      // "Aug 10–16" — a bare "week" tells you nothing about where you'd land.
-      return `${MONTH_NAMES[w.getMonth()].slice(0, 3)} ${w.getDate()}–${e.getDate()}`;
-    }
     return MONTH_NAMES[new Date(calCursor.getFullYear(), calCursor.getMonth() + delta, 1).getMonth()];
   };
   // One row, prev on the left and next on the right — the same shape the day
@@ -1956,102 +1941,14 @@ function renderCalendar() {
     + `<span class="cal-cue-current">${escapeHtml(cueLabel(0))}</span>`
     + `<button type="button" class="cal-cue cal-cue-side" data-shift="1">${escapeHtml(cueLabel(1))} ${cueFwd}</button>`
     + `</div>`;
-  // WEEK TIMELINE (v2026.09.30-2312). Each day a column of hours, from the hour of the
-  // week's earliest start to the hour of its latest finish, squeezed to fit —
-  // no scrolling. Jobs are blocks at their times; overlapping ones share the
-  // width in lanes. Untimed jobs sit in a strip above, the SAME height in every
-  // column, so the hour lines and the gutter labels stay level across the week.
-  let headHtml = head, cellsHtml = cells;
-  const weekTl = calMode === 'week';
-  if (weekTl) {
-    const dayJobs = days.map(d => calJobsByDate(ymd(d)));
-    let lo = Infinity, hi = -Infinity;
-    dayJobs.forEach(js => js.forEach(j => {
-      const sp = jobSpan(j);
-      if (sp) { lo = Math.min(lo, sp.start); hi = Math.max(hi, sp.end); }
-    }));
-    if (lo === Infinity) { lo = 7 * 60; hi = 17 * 60; }          // empty week: 7–5
-    lo = Math.floor(lo / 60) * 60;
-    hi = Math.max(lo + 60, Math.ceil(hi / 60) * 60);
-    const range = hi - lo;
-    const pct = (m) => ((m - lo) / range * 100).toFixed(3) + '%';
-    const hourMarks = [];
-    for (let m = lo; m <= hi; m += 60) hourMarks.push(m);
-    const hourLines = hourMarks.map(m => `<div class="cal-wk-line" style="top:${pct(m)}"></div>`).join('');
-    const maxUntimed = Math.max(0, ...dayJobs.map(js => js.filter(j => !jobSpan(j)).length));
-    const untimedH = maxUntimed ? Math.min(maxUntimed, 3) * 18 : 0;
-    const gutter = `<div class="cal-wk-gutter"><div class="cal-daynum">&nbsp;</div>`
-      + `<div class="cal-wk-top" style="height:${untimedH}px"></div>`
-      + `<div class="cal-wk-track">${hourMarks.map(m =>
-          `<span class="cal-wk-hour" style="top:${pct(m)}">${escapeHtml(fmtHourLabel((m / 60) % 24))}</span>`).join('')}</div></div>`;
-    // Overlaps CASCADE like the day view (v2026.09.30-2326): a later job draws over an
-    // earlier one, indented, when enough of the earlier one stays visible for
-    // its name and crew tags. The hours here are a share of the screen, not
-    // HOUR_PX, so the clearance is converted from an estimate of the track's
-    // height. Narrow phone columns wrap names, so they need more.
-    const trackPx = Math.max(200, (calGrid.clientHeight || 600) - 70 - untimedH);
-    const clearMin = (shortPills ? 40 : 30) / (trackPx / range);
-    const indentPx = shortPills ? 6 : 12;
-    // Current time on today's column, when it falls inside the range (v2026.10.01-1646).
-    // Labelled with the time since v2026.10.03-1636 — compact, the columns are narrow.
-    const nowLineWk = (s) => {
-      if (s !== todayStr) return '';
-      const n = new Date().getHours() * 60 + new Date().getMinutes();
-      if (n < lo || n > hi) return '';
-      return `<div class="cal-now" data-now="week" data-lo="${lo}" data-range="${range}" style="top:${pct(n)}"><span class="cal-now-label cal-now-label-wk" data-compact="1">${nowTimeLabel(true)}</span></div>`;
-    };
-    const cols = days.map((d, i) => {
-      const s = ymd(d);
-      const js = dayJobs[i];
-      const timed = js.map(j => ({ j, sp: jobSpan(j) })).filter(t => t.sp)
-        .sort((a, b) => (a.sp.start - b.sp.start) || (a.sp.end - b.sp.end));
-      const lay = layoutLanes(timed.map(t => t.sp), clearMin);
-      timed.forEach((t, k) => { t.lane = lay[k].lane; t.n = lay[k].lanes; t.depth = lay[k].depth; });
-      const blocks = timed.map(t => {
-        const j = t.j;
-        const crew = jobCrew(j);
-        const chips = crewNames(crew).map(n => shortPills
-          ? `<span class="cal-chip cal-chip-initial" style="${chipStyle(n)}" title="${escapeHtml(n)}">${escapeHtml(n.split(/[\s(]+/)[0].slice(0, 1).toUpperCase())}</span>`
-          : `<span class="cal-chip" style="${chipStyle(n)}" title="${escapeHtml(n)}">${escapeHtml(crewChipLabel(crew, n, true))}</span>`).join('');
-        const w = 100 / t.n;
-        const ind = t.depth * indentPx;
-        const who = calHeadLabel(j) || '—';
-        return `<div class="cal-wk-job${j.noWork ? ' cal-nowork' : ' cal-working'}" data-job="${escapeHtml(j.id)}"`
-          + ` style="top:${pct(t.sp.start)};height:${((t.sp.end - t.sp.start) / range * 100).toFixed(3)}%;left:calc(${(t.lane * w).toFixed(3)}% + ${ind}px);width:calc(${w.toFixed(3)}% - ${ind}px)"`
-          + ` title="${escapeHtml(`${who} · ${fmtClock(t.sp.start)}–${fmtClock(t.sp.end)}`)}">`
-          + `<span class="cal-wk-who">${escapeHtml(who)}</span><span class="cal-wk-chips">${chips}</span></div>`;
-      }).join('');
-      const untimed = js.filter(j => !jobSpan(j)).slice(0, 3).map(j =>
-        `<div class="cal-wk-untimed${j.noWork ? ' cal-nowork-text' : ''}" data-job="${escapeHtml(j.id)}">${escapeHtml(calHeadLabel(j) || '—')}</div>`).join('');
-      const classes = ['cal-cell', 'cal-wk-col'];
-      if (!js.length) classes.push('cal-empty');
-      if (s === todayStr) classes.push('cal-today');
-      return `<div class="${classes.join(' ')}" data-date="${s}">`
-        + `<div class="cal-daynum">${d.getDate()}</div>`
-        + `<div class="cal-wk-top" style="height:${untimedH}px">${untimed}</div>`
-        + `<div class="cal-wk-track">${hourLines}${blocks}${nowLineWk(s)}</div></div>`;
-    }).join('');
-    headHtml = '<div class="cal-head"></div>' + head;
-    cellsHtml = gutter + cols;
-  }
-  calGrid.classList.toggle('cal-grid-wktl', weekTl);
-  calGrid.classList.toggle('cal-grid-week', calMode === 'week');
-  // Desktop month only: week rows size to their content, so a busy week is
-  // taller than a quiet one. Week view already gives each day a full row, and a
-  // phone has no height to spend, so neither gets it.
-  calGrid.classList.toggle('cal-grid-tall', calMode === 'month' && !shortPills);
-  // Phone month: each week as tall as its busiest day, still filling the screen (v2026.11.09-1718).
-  calGrid.classList.toggle('cal-grid-fit', calMode === 'month' && shortPills);
-  calGrid.innerHTML = cues + `<div class="cal-headrow">${headHtml}</div><div class="cal-cells">${cellsHtml}</div>`;
+  // Desktop: week rows size to their content, so a busy week is taller than a
+  // quiet one.
+  calGrid.classList.toggle('cal-grid-tall', !shortPills);
+  // Phone: each week as tall as its busiest day, still filling the screen (v2026.11.09-1718).
+  calGrid.classList.toggle('cal-grid-fit', shortPills);
+  calGrid.innerHTML = cues + `<div class="cal-headrow">${head}</div><div class="cal-cells">${cells}</div>`;
   // A redraw while a search is open must not put the grid back on screen.
   renderCalSearchResults();
-  const modeBtn = document.getElementById('cal-mode');
-  if (modeBtn) {
-    // Labelled with where it GOES, not where you are — a button that says
-    // "Month" while showing a month reads as a state nobody can act on.
-    modeBtn.textContent = calMode === 'week' ? 'Month view' : 'Week view';   // ⋯ menu item (v2026.10.02-2126)
-    modeBtn.setAttribute('aria-label', calMode === 'week' ? 'Switch to month view' : 'Switch to week view');
-  }
   calGrid.querySelectorAll('.cal-cue').forEach(btn => {
     btn.addEventListener('click', () => calShiftMonth(parseInt(btn.dataset.shift, 10)));
   });
@@ -2173,7 +2070,7 @@ const CASCADE_INDENT = 14;   // px the later block is pushed in by
 const CASCADE_CLEAR  = 28;   // px of the earlier block that must stay visible
 
 // clearMin: minutes of the earlier block that must stay visible to cascade.
-// The week view passes its own, since its hours are not HOUR_PX tall. (v2026.09.30-2326)
+// Defaults to the day view's; the week view (removed v2026.11.11-1914) passed its own.
 function layoutLanes(spans, clearMinArg) {
   const placed = spans.map(() => ({ lane: 0, lanes: 1, depth: 0, visible: Infinity }));
   const order = spans.map((s, i) => ({ s, i })).sort((a, b) =>
@@ -2516,8 +2413,6 @@ if (calToday) calToday.addEventListener('click', () => {
   if (calScrollOn()) { calScrollJumpTo(new Date()); return; }   // v2026.10.28-2305
   calCursor = new Date(); renderCalendar();
 });
-const calModeBtn = document.getElementById('cal-mode');
-if (calModeBtn) calModeBtn.addEventListener('click', () => setCalMode(calMode === 'week' ? 'month' : 'week'));
 // A window dragged narrow (or a tablet rotated) crosses the phone breakpoint
 // without any navigation, and the pills are rendered HTML — so redraw, or the
 // initials stay behind on a screen with room for names.
@@ -2539,37 +2434,13 @@ function calSlide(el, dir) {
   el.classList.add(cls);
   el.addEventListener('animationend', () => el.classList.remove(cls), { once: true });
 }
-// Named for what it did originally; it now shifts by whatever the current view
-// is a view OF — a month, or a week. The swipe and the ∧/∨ cues both come
-// through here, so both follow the mode without knowing about it.
+// The swipe, the wheel and the ‹ › cues all come through here.
 function calShiftMonth(delta) {
-  if (calMode === 'week') {
-    const s = weekStart(calCursor);
-    calCursor = new Date(s.getFullYear(), s.getMonth(), s.getDate() + delta * 7);
-  } else {
-    calCursor = new Date(calCursor.getFullYear(), calCursor.getMonth() + delta, 1);
-  }
+  calCursor = new Date(calCursor.getFullYear(), calCursor.getMonth() + delta, 1);
   renderCalendar();
   // renderCalendar rebuilds .cal-cells, so grab it after the render
   calSlide(calGrid && calGrid.querySelector('.cal-cells'),
     calSwipeVertical() ? (delta > 0 ? 'up' : 'down') : (delta > 0 ? 'left' : 'right'));
-}
-function setCalMode(mode) {
-  calMode = mode === 'week' ? 'week' : 'month';
-  localStorage.setItem('na-cal-mode', calMode);
-  // Switching to week lands on the week containing whatever month you were
-  // looking at — the 1st, unless that month is the current one, where "the week
-  // you meant" is almost always this one.
-  if (calMode === 'week') {
-    const today = new Date();
-    const sameMonth = calCursor.getFullYear() === today.getFullYear()
-      && calCursor.getMonth() === today.getMonth();
-    calCursor = weekStart(sameMonth ? today : calCursor);
-  } else {
-    calCursor = new Date(calCursor.getFullYear(), calCursor.getMonth(), 1);
-  }
-  calScrollAnchor = null; calScrollStart = null;   // scroll mode starts on calCursor's month
-  renderCalendar();
 }
 // Desktop: a SIDEWAYS wheel/trackpad scroll changes months, which is the same
 // feel as the swipe. Vertical is left alone so the grid can scroll its own
@@ -2650,11 +2521,6 @@ setInterval(() => {
   document.querySelectorAll('.cal-now-label').forEach(el => { el.textContent = nowTimeLabel(el.dataset.compact === '1'); });
   document.querySelectorAll('.cal-now').forEach(el => {
     if (el.dataset.now === 'day') el.style.top = ((n / 60) * HOUR_PX) + 'px';
-    else {
-      const lo = +el.dataset.lo, range = +el.dataset.range;
-      if (n < lo || n > lo + range) { el.remove(); return; }
-      el.style.top = ((n - lo) / range * 100).toFixed(3) + '%';
-    }
   });
 }, 60000);
 
@@ -12802,21 +12668,16 @@ function tutorialSteps(part) {
         target: () => document.querySelector('#cal-grid .cal-cues') || document.querySelector('#cal-grid .cal-scroll'),
         // Follows Settings › Calendar swipe (v2026.09.30-2127; Scroll v2026.10.28-2305).
         text: calSwipeScroll()
-          ? 'Scroll up and down through the months — they carry on in both directions. This month is outlined in blue; the month you’ve scrolled to is named at the top of the screen. Settings › Calendar swipe switches this to sideways swipes.'
+          ? 'Scroll up and down through the months — they carry on in both directions. This month is outlined in blue; the month you’ve scrolled to is named at the top of the screen. Swipe view in the ⋯ menu goes back to swiping a month at a time.'
           : calSwipeVertical()
-          ? 'Swipe up for next month and down for last. These cues name the month you’re heading to, and you can tap them instead. Settings › Calendar swipe switches this to sideways.'
-          : 'Swipe left for next month and right for last. These cues name the month you’re heading to, and you can tap them instead. Settings › Calendar swipe switches this to up and down.',
+          ? 'Swipe up for next month and down for last. These cues name the month you’re heading to, and you can tap them instead. Scroll view in the ⋯ menu shows the months as one long scroll; Settings › Calendar swipe switches to sideways.'
+          : 'Swipe left for next month and right for last. These cues name the month you’re heading to, and you can tap them instead. Scroll view in the ⋯ menu shows the months as one long scroll; Settings › Calendar swipe switches to up and down.',
       },
       {
         screen: 'calendar',
         setup: goMonth,
         target: () => document.getElementById('cal-more-btn'),
-        text: 'This ⋯ menu has Jump to today, which brings you back from wherever you’ve wandered — to this month, or to this week if you’re in week view.',
-      },
-      {
-        screen: 'calendar',
-        target: () => document.getElementById('cal-more-btn'),
-        text: 'Week view and Month view are in the same ⋯ menu — the item says where it GOES, not where you are. The week shows each day divided into hours, from the earliest start that week to the latest finish, with every job drawn as a block at its time.',
+        text: 'This ⋯ menu has Jump to today, which brings you back to this month from wherever you’ve wandered.',
       },
       {
         // Admin/bookkeeper only — isTargetVisible skips it for anyone else,
