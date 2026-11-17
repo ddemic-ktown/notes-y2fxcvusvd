@@ -20,6 +20,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 100, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.11.16-1833', 'Employees get Call and Text in the job menu too: the customer’s phone numbers are now saved on each job'],
   ['v2026.11.11-1914', 'Calendar: week view removed; the ⋯ menu has Scroll view / Swipe view to switch how months change'],
   ['v2026.11.10-2103', 'Fix: the price table was blank after the last update'],
   ['v2026.11.10-2054', 'Tidy-up: consistent wording (vendor, Job note, Turn filter off, How long), day view gets a ⋯ menu, Text button on the job menu, price sort as three choices, A−/A+ zoom, Trash under Backup, one sign-in link button'],
@@ -119,19 +120,6 @@ const CHANGELOG = [
   ['v2026.09.30-2101', 'The note under each employee on a job sits fully inside its box'],
   ['v2026.09.30-2059', 'The job editor has a Cancel button at the bottom as well as the ✕ at the top'],
   ['v2026.09.30-2053', 'Android: tapping a keyboard suggestion at the end of a line no longer swallows the line break'],
-  ['v2026.09.30-2048', 'Settings › Back button: keep Back at the top, or move it to the bottom right beside the + (iPhone home-screen app and desktop)'],
-  ['v2026.09.30-2044', 'A customer’s ⋯ menu has “See customer in calendar”, which opens the calendar filtered to them; calendar search now looks only at the jobs the filter is showing'],
-  ['v2026.09.30-2042', 'Calendar ⋯ › Filter: show only one employee’s or one customer’s jobs. A bar above the calendar shows the filter until you tap its ✕'],
-  ['v2026.09.30-2038', 'Settings › Customer accounts: the customer list starts on “Select customer” instead of showing a real customer’s name'],
-  ['v2026.09.30-2033', 'iPhone: the price chart and the job editor no longer jump or drift sideways while you type, Start/End/Hours no longer overlap, and the price chart’s scroll bars stay hidden'],
-  ['v2026.09.24-2219', 'The note box under an employee’s hours grows to fit what you type instead of hiding it on one line'],
-  ['v2026.09.24-2121', 'Hours on a job are now picked from hours and minutes dropdowns, and the hours chart has a “:” key so you can type 3:30 on a phone'],
-  ['v2026.09.24-2044', 'The ✕ that deletes a recorded price is now big enough to hit on a phone, and the history sheet no longer closes itself the moment it opens'],
-  ['v2026.09.24-2031', 'Updates should reach phones more reliably: a patchy connection no longer silently abandons the download, and if an update still does not take you get an “Update ready — tap” button instead of nothing'],
-  ['v2026.09.24-2005', 'Job addresses: street names with no number are offered too, “Which address?” catches your eye, and there is a plain “type a different address” option'],
-  ['v2026.09.24-2001', 'Dragging or resizing a job on the day view now steps in 15-minute jumps as you move it, instead of following your finger and snapping only when you let go'],
-  ['v2026.09.21-2336', 'Housekeeping: removed three unreachable branches left over from when customers were edited as their own record type'],
-  ['v2026.09.21-2331', 'The orphaned notes list sorts from a ⋯ menu like the customer list does'],
 ];
 const APP_VERSION = CHANGELOG[0][0];
 
@@ -2835,8 +2823,10 @@ function openJobMenu(jobId, opts = {}) {
   noteEl.textContent = note;
   noteEl.hidden = !note;
   // Call: the numbers in the customer's main note, as on the customer screen.
+  // Employees can't read that note, so they get the copy saved on the job (v2026.11.16-1833).
   const def = j.customerId ? Storage.getDefaultNoteForCustomer(j.customerId) : null;
   jobMenuPhones = extractContacts(def ? def.body : '').phones;
+  if (!jobMenuPhones.length && Array.isArray(j.customerPhones)) jobMenuPhones = j.customerPhones.filter(p => p && p.digits);
   const call = document.getElementById('job-menu-call');
   call.hidden = !jobMenuPhones.length;
   if (jobMenuPhones.length === 1) call.href = `tel:${jobMenuPhones[0].tel}`;
@@ -9247,6 +9237,26 @@ function extractContacts(text) {
   return { phones: info.phones, emails: info.emails, addresses: info.addresses };
 }
 
+// Customer phone numbers copied onto jobs (v2026.11.16-1833) so employees, who can't read
+// customer notes, still get Call and Text in the job menu. The admin's app keeps
+// the copies current: once per session, and again whenever a main note's numbers change.
+Storage.setJobPhonesResolver((customerId) => {
+  const def = Storage.getDefaultNoteForCustomer(customerId);
+  return extractContacts(def ? def.body : '').phones;
+});
+let jobPhonesSig = null;
+let jobPhonesTimer = null;
+Storage.onChange(() => {
+  if (Storage.getRole() !== 'admin' || !Storage.isReady()) { jobPhonesSig = null; return; }
+  const sig = Storage.liveNotes().filter(n => n.customerId && n.isDefault)
+    .map(n => n.customerId + ':' + extractContacts(n.body || '').phones.map(p => p.tel).join(','))
+    .sort().join('|');
+  if (sig === jobPhonesSig) return;
+  jobPhonesSig = sig;
+  clearTimeout(jobPhonesTimer);
+  jobPhonesTimer = setTimeout(() => Storage.resyncJobPhones(shiftYmd(ymd(new Date()), -30)), 3000);
+});
+
 // Directions link: Apple Maps on iPhone/iPad, Google Maps elsewhere (v2026.10.03-0725).
 function mapsUrl(address) {
   // Without the unit/suite: maps apps often fail on "… Dr. Suite 12" (v2026.10.03-2159)
@@ -12741,7 +12751,9 @@ function tutorialSteps(part) {
         text: (isCustomerRole()
             ? 'Tap a job for its menu. The top shows the job and who is coming.'
             : 'Tap a job for its menu. The top shows the job, who is on it and its full note.')
-          + ' Below that: add it to your own calendar, get directions to the address, and call the customer.'
+          + (isCustomerRole()
+            ? ' Below that: add it to your own calendar and get directions to the address.'
+            : ' Below that: add it to your own calendar, get directions to the address, and call or text the customer.')
           + (canEditJobs() ? ' As an admin you also get Edit job, Duplicate to next day and Delete job.' : ''),
       },
     ];

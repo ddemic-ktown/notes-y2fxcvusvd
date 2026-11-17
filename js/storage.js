@@ -96,6 +96,7 @@ function custJobsCol()   { return collection(db, `orgs/${_orgId}/custJobs`); }
 function custAccessDoc(u){ return doc(db, `orgs/${_orgId}/custAccess/${u}`); }
 const PRIVATE_SETTING_KEYS = ['customerLinks', 'employeeLinks', 'iifItemApprentice', 'iifItemJourneyman', 'customerHours', 'custJobsBuilt', 'custJobsBuiltV2'];
 let _custBackfill = false;
+let _jobPhonesFor = null;   // customerId -> phones, set by app.js
 let _privLoaded = false;
 // First run on this company: build the customer-safe copies and access docs
 // once, after the private doc has loaded and any migration has finished.
@@ -1404,6 +1405,33 @@ export const Storage = {
     const u = customerId ? links[customerId] : null;
     return u ? [u] : [];
   },
+  // app.js supplies the phone parser (it lives there); see customerPhones in saveJob.
+  setJobPhonesResolver(fn) { _jobPhonesFor = fn; },
+  // Bring every job from sinceYmd on up to date with its customer's numbers:
+  // run once per admin session and whenever a customer's main note changes.
+  // Writes only the jobs whose numbers differ.
+  async resyncJobPhones(sinceYmd) {
+    if (_role !== 'admin' || !_jobPhonesFor) return;
+    try {
+      const snap = await getDocs(query(jobsCol(), where('date', '>=', sinceYmd)));
+      const ops = [];
+      for (const d of snap.docs) {
+        const j = d.data();
+        if (j.deletedAt) continue;
+        const want = (j.customerId && !j.noWork) ? _jobPhonesFor(j.customerId) : [];
+        if (canon(j.customerPhones || []) === canon(want)) continue;
+        ops.push(tracked(setDoc(d.ref, { customerPhones: want }, { merge: true })));
+        const c = _cache.jobs.find(x => x.id === d.id);
+        if (c) c.customerPhones = want;
+      }
+      if (ops.length) emit();
+      const res = await Promise.allSettled(ops);
+      const failed = res.filter(r => r.status === 'rejected').length;
+      if (failed) console.warn('resyncJobPhones: writes failed', failed);
+    } catch (err) {
+      console.warn('resyncJobPhones', err);
+    }
+  },
   async saveJob(job) {
     const id = job.id || uid();
     const now = nowIso();
@@ -1437,6 +1465,10 @@ export const Storage = {
       customerId: job.customerId || null,
       customerName: job.customerName || '',
       address: job.address || '',
+      // The customer's phone numbers, copied from their main note (v2026.11.16-1833).
+      // Employees can't read customer notes, so without this copy the job
+      // menu had no Call or Text for them. Never put in custSafeCopy().
+      customerPhones: (job.customerId && !job.noWork && _jobPhonesFor) ? _jobPhonesFor(job.customerId) : [],
       // A day off rather than a job. It still occupies the calendar (and can
       // have times, so it draws as a block), but it has no customer and never
       // reaches the hours chart or the QuickBooks export.
