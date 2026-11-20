@@ -1274,13 +1274,6 @@ body.dark-mode .price-best-badge { color: #4ade80; }
 .price-select-bar[hidden] { display: none; }
 .price-pick { margin-right: 6px; vertical-align: middle; }
 
-/* Reorder mode arrows on row/column headers */
-.reorder-arrows { display: inline-flex; gap: 2px; margin-left: 6px; }
-.reorder-arrows button {
-  border: 1px solid var(--line); background: var(--surface); color: var(--ink);
-  border-radius: 4px; font-size: 11px; line-height: 1; padding: 3px 5px; cursor: pointer;
-}
-.reorder-arrows button:disabled { opacity: 0.3; cursor: default; }
 .icon-btn.active { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
 /* Pinch-to-zoom needs the browser to hand us two-finger gestures */
 .price-scroll { touch-action: pan-x pan-y; }

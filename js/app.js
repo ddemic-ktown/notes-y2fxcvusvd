@@ -20,6 +20,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 100, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.11.19-2203', 'Price table Layout: arrows gone — tick rows or columns, then Move to top/bottom (far left/right for columns); a filter that is on stays on'],
   ['v2026.11.19-2156', 'Price table: Filter and Layout on the toolbar (Finish layout while rearranging), Apply with nothing ticked cancels, Edit filter keeps your picks, new items and vendors join the filter, search inside the filter offers outside matches with + Filter; calendar always uses Scroll view and its columns always fit the screen'],
   ['v2026.11.16-1833', 'Employees get Call and Text in the job menu too: the customer’s phone numbers are now saved on each job'],
   ['v2026.11.11-1914', 'Calendar: week view removed; the ⋯ menu has Scroll view / Swipe view to switch how months change'],
@@ -119,7 +120,6 @@ const CHANGELOG = [
   ['v2026.09.30-2105', 'Settings: every section opens and closes from its heading, all start closed, and Expand all / Collapse all sit at the top'],
   ['v2026.09.30-2103', 'The home search bar says “Search customers and notes…”, since it finds both'],
   ['v2026.09.30-2101', 'The note under each employee on a job sits fully inside its box'],
-  ['v2026.09.30-2059', 'The job editor has a Cancel button at the bottom as well as the ✕ at the top'],
 ];
 const APP_VERSION = CHANGELOG[0][0];
 
@@ -3970,18 +3970,14 @@ function renderPriceTable() {
       reorder ? `<input type="checkbox" class="price-pick" data-pick-vendor="${escapeHtml(v.id)}" ${priceSelVendors.has(v.id) ? 'checked' : ''} aria-label="Select ${escapeHtml(v.name)}" />` : ''
     }${
       picking ? `<input type="checkbox" class="price-pick price-keep" data-keep-vendor="${escapeHtml(v.id)}" ${pricePickVendors.has(v.id) ? 'checked' : ''} aria-label="Keep ${escapeHtml(v.name)}" />` : ''
-    }${escapeHtml(v.name)}${priceShowOutside && outsideVendorIds.has(v.id) ? addTag('data-addfilter-vendor', v.id) : ''}${
-      reorder ? `<span class="reorder-arrows"><button type="button" class="v-left" data-vendor="${escapeHtml(v.id)}" ${i === 0 ? 'disabled' : ''}>←</button><button type="button" class="v-right" data-vendor="${escapeHtml(v.id)}" ${i === vendors.length - 1 ? 'disabled' : ''}>→</button></span>` : ''
-    }</th>`).join('')
+    }${escapeHtml(v.name)}${priceShowOutside && outsideVendorIds.has(v.id) ? addTag('data-addfilter-vendor', v.id) : ''}</th>`).join('')
   }</tr></thead>`;
   const body = `<tbody>${items.map((item, i) => `<tr>
       <th class="price-item${priceShowOutside && outsideItemIds.has(item.id) ? ' price-outside' : ''}" data-item="${escapeHtml(item.id)}">${
         reorder ? `<input type="checkbox" class="price-pick" data-pick-item="${escapeHtml(item.id)}" ${priceSelItems.has(item.id) ? 'checked' : ''} aria-label="Select ${escapeHtml(item.name)}" />` : ''
       }${
         picking ? `<input type="checkbox" class="price-pick price-keep" data-keep-item="${escapeHtml(item.id)}" ${pricePickItems.has(item.id) ? 'checked' : ''} aria-label="Keep ${escapeHtml(item.name)}" />` : ''
-      }<span class="price-item-name">${escapeHtml(item.name)}</span>${priceShowOutside && outsideItemIds.has(item.id) ? addTag('data-addfilter-item', item.id) : ''}${
-        reorder ? `<span class="reorder-arrows"><button type="button" class="i-up" data-item="${escapeHtml(item.id)}" ${i === 0 ? 'disabled' : ''}>↑</button><button type="button" class="i-down" data-item="${escapeHtml(item.id)}" ${i === items.length - 1 ? 'disabled' : ''}>↓</button></span>` : ''
-      }</th>
+      }<span class="price-item-name">${escapeHtml(item.name)}</span>${priceShowOutside && outsideItemIds.has(item.id) ? addTag('data-addfilter-item', item.id) : ''}</th>
       ${(() => { const best = cheapestVendorId(item, vendors); return vendors.map(v => priceCellHtml(item, v, canEdit, v.id === best)).join(''); })()}
     </tr>`).join('')}${outsideLine(vendors.length + 1)}</tbody>`;
   priceTableEl.innerHTML = head + body;
@@ -4305,11 +4301,9 @@ function wirePriceTable(canEdit) {
         renderPriceSelectBar();
       });
     });
+    // The one-step arrows went in v2026.11.19-2203: tick, then Move to top/bottom
+    // (far left/right for columns). Fine moves are a long-press drag outside Layout.
     renderPriceSelectBar();
-    priceTableEl.querySelectorAll('.i-up').forEach(b => b.addEventListener('click', (e) => { e.stopPropagation(); movePriceItem(b.dataset.item, -1); }));
-    priceTableEl.querySelectorAll('.i-down').forEach(b => b.addEventListener('click', (e) => { e.stopPropagation(); movePriceItem(b.dataset.item, 1); }));
-    priceTableEl.querySelectorAll('.v-left').forEach(b => b.addEventListener('click', (e) => { e.stopPropagation(); movePriceVendor(b.dataset.vendor, -1); }));
-    priceTableEl.querySelectorAll('.v-right').forEach(b => b.addEventListener('click', (e) => { e.stopPropagation(); movePriceVendor(b.dataset.vendor, 1); }));
     return;
   }
   // Rename / remove a row or column (edit rights only), plus long-press to move
@@ -4942,9 +4936,12 @@ if (priceReorderBtn) priceReorderBtn.addEventListener('click', () => {
     priceSort = '';
     localStorage.removeItem('na-price-sort');
   }
-  // Reordering a filtered table would move rows relative to ones you cannot
-  // see, so the filter goes on the way in — same rule the search box follows.
-  if (!priceReorderMode && priceFilterMode !== 'off') clearPriceFilter();
+  // A filter that is ON stays on (v2026.11.19-2203): Layout works on what you can
+  // see, and top/bottom mean the whole table. Half-picked ticks are dropped.
+  if (!priceReorderMode && priceFilterMode === 'picking') {
+    if (priceFilterWasOn) priceFilterMode = 'on'; else clearPriceFilter();
+    savePriceFilter();
+  }
   priceReorderMode = !priceReorderMode;
   priceReorderBtn.setAttribute('aria-pressed', String(priceReorderMode));
   // "Finish layout", not "Done": coming back to it later, Done says nothing
@@ -4975,16 +4972,24 @@ function renderPriceSelectBar() {
     if (priceSelVendors.size) parts.push(`${priceSelVendors.size} vendor${priceSelVendors.size === 1 ? '' : 's'}`);
     count.textContent = `${parts.join(' · ')} selected`;
   }
+  // Top/bottom only make sense for rows (v2026.11.19-2203).
+  const rows = priceSelItems.size > 0, cols = priceSelVendors.size > 0;
+  const first = document.getElementById('price-move-top');
+  const last = document.getElementById('price-move-bottom');
+  if (first) first.textContent = rows && cols ? 'Move to start' : cols ? 'Move to far left' : 'Move to top';
+  if (last) last.textContent = rows && cols ? 'Move to end' : cols ? 'Move to far right' : 'Move to bottom';
 }
 // Selected rows go to the top / selected columns to the front, keeping their
 // relative order; everything else follows. Then every order value is
 // renumbered so the result is stable.
-async function movePriceSelectionFirst() {
+// toEnd (v2026.11.19-2203): to the bottom / far right instead. Always the WHOLE
+// table, filter or not — rows the filter hides keep their order around them.
+async function movePriceSelection(toEnd) {
   if (priceSelItems.size) {
     const items = Storage.listPriceItems();
     const picked = items.filter(i => priceSelItems.has(i.id));
     const rest = items.filter(i => !priceSelItems.has(i.id));
-    const ordered = [...picked, ...rest];
+    const ordered = toEnd ? [...rest, ...picked] : [...picked, ...rest];
     for (let i = 0; i < ordered.length; i++) {
       if ((ordered[i].order ?? -1) !== i) await Storage.savePriceItem(ordered[i].id, { order: i });
     }
@@ -4993,7 +4998,7 @@ async function movePriceSelectionFirst() {
     const vendors = Storage.getPriceConfig().vendors.slice().sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
     const picked = vendors.filter(v => priceSelVendors.has(v.id));
     const rest = vendors.filter(v => !priceSelVendors.has(v.id));
-    await Storage.savePriceConfig({ vendors: [...picked, ...rest].map((v, i) => ({ ...v, order: i })) });
+    await Storage.savePriceConfig({ vendors: (toEnd ? [...rest, ...picked] : [...picked, ...rest]).map((v, i) => ({ ...v, order: i })) });
   }
   priceSelItems.clear();
   priceSelVendors.clear();
@@ -5008,31 +5013,13 @@ if (priceSearchInput) priceSearchInput.addEventListener('input', () => {
 });
 
 const priceMoveTopBtn = document.getElementById('price-move-top');
-if (priceMoveTopBtn) priceMoveTopBtn.addEventListener('click', movePriceSelectionFirst);
+if (priceMoveTopBtn) priceMoveTopBtn.addEventListener('click', () => movePriceSelection(false));
+const priceMoveBottomBtn = document.getElementById('price-move-bottom');
+if (priceMoveBottomBtn) priceMoveBottomBtn.addEventListener('click', () => movePriceSelection(true));
 const priceSelClearBtn = document.getElementById('price-select-clear');
 if (priceSelClearBtn) priceSelClearBtn.addEventListener('click', () => {
   priceSelItems.clear(); priceSelVendors.clear(); renderPriceTable();
 });
-async function movePriceItem(itemId, dir) {
-  const items = Storage.listPriceItems();
-  const i = items.findIndex(x => x.id === itemId);
-  const j = i + dir;
-  if (i === -1 || j < 0 || j >= items.length) return;
-  const a = items[i], b = items[j];
-  await Storage.savePriceItem(a.id, { order: j });
-  await Storage.savePriceItem(b.id, { order: i });
-  renderPriceTable();
-}
-async function movePriceVendor(vendorId, dir) {
-  const vendors = Storage.getPriceConfig().vendors.slice().sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
-  const i = vendors.findIndex(v => v.id === vendorId);
-  const j = i + dir;
-  if (i === -1 || j < 0 || j >= vendors.length) return;
-  [vendors[i], vendors[j]] = [vendors[j], vendors[i]];
-  await Storage.savePriceConfig({ vendors: vendors.map((v, idx) => ({ ...v, order: idx })) });
-  renderPriceTable();
-}
-
 // ---------- price table: CSV export / import ----------
 function priceCsvCell(entry) {
   if (!entry) return '';
@@ -12687,7 +12674,7 @@ function tutorialSteps(part) {
       screen: 'price',
       setup: () => { showPriceTable(); return true; },
       target: () => document.getElementById('price-reorder'),
-      text: 'Layout lets you reorder rows and columns: use the arrows, or tick several to move them to the top together. Each move saves as you make it; Finish layout puts the arrows away.',
+      text: 'Layout: tick rows or columns, then move them to the top or bottom of the table (far left or right for columns). With a filter on it works on what you can see. Finish layout puts the boxes away. For any other move, press and hold a row or column name outside Layout and drag it.',
     },
     {
       screen: 'price',
