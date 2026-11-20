@@ -20,6 +20,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 100, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.11.19-2214', 'Calendar: a swipe that starts sideways and turns up or down now scrolls the months (Android and iPhone)'],
   ['v2026.11.19-2203', 'Price table Layout: arrows gone — tick rows or columns, then Move to top/bottom (far left/right for columns); a filter that is on stays on'],
   ['v2026.11.19-2156', 'Price table: Filter and Layout on the toolbar (Finish layout while rearranging), Apply with nothing ticked cancels, Edit filter keeps your picks, new items and vendors join the filter, search inside the filter offers outside matches with + Filter; calendar always uses Scroll view and its columns always fit the screen'],
   ['v2026.11.16-1833', 'Employees get Call and Text in the job menu too: the customer’s phone numbers are now saved on each job'],
@@ -119,7 +120,6 @@ const CHANGELOG = [
   ['v2026.09.30-2107', 'Settings › Features: the Hours button hint says the switch above hides the whole feature, not removes it — nothing is deleted'],
   ['v2026.09.30-2105', 'Settings: every section opens and closes from its heading, all start closed, and Expand all / Collapse all sit at the top'],
   ['v2026.09.30-2103', 'The home search bar says “Search customers and notes…”, since it finds both'],
-  ['v2026.09.30-2101', 'The note under each employee on a job sits fully inside its box'],
 ];
 const APP_VERSION = CHANGELOG[0][0];
 
@@ -2491,6 +2491,42 @@ if (calGrid) {
       calShiftMonth(dx < 0 ? 1 : -1);
     }
   });
+}
+
+// SCROLL RESCUE (v2026.11.19-2214). Android and iPhone both decide at the start of a
+// swipe what it is for. One that starts sideways on the month scroll latched onto
+// something that can't move, and turning it up or down did nothing until you let
+// go. So: if the finger has clearly moved up or down and the months haven't
+// followed, move them here for the rest of that swipe. Incremental, so months
+// added at either end mid-swipe don't make it jump. No glide after letting go.
+if (calGrid) {
+  let r = null;
+  calGrid.addEventListener('touchstart', (e) => {
+    r = null;
+    if (e.touches.length !== 1 || viewportZoom() > 1.01) return;   // pinch / zoomed in: the page pans
+    const el = e.target.closest && e.target.closest('.cal-scroll');
+    if (!el) return;
+    const cell = e.target.closest('.cal-cell');
+    const inner = cell && cell.scrollHeight > cell.clientHeight + 2 ? cell : null;
+    const t = e.touches[0];
+    r = { el, inner, sy: t.clientY, y: t.clientY, top: el.scrollTop, innerTop: inner ? inner.scrollTop : 0, active: false };
+  }, { passive: true });
+  calGrid.addEventListener('touchmove', (e) => {
+    if (!r) return;
+    if (e.touches.length !== 1) { r = null; return; }
+    const y = e.touches[0].clientY;
+    if (!r.active) {
+      if (Math.abs(y - r.sy) < 24) return;
+      // The browser is scrolling something already: leave it alone.
+      if (r.el.scrollTop !== r.top || (r.inner && r.inner.scrollTop !== r.innerTop)) { r = null; return; }
+      r.active = true;
+    }
+    r.el.scrollTop += r.y - y;
+    r.y = y;
+  }, { passive: true });
+  const end = () => { r = null; };
+  calGrid.addEventListener('touchend', end, { passive: true });
+  calGrid.addEventListener('touchcancel', end, { passive: true });
 }
 
 // Midnight rollover (v2026.11.09-1731): "today" is only worked out when the

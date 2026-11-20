@@ -685,6 +685,11 @@ select.iif-date-input { appearance: none; -webkit-appearance: none; padding-righ
 /* Continuous scroll of months (v2026.10.28-2305). The months scroll in .cal-scroll; each
    month's own cells don't. The month at the top is outlined. */
 .cal-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior-y: contain; position: relative; padding: 2px; }
+/* Up and down only (v2026.11.19-2214): nothing here scrolls sideways, so a swipe
+   that starts sideways has no other way to go. The JS SCROLL RESCUE covers
+   browsers that still lock it the wrong way. */
+.cal-scroll { overflow-x: hidden; overscroll-behavior-x: none; touch-action: pan-y pinch-zoom; }
+.cal-mblock, .cal-scroll .cal-cells { max-width: 100%; }
 .cal-mblock { border: 2px solid transparent; border-radius: 8px; padding: 2px; margin-bottom: 8px; transition: border-color 0.2s; }
 .cal-mblock.cal-mblock-active { border-color: var(--accent); }
 .cal-mtitle { font-size: 14px; font-weight: 700; color: var(--ink); padding: 4px 4px 6px; }
