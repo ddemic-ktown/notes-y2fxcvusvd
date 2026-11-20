@@ -619,7 +619,9 @@ select.iif-date-input { appearance: none; -webkit-appearance: none; padding-righ
 .cal-cues .cal-cue-side:first-child, .cal-day-cues .cal-cue-side:first-child { text-align: right; }
 .cal-cues .cal-cue-side:last-child, .cal-day-cues .cal-cue-side:last-child { text-align: left; }
 
-.cal-headrow, .cal-cells { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
+/* minmax(0, 1fr), not 1fr (v2026.11.19-2156): 1fr won't shrink below a day's widest
+   line, and one long customer name then widened all seven columns past a phone screen. */
+.cal-headrow, .cal-cells { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 2px; }
 .cal-head {
   text-align: center; font-size: 11px; font-weight: 700; color: var(--ink-soft);
   text-transform: uppercase; letter-spacing: 0.04em; padding: 4px 0;
@@ -789,7 +791,22 @@ select.iif-date-input { appearance: none; -webkit-appearance: none; padding-righ
 .price-keep { accent-color: var(--accent); }
 .price-view-picking .price-item,
 .price-view-picking .price-vendor { cursor: pointer; }
-#price-filter-btn.active { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+#price-filter-btn.active,
+#price-reorder.active { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+/* Search with a filter on (v2026.11.19-2156): matches outside the filter, shown on
+   request, are dimmed and carry a + Filter tag that adds them to it. */
+.price-outside { opacity: 0.7; font-style: italic; }
+.price-addfilter {
+  margin-left: 6px; padding: 1px 7px; border-radius: 999px; font-size: 0.75em; font-style: normal;
+  font-weight: 700; border: 1px solid var(--accent); background: transparent; color: var(--accent);
+  cursor: pointer; white-space: nowrap; vertical-align: middle;
+}
+.price-table .price-outside-row td { text-align: left; padding: 8px 6px; background: transparent; border: none; }
+.price-outside-btn {
+  background: none; border: none; padding: 4px 2px; color: var(--accent);
+  font: inherit; font-size: 0.9em; cursor: pointer; text-decoration: underline;
+  position: sticky; left: 6px;
+}
 
 /* "Create …" at the end of a customer search. Deliberately NOT a result: a
    dashed outline and the accent colour say this makes something new rather

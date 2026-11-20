@@ -20,6 +20,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 100, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.11.19-2156', 'Price table: Filter and Layout on the toolbar (Finish layout while rearranging), Apply with nothing ticked cancels, Edit filter keeps your picks, new items and vendors join the filter, search inside the filter offers outside matches with + Filter; calendar always uses Scroll view and its columns always fit the screen'],
   ['v2026.11.16-1833', 'Employees get Call and Text in the job menu too: the customer’s phone numbers are now saved on each job'],
   ['v2026.11.11-1914', 'Calendar: week view removed; the ⋯ menu has Scroll view / Swipe view to switch how months change'],
   ['v2026.11.10-2103', 'Fix: the price table was blank after the last update'],
@@ -119,7 +120,6 @@ const CHANGELOG = [
   ['v2026.09.30-2103', 'The home search bar says “Search customers and notes…”, since it finds both'],
   ['v2026.09.30-2101', 'The note under each employee on a job sits fully inside its box'],
   ['v2026.09.30-2059', 'The job editor has a Cancel button at the bottom as well as the ✕ at the top'],
-  ['v2026.09.30-2053', 'Android: tapping a keyboard suggestion at the end of a line no longer swallows the line break'],
 ];
 const APP_VERSION = CHANGELOG[0][0];
 
@@ -1317,11 +1317,18 @@ function prettyDate(s) {
 try { localStorage.removeItem('na-cal-mode'); } catch (e) {}
 // Settings › Calendar swipe (v2026.09.30-2127): 'sideways' (default) or 'vertical', for the
 // month grid only. This device only.
+// DORMANT (v2026.11.19-2156): every device gets Scroll view and the switches are hidden
+// (calendar ⋯ menu and Settings). Swipe view let one long customer name widen all
+// seven columns past the screen on a phone. To bring it back: set this to false
+// and remove `hidden` from #cal-scroll-btn and the Settings › Calendar swipe row.
+const CAL_SWIPE_DORMANT = true;
 function calSwipeVertical() {
+  if (CAL_SWIPE_DORMANT) return false;
   try { return localStorage.getItem('na-cal-swipe') === 'vertical'; } catch (e) { return false; }
 }
 // 'scroll' (v2026.10.28-2305): month view becomes one continuous scroll of months.
 function calSwipeScroll() {
+  if (CAL_SWIPE_DORMANT) return true;
   try { return localStorage.getItem('na-cal-swipe') === 'scroll'; } catch (e) { return false; }
 }
 function calScrollOn() { return calSwipeScroll(); }
@@ -3776,15 +3783,24 @@ function priceItemLastTouched(item) {
 // ---------- price table: pick-and-keep filter ----------
 // Three states, because picking what to keep and looking at the result are
 // different jobs and the same button cannot mean both:
-//   'off'     — no filter, no button
+//   'off'     — no filter; the header button reads "Filter" (v2026.11.19-2156)
 //   'picking' — checkboxes on every row and column, everything still visible,
 //               the header button reads "Apply filter" and applies the ticks
-//   'on'      — only the ticked rows/columns, button reads "Turn filter off"
+//               (nothing ticked = no filter, like a cancel)
+//   'on'      — only the ticked rows/columns; the button reads "Edit filter"
+//               (back to picking with the ticks kept) and "Turn filter off" sits beside it
 // Remembered across sessions: a filtered table is a deliberate working set, so
 // it should survive closing the app and stay until switched off.
 let priceFilterMode = localStorage.getItem('na-price-filter-mode') === 'on' ? 'on' : 'off';
 const pricePickItems = new Set(readFilterSet('na-price-filter-items'));
 const pricePickVendors = new Set(readFilterSet('na-price-filter-vendors'));
+// Editing a filter that was on (v2026.11.19-2156) still counts as on if the app is
+// closed mid-edit, so the working set isn't lost.
+let priceFilterWasOn = false;
+// Search with a filter on looks inside it first; "show" adds the matches
+// outside it, each with a + Filter tag (v2026.11.19-2156). Reset whenever the search
+// text or the filter changes.
+let priceShowOutside = false;
 function readFilterSet(key) {
   try {
     const raw = JSON.parse(localStorage.getItem(key) || '[]');
@@ -3793,7 +3809,8 @@ function readFilterSet(key) {
 }
 function savePriceFilter() {
   try {
-    localStorage.setItem('na-price-filter-mode', priceFilterMode === 'on' ? 'on' : 'off');
+    const on = priceFilterMode === 'on' || (priceFilterMode === 'picking' && priceFilterWasOn);
+    localStorage.setItem('na-price-filter-mode', on ? 'on' : 'off');
     localStorage.setItem('na-price-filter-items', JSON.stringify([...pricePickItems]));
     localStorage.setItem('na-price-filter-vendors', JSON.stringify([...pricePickVendors]));
   } catch {}
@@ -3803,6 +3820,7 @@ function savePriceFilter() {
 // you tick six rows, apply, and see two. Cleared at both transitions.
 function clearPriceSearchBox() {
   priceFilter = '';
+  priceShowOutside = false;
   const input = document.getElementById('price-search');
   if (input) input.value = '';
   if (typeof refreshSearchClears === 'function') refreshSearchClears();
@@ -3811,6 +3829,15 @@ function clearPriceFilter() {
   priceFilterMode = 'off';
   pricePickItems.clear();
   pricePickVendors.clear();
+  priceShowOutside = false;
+  savePriceFilter();
+}
+// Something added while a filter is on (or being edited) joins it, so it shows
+// up at once (v2026.11.19-2156). An empty set already means "everything", and adding
+// one id to it would hide all the rest, so that case is left alone.
+function joinPriceFilter(set, id) {
+  if (!id || priceFilterMode === 'off' || !set.size) return;
+  set.add(id);
   savePriceFilter();
 }
 // An empty pick set means "everything", NOT "nothing". Applying a filter that
@@ -3845,12 +3872,25 @@ function renderPriceTable() {
   // Rows only: vendors are few and always visible, and filtering columns too
   // would leave you comparing prices you can't see the context for.
   const words = priceFilter.trim().toLowerCase().split(/\s+/).filter(Boolean);
-  const searched = words.length
-    ? allItems.filter(i => words.every(w => (i.name || '').toLowerCase().includes(w)))
-    : allItems;
+  const nameMatches = (name) => words.every(w => (name || '').toLowerCase().includes(w));
+  const searched = words.length ? allItems.filter(i => nameMatches(i.name)) : allItems;
   // The kept-set filter sits on TOP of the search box: search narrows what you
   // are looking at now, the filter is the working set you chose to keep.
-  const items = applyPriceFilter(searched, pricePickItems);
+  let items = applyPriceFilter(searched, pricePickItems);
+  // Filter on + a search (v2026.11.19-2156): matches the filter hides are counted
+  // and, once "show" is tapped, drawn too, tagged + Filter. Vendor names are
+  // searched only for this — they never narrow the rows.
+  const sortedVendors = cfg.vendors.slice().sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+  const searchingFilter = priceFilterMode === 'on' && words.length > 0;
+  const outsideItems = searchingFilter && pricePickItems.size
+    ? searched.filter(i => !pricePickItems.has(i.id)) : [];
+  const outsideVendors = searchingFilter && pricePickVendors.size
+    ? sortedVendors.filter(v => !pricePickVendors.has(v.id) && nameMatches(v.name)) : [];
+  const hasOutside = outsideItems.length + outsideVendors.length > 0;
+  if (!hasOutside) priceShowOutside = false;
+  const outsideItemIds = new Set(outsideItems.map(i => i.id));
+  const outsideVendorIds = new Set(outsideVendors.map(v => v.id));
+  if (priceShowOutside) items = searched.filter(i => !pricePickItems.size || pricePickItems.has(i.id) || outsideItemIds.has(i.id));
   const filterCount = document.getElementById('price-filter-count');
   if (filterCount) filterCount.textContent = words.length
     ? `showing ${items.length} of ${allItems.length} items`
@@ -3880,11 +3920,6 @@ function renderPriceTable() {
   });
   if (importBtn) importBtn.hidden = !canEdit;
   if (exportBtn) exportBtn.hidden = !Storage.canViewPriceTable();
-  const filterStart = document.getElementById('price-filter-start');
-  if (filterStart) {
-    // Only an entry POINT: once picking or on, the header button drives it.
-    filterStart.hidden = !Storage.canViewPriceTable() || priceFilterMode !== 'off';
-  }
   // Layout's checkboxes and the filter's look alike but mean different things,
   // so only one set is ever on screen — entering Layout leaves picking.
   const picking = priceFilterMode === 'picking';
@@ -3892,19 +3927,31 @@ function renderPriceTable() {
   if (priceViewEl) priceViewEl.classList.toggle('price-view-picking', picking);
   const filterBtn = document.getElementById('price-filter-btn');
   if (filterBtn) {
-    filterBtn.hidden = priceFilterMode === 'off';
-    filterBtn.textContent = priceFilterMode === 'on' ? 'Turn filter off' : 'Apply filter';
+    filterBtn.hidden = !Storage.canViewPriceTable();
+    filterBtn.textContent = priceFilterMode === 'on' ? 'Edit filter'
+      : priceFilterMode === 'picking' ? 'Apply filter' : 'Filter';
     filterBtn.classList.toggle('active', priceFilterMode === 'on');
   }
+  const filterOffBtn = document.getElementById('price-filter-off');
+  if (filterOffBtn) filterOffBtn.hidden = priceFilterMode !== 'on';
   // Hide the ⋯ button when every item inside it is hidden
   const moreWrap = priceMoreBtn ? priceMoreBtn.closest('.editor-more-wrap') : null;
   if (moreWrap) {
-    const anyVisible = [reorderBtn, importBtn, exportBtn, shareBtn, filterStart, ...document.querySelectorAll('[data-price-sort]')].some(b => b && !b.hidden);
+    const anyVisible = [importBtn, exportBtn, shareBtn, ...document.querySelectorAll('[data-price-sort]')].some(b => b && !b.hidden);
     moreWrap.style.display = anyVisible ? '' : 'none';
   }
 
+  const outsideLine = (colspan) => {
+    if (!hasOutside) return '';
+    const n = (k, one, many) => k ? `${k} ${k === 1 ? one : many}` : '';
+    const what = [n(outsideItems.length, 'item', 'items'), n(outsideVendors.length, 'vendor', 'vendors')].filter(Boolean).join(' and ');
+    const label = priceShowOutside ? 'Hide matches outside your filter' : `${what} outside your filter — show`;
+    return `<tr class="price-outside-row"><td colspan="${colspan}"><button type="button" class="price-outside-btn">${escapeHtml(label)}</button></td></tr>`;
+  };
   if (words.length && !items.length) {
-    priceTableEl.innerHTML = `<tbody><tr><td class="price-empty-state">No items match “${escapeHtml(priceFilter)}”.</td></tr></tbody>`;
+    const msg = hasOutside ? `Nothing in your filter matches “${escapeHtml(priceFilter)}”.` : `No items match “${escapeHtml(priceFilter)}”.`;
+    priceTableEl.innerHTML = `<tbody><tr><td class="price-empty-state">${msg}</td></tr>${outsideLine(1)}</tbody>`;
+    wirePriceOutside();
     return;
   }
   if (!cfg.vendors.length && !allItems.length) {
@@ -3913,33 +3960,59 @@ function renderPriceTable() {
       : 'The price table is empty.'}</td></tr></tbody>`;
     return;
   }
-  const vendors = applyPriceFilter(
-    cfg.vendors.slice().sort((a, b) => (a.order ?? 0) - (b.order ?? 0)),
-    pricePickVendors);
+  const vendors = priceShowOutside
+    ? sortedVendors.filter(v => !pricePickVendors.size || pricePickVendors.has(v.id) || outsideVendorIds.has(v.id))
+    : applyPriceFilter(sortedVendors, pricePickVendors);
+  const addTag = (attr, id) => `<button type="button" class="price-addfilter" ${attr}="${escapeHtml(id)}" aria-label="Add to filter">+ Filter</button>`;
   const reorder = priceReorderMode && canEdit;
   const head = `<thead><tr><th class="price-corner">Item</th>${
-    vendors.map((v, i) => `<th class="price-vendor" data-vendor="${escapeHtml(v.id)}">${
+    vendors.map((v, i) => `<th class="price-vendor${outsideVendorIds.has(v.id) ? ' price-outside' : ''}" data-vendor="${escapeHtml(v.id)}">${
       reorder ? `<input type="checkbox" class="price-pick" data-pick-vendor="${escapeHtml(v.id)}" ${priceSelVendors.has(v.id) ? 'checked' : ''} aria-label="Select ${escapeHtml(v.name)}" />` : ''
     }${
       picking ? `<input type="checkbox" class="price-pick price-keep" data-keep-vendor="${escapeHtml(v.id)}" ${pricePickVendors.has(v.id) ? 'checked' : ''} aria-label="Keep ${escapeHtml(v.name)}" />` : ''
-    }${escapeHtml(v.name)}${
+    }${escapeHtml(v.name)}${priceShowOutside && outsideVendorIds.has(v.id) ? addTag('data-addfilter-vendor', v.id) : ''}${
       reorder ? `<span class="reorder-arrows"><button type="button" class="v-left" data-vendor="${escapeHtml(v.id)}" ${i === 0 ? 'disabled' : ''}>←</button><button type="button" class="v-right" data-vendor="${escapeHtml(v.id)}" ${i === vendors.length - 1 ? 'disabled' : ''}>→</button></span>` : ''
     }</th>`).join('')
   }</tr></thead>`;
   const body = `<tbody>${items.map((item, i) => `<tr>
-      <th class="price-item" data-item="${escapeHtml(item.id)}">${
+      <th class="price-item${priceShowOutside && outsideItemIds.has(item.id) ? ' price-outside' : ''}" data-item="${escapeHtml(item.id)}">${
         reorder ? `<input type="checkbox" class="price-pick" data-pick-item="${escapeHtml(item.id)}" ${priceSelItems.has(item.id) ? 'checked' : ''} aria-label="Select ${escapeHtml(item.name)}" />` : ''
       }${
         picking ? `<input type="checkbox" class="price-pick price-keep" data-keep-item="${escapeHtml(item.id)}" ${pricePickItems.has(item.id) ? 'checked' : ''} aria-label="Keep ${escapeHtml(item.name)}" />` : ''
-      }<span class="price-item-name">${escapeHtml(item.name)}</span>${
+      }<span class="price-item-name">${escapeHtml(item.name)}</span>${priceShowOutside && outsideItemIds.has(item.id) ? addTag('data-addfilter-item', item.id) : ''}${
         reorder ? `<span class="reorder-arrows"><button type="button" class="i-up" data-item="${escapeHtml(item.id)}" ${i === 0 ? 'disabled' : ''}>↑</button><button type="button" class="i-down" data-item="${escapeHtml(item.id)}" ${i === items.length - 1 ? 'disabled' : ''}>↓</button></span>` : ''
       }</th>
       ${(() => { const best = cheapestVendorId(item, vendors); return vendors.map(v => priceCellHtml(item, v, canEdit, v.id === best)).join(''); })()}
-    </tr>`).join('')}</tbody>`;
+    </tr>`).join('')}${outsideLine(vendors.length + 1)}</tbody>`;
   priceTableEl.innerHTML = head + body;
+  wirePriceOutside();
   renderPriceSelectBar();
   applyPriceZoomVar();
   wirePriceTable(canEdit);
+}
+
+// "N outside your filter — show" and the + Filter tags (v2026.11.19-2156).
+function wirePriceOutside() {
+  const btn = priceTableEl.querySelector('.price-outside-btn');
+  if (btn) btn.addEventListener('click', () => { priceShowOutside = !priceShowOutside; renderPriceTable(); });
+  priceTableEl.querySelectorAll('.price-addfilter').forEach(tag => {
+    tag.addEventListener('pointerdown', (e) => e.stopPropagation());   // not a long-press drag
+    tag.addEventListener('click', (e) => {
+      e.stopPropagation();                                            // not a rename
+      const isItem = !!tag.dataset.addfilterItem;
+      const set = isItem ? pricePickItems : pricePickVendors;
+      const id = tag.dataset.addfilterItem || tag.dataset.addfilterVendor;
+      set.add(id);
+      savePriceFilter();
+      renderPriceTable();
+      const it = isItem ? Storage.listPriceItems().find(x => x.id === id) : Storage.getPriceConfig().vendors.find(x => x.id === id);
+      showActionToast(`“${(it && it.name) || 'It'}” added to your filter — tap to undo`, () => {
+        set.delete(id);
+        savePriceFilter();
+        renderPriceTable();
+      });
+    });
+  });
 }
 
 // ---------- price table: long-press to drag a row or column ----------
@@ -4448,8 +4521,14 @@ if (priceAddItemBtn) priceAddItemBtn.addEventListener('click', () => {
     similar: Storage.listPriceItems().map(i => i.name),
   }).then(async name => {
     if (!name) return;
-    await Storage.addPriceItem(name);
+    // The new row is in the cache before the write's first await, so it can join
+    // the filter at once — even offline, where the write itself never settles.
+    const before = new Set(Storage.listPriceItems().map(i => i.id));
+    const saving = Storage.addPriceItem(name);
+    const added = Storage.listPriceItems().find(i => !before.has(i.id));
+    if (added) joinPriceFilter(pricePickItems, added.id);
     renderPriceTable();
+    await saving;
   });
 });
 if (priceAddVendorBtn) priceAddVendorBtn.addEventListener('click', () => {
@@ -4458,8 +4537,12 @@ if (priceAddVendorBtn) priceAddVendorBtn.addEventListener('click', () => {
     similar: Storage.getPriceConfig().vendors.map(v => v.name),
   }).then(async name => {
     if (!name) return;
-    await Storage.addPriceVendor(name);
+    const before = new Set(Storage.getPriceConfig().vendors.map(v => v.id));
+    const saving = Storage.addPriceVendor(name);
+    const added = Storage.getPriceConfig().vendors.find(v => !before.has(v.id));
+    if (added) joinPriceFilter(pricePickVendors, added.id);
     renderPriceTable();
+    await saving;
   });
 });
 // Zoom by scaling type and spacing rather than transforming the table: a
@@ -4816,8 +4899,11 @@ function exitPriceReorderMode() {
     priceReorderBtn.classList.remove('active');
   }
 }
-const priceFilterStartBtn = document.getElementById('price-filter-start');
-if (priceFilterStartBtn) priceFilterStartBtn.addEventListener('click', () => {
+// Filter (v2026.11.19-2156): one header button. Off → picking (fresh ticks); picking →
+// apply, or no filter if nothing is ticked; on → picking again with the ticks kept.
+function startPriceFilterPicking(keepTicks) {
+  if (!keepTicks) { pricePickItems.clear(); pricePickVendors.clear(); }
+  priceFilterWasOn = keepTicks;
   priceFilterMode = 'picking';
   // You cannot tick a row a search has hidden, so the box goes on the way in.
   clearPriceSearchBox();
@@ -4825,22 +4911,25 @@ if (priceFilterStartBtn) priceFilterStartBtn.addEventListener('click', () => {
   // "keep these" — two sets of identical boxes on one table is unreadable.
   if (priceReorderMode) exitPriceReorderMode();
   savePriceFilter();
+  openCellKey = null;
   renderPriceTable();
-});
+}
 const priceFilterBtn = document.getElementById('price-filter-btn');
 if (priceFilterBtn) priceFilterBtn.addEventListener('click', () => {
-  if (priceFilterMode === 'picking') {
-    // Nothing ticked would hide the whole table and the way back out of it.
-    if (!pricePickItems.size && !pricePickVendors.size) {
-      showAlert('Tick the rows and columns you want to keep first.', 'Nothing picked');
-      return;
-    }
-    priceFilterMode = 'on';
-  } else {
-    clearPriceFilter();
-  }
+  if (priceFilterMode === 'off') { startPriceFilterPicking(false); return; }
+  if (priceFilterMode === 'on') { startPriceFilterPicking(true); return; }
+  // Applying with nothing ticked is a cancel: no filter, no message (v2026.11.19-2156).
+  if (!pricePickItems.size && !pricePickVendors.size) clearPriceFilter();
+  else priceFilterMode = 'on';
   clearPriceSearchBox();
   savePriceFilter();
+  openCellKey = null;
+  renderPriceTable();
+});
+const priceFilterOffBtn = document.getElementById('price-filter-off');
+if (priceFilterOffBtn) priceFilterOffBtn.addEventListener('click', () => {
+  clearPriceFilter();
+  clearPriceSearchBox();
   openCellKey = null;
   renderPriceTable();
 });
@@ -4858,7 +4947,9 @@ if (priceReorderBtn) priceReorderBtn.addEventListener('click', () => {
   if (!priceReorderMode && priceFilterMode !== 'off') clearPriceFilter();
   priceReorderMode = !priceReorderMode;
   priceReorderBtn.setAttribute('aria-pressed', String(priceReorderMode));
-  priceReorderBtn.textContent = priceReorderMode ? 'Done' : 'Layout';
+  // "Finish layout", not "Done": coming back to it later, Done says nothing
+  // about what is being finished (v2026.11.19-2156). Each move already saved.
+  priceReorderBtn.textContent = priceReorderMode ? 'Finish layout' : 'Layout';
   priceReorderBtn.classList.toggle('active', priceReorderMode);
   if (priceReorderMode && priceFilter) {
     // Reordering a filtered view would move rows relative to ones you can't
@@ -4911,6 +5002,7 @@ async function movePriceSelectionFirst() {
 const priceSearchInput = document.getElementById('price-search');
 if (priceSearchInput) priceSearchInput.addEventListener('input', () => {
   priceFilter = priceSearchInput.value;
+  priceShowOutside = false;
   openCellKey = null;
   renderPriceTable();
 });
@@ -12587,8 +12679,21 @@ function tutorialSteps(part) {
     {
       screen: 'price',
       setup: () => { showPriceTable(); return true; },
+      target: () => document.getElementById('price-filter-btn'),
+      // Filter and Layout moved out of the ⋯ menu (v2026.11.19-2156).
+      text: 'Filter shows only the rows and columns you tick — on this device, until you turn it off. Apply filter with nothing ticked just cancels. While it’s on, Edit filter changes the picks, anything you add joins it, and a search looks inside the filter first: matches outside it are offered underneath, each with a + Filter tag to add it.',
+    },
+    {
+      screen: 'price',
+      setup: () => { showPriceTable(); return true; },
+      target: () => document.getElementById('price-reorder'),
+      text: 'Layout lets you reorder rows and columns: use the arrows, or tick several to move them to the top together. Each move saves as you make it; Finish layout puts the arrows away.',
+    },
+    {
+      screen: 'price',
+      setup: () => { showPriceTable(); return true; },
       target: () => document.getElementById('price-more-btn'),
-      text: 'The ⋯ menu holds the rest: sort A–Z or by most recently priced, Layout to reorder rows and columns (tick several to move them to the top together), Filter to show only the rows and columns you tick — on this device, until you turn it off — export to a spreadsheet (latest prices, or the full price history), import prices from a file or a pasted table (repeats are skipped), Share / unshare to let an employee see it (the number is how many can), and (admins) reset it to start over.',
+      text: 'The ⋯ menu holds the rest: sort A–Z or by most recently priced, export to a spreadsheet (latest prices, or the full price history), import prices from a file or a pasted table (repeats are skipped), Share / unshare to let an employee see it (the number is how many can), and (admins) reset it to start over.',
     },
   ];
 
@@ -12678,7 +12783,8 @@ function tutorialSteps(part) {
         target: () => document.querySelector('#cal-grid .cal-cues') || document.querySelector('#cal-grid .cal-scroll'),
         // Follows Settings › Calendar swipe (v2026.09.30-2127; Scroll v2026.10.28-2305).
         text: calSwipeScroll()
-          ? 'Scroll up and down through the months — they carry on in both directions. This month is outlined in blue; the month you’ve scrolled to is named at the top of the screen. Swipe view in the ⋯ menu goes back to swiping a month at a time.'
+          ? 'Scroll up and down through the months — they carry on in both directions. This month is outlined in blue; the month you’ve scrolled to is named at the top of the screen.'
+            + (CAL_SWIPE_DORMANT ? '' : ' Swipe view in the ⋯ menu goes back to swiping a month at a time.')
           : calSwipeVertical()
           ? 'Swipe up for next month and down for last. These cues name the month you’re heading to, and you can tap them instead. Scroll view in the ⋯ menu shows the months as one long scroll; Settings › Calendar swipe switches to sideways.'
           : 'Swipe left for next month and right for last. These cues name the month you’re heading to, and you can tap them instead. Scroll view in the ⋯ menu shows the months as one long scroll; Settings › Calendar swipe switches to up and down.',
@@ -12977,7 +13083,9 @@ function tutorialSteps(part) {
       step(() => document.getElementById('feature-toggle-list'),
         'Switch off what you do not use and it disappears from the app — nothing is deleted, and turning it back on puts everything where it was. This is your account only; it follows you to your other devices and changes nothing for anyone else. If part of the app has vanished, look here first.'),
       step(() => { const el = document.getElementById('theme-cycle-btn'); return el ? el.closest('.setting-row') : null; },
-        'Appearance & editing: light or dark, 12- or 24-hour time, where the Back button sits, which way the calendar swipes, and two editing options. These are for this device only.'),
+        CAL_SWIPE_DORMANT
+          ? 'Appearance & editing: light or dark, 12- or 24-hour time, where the Back button sits, and two editing options. These are for this device only.'
+          : 'Appearance & editing: light or dark, 12- or 24-hour time, where the Back button sits, which way the calendar swipes, and two editing options. These are for this device only.'),
       step(row('backup-btn'),
         'Downloads everything — including jobs and hours — as one file you can keep. Worth doing before anything drastic. Photos and documents are NOT in it; those live on the device. Restore from backup adds back anything that has gone missing, and never changes or deletes what is already here.'),
       step(() => document.getElementById('trash-open-btn'),
