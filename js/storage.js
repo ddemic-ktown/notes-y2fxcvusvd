@@ -1128,6 +1128,23 @@ export const Storage = {
     await setDoc(doc(priceItemsCol(), id), stripId(item)).catch(err => console.warn("addPriceItem", err));
     return item;
   },
+  // Several rows' order at once (v2026.11.22-0950): ONE redraw and one batched write, so
+  // Move to top/bottom lands in a single step instead of shuffling row by row.
+  async setPriceItemOrders(orders) {   // { [itemId]: order }
+    const now = nowIso();
+    const batch = writeBatch(db);
+    let n = 0;
+    _cache.priceItems = _cache.priceItems.map(it => {
+      if (!(it.id in orders)) return it;
+      const next = { ...it, order: orders[it.id], updated: now };
+      batch.set(doc(priceItemsCol(), it.id), stripId(next));
+      n++;
+      return next;
+    });
+    if (!n) return;
+    emit();
+    await tracked(batch.commit()).catch(err => console.warn('setPriceItemOrders', err));
+  },
   async savePriceItem(itemId, patch) {
     const i = _cache.priceItems.findIndex(n => n.id === itemId);
     if (i === -1) return null;

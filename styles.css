@@ -692,6 +692,13 @@ select.iif-date-input { appearance: none; -webkit-appearance: none; padding-righ
 .cal-mblock, .cal-scroll .cal-cells { max-width: 100%; }
 .cal-mblock { border: 2px solid transparent; border-radius: 8px; padding: 2px; margin-bottom: 8px; transition: border-color 0.2s; }
 .cal-mblock.cal-mblock-active { border-color: var(--accent); }
+/* Desktop (v2026.11.22-0950): 2px read as a hairline on a big screen. Every month block gets
+   the 5px border (transparent when inactive) so the outline moving doesn't shift
+   the layout. Phones keep 2px — same breakpoint as PHONE_MQ. */
+@media (min-width: 431px) {
+  .cal-mblock { border-width: 5px; }
+  .cal-cell.cal-today { border-width: 5px; }
+}
 .cal-mtitle { font-size: 14px; font-weight: 700; color: var(--ink); padding: 4px 4px 6px; }
 .cal-mblock-active .cal-mtitle { color: var(--accent); }
 .cal-scroll .cal-cells { flex: none; overflow: visible; grid-auto-rows: minmax(84px, auto); }
@@ -766,7 +773,14 @@ select.iif-date-input { appearance: none; -webkit-appearance: none; padding-righ
   user-select: none;
   -webkit-touch-callout: none;
 }
-.cal-block-dragging { opacity: 0.85; box-shadow: 0 6px 18px rgba(0,0,0,0.3); z-index: 50 !important; }
+/* Picked up to move or resize (v2026.11.22-0950): outlined and lifted, the rest dimmed. */
+.cal-block-dragging { opacity: 1; outline: 3px solid var(--accent); outline-offset: 0; box-shadow: 0 8px 22px rgba(0,0,0,0.35); z-index: 50 !important; }
+.cal-timeline.cal-lifting .cal-block:not(.cal-block-dragging) { opacity: 0.35; transition: opacity 0.15s; }
+.cal-live-time {
+  position: absolute; z-index: 60; pointer-events: none; white-space: nowrap;
+  font-size: 11px; font-weight: 700; line-height: 1.5; padding: 1px 7px; border-radius: 999px;
+  background: var(--accent); color: var(--accent-ink); box-shadow: var(--shadow);
+}
 .cal-block-time { font-size: 10px; color: var(--ink-soft); }
 /* Customer + crew on ONE row when they fit. `flex: 0 1 auto` on the name is
    what allows it: the name takes only what it needs, so the chips sit beside a

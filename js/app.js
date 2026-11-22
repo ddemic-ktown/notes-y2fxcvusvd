@@ -20,6 +20,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 100, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.11.22-0950', 'Day view: tap an empty time for a new job there; new jobs start an hour long; a job being moved or resized is outlined, shows its new time live and dims the rest. Price table Move to top/bottom lands in one step and scrolls to it. Thicker calendar outlines on desktop'],
   ['v2026.11.22-0916', 'Day view: press and hold anywhere on a job to move it, on phones and with a mouse; the length handle in the corner is bigger'],
   ['v2026.11.19-2214', 'Calendar: a swipe that starts sideways and turns up or down now scrolls the months (Android and iPhone)'],
   ['v2026.11.19-2203', 'Price table Layout: arrows gone — tick rows or columns, then Move to top/bottom (far left/right for columns); a filter that is on stays on'],
@@ -119,7 +120,6 @@ const CHANGELOG = [
   ['v2026.09.30-2127', 'Settings › Calendar swipe: change month or week by swiping sideways or up and down'],
   ['v2026.09.30-2112', 'Tutorials 3, 7 and 9 open by saying which screen you are on and how to get there yourself'],
   ['v2026.09.30-2107', 'Settings › Features: the Hours button hint says the switch above hides the whole feature, not removes it — nothing is deleted'],
-  ['v2026.09.30-2105', 'Settings: every section opens and closes from its heading, all start closed, and Expand all / Collapse all sit at the top'],
 ];
 const APP_VERSION = CHANGELOG[0][0];
 
@@ -2260,10 +2260,20 @@ function renderCalendarDay() {
 
   if (!jobs.length) {
     untimedWrap.hidden = false;
-    untimedWrap.innerHTML = `<p class="cal-untimed-label">Nothing scheduled${canEdit ? ' — tap + to add a job' : ''}</p>`;
+    untimedWrap.innerHTML = `<p class="cal-untimed-label">Nothing scheduled${canEdit ? ' — tap a time or + to add a job' : ''}</p>`;
   }
 
   wireDayInteractions(canEdit);
+  // Tap an empty time (v2026.11.22-0950): a new job starting there, an hour long. Nothing is
+  // saved until Save, same as +. Taps on a job, or the end of a drag, land on
+  // the block and are ignored here.
+  if (canEdit) timeline.onclick = (e) => {
+    if (e.target.closest('.cal-block, .cal-now, a, button')) return;
+    const y = e.clientY - timeline.getBoundingClientRect().top;
+    const min = Math.max(0, Math.min(24 * 60 - SNAP_MIN, snapMinutes((y / HOUR_PX) * 60)));
+    openJobModal(null, calSelectedDate, { start: hhmmFromMinutes(min) });
+  };
+  else timeline.onclick = null;
 
   // Open on the first job rather than at midnight
   const scroller = document.getElementById('cal-day-scroll');
@@ -2297,6 +2307,41 @@ function wireDayInteractions(canEdit) {
       calTouchOwned = false;
       document.removeEventListener('touchmove', blockCalDragScroll, { passive: false });
     };
+    // Picked up (v2026.11.22-0950): outlined, the other jobs dimmed, and the time shown live —
+    // on the block's own time line, or in a tag above it when the block is too
+    // short to have one (the block clips, so the tag lives on the timeline).
+    const job0 = Storage.getJob(jobId);
+    const span0 = job0 ? jobSpan(job0) : null;
+    const dragLen = span0 ? span0.trueEnd - span0.start : DEFAULT_LEN;
+    const timeEl = block.querySelector('.cal-block-time');
+    let liveTag = null;
+    const showLive = () => {
+      const s = snapMinutes((parseFloat(block.style.top) / HOUR_PX) * 60);
+      const len = resizing
+        ? Math.max(SNAP_MIN, snapMinutes((parseFloat(block.style.height) / HOUR_PX) * 60))
+        : dragLen;
+      const e = s + len;
+      const txt = `${fmtClock(s)}–${fmtClock(e % (24 * 60))}${e > 24 * 60 ? ' +1' : ''}`;
+      if (timeEl) { timeEl.textContent = txt; return; }
+      if (!liveTag) {
+        liveTag = document.createElement('div');
+        liveTag.className = 'cal-live-time';
+        timeline.appendChild(liveTag);
+      }
+      liveTag.textContent = txt;
+      liveTag.style.left = block.style.left;
+      liveTag.style.top = `${Math.max(0, block.offsetTop - 20)}px`;
+    };
+    const lift = () => {
+      block.classList.add('cal-block-dragging');
+      timeline.classList.add('cal-lifting');
+      showLive();
+    };
+    const drop = () => {
+      block.classList.remove('cal-block-dragging');
+      timeline.classList.remove('cal-lifting');
+      if (liveTag) { liveTag.remove(); liveTag = null; }
+    };
 
     const beginDrag = (y) => {
       dragging = true;
@@ -2304,7 +2349,7 @@ function wireDayInteractions(canEdit) {
       startY = y;
       origTop = parseFloat(block.style.top);
       origH = parseFloat(block.style.height);
-      block.classList.add('cal-block-dragging');
+      lift();
       // The block stays `touch-action: pan-y` in CSS so the day can still be
       // scrolled with a finger that happens to land on a card. Setting
       // touch-action here would do NOTHING — the browser latched it when the
@@ -2325,6 +2370,7 @@ function wireDayInteractions(canEdit) {
         block.setPointerCapture(e.pointerId);
         e.preventDefault();
         takeOverCalTouch();
+        lift();
         return;
       }
       downX = e.clientX; downY = e.clientY;
@@ -2344,6 +2390,7 @@ function wireDayInteractions(canEdit) {
         // otherwise the preview sits 2px out of step and shifts on release.
         const h = Math.max(SNAP_PX - 2, snapPx(origH + 2 + (e.clientY - startY)) - 2);
         block.style.height = `${h}px`;
+        showLive();
         return;
       }
       if (!dragging) {
@@ -2363,13 +2410,14 @@ function wireDayInteractions(canEdit) {
       // leave a non-multiple, which is better than letting the block overhang.
       const next = Math.max(0, Math.min(24 * HOUR_PX - origH, snapPx(origTop + (e.clientY - startY))));
       block.style.top = `${next}px`;
+      showLive();
     });
     const finish = async (e) => {
       if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
       if (!dragging && !resizing) return;                 // plain tap handled below
       const wasDragging = dragging, wasResizing = resizing;
       dragging = resizing = false;
-      block.classList.remove('cal-block-dragging');
+      drop();
       releaseCalTouch();              // hand scrolling back to the browser
       if (!moved) { renderCalendarDay(); return; }
       const job = Storage.getJob(jobId);
@@ -2959,7 +3007,7 @@ function openJobMenu(jobId, opts = {}) {
   });
 })();
 
-function openJobModal(jobId, dateStr) {
+function openJobModal(jobId, dateStr, opts = {}) {
   if (!jobModal || !isAdminRole()) return;
   jobEditingId = jobId || null;
   jobTitlePrefix = '';
@@ -2974,7 +3022,14 @@ function openJobModal(jobId, dateStr) {
   // still derived. (v2026.09.21-2226)
   const savedDur = job ? Number(job.duration) : NaN;
   if (Number.isFinite(savedDur) && savedDur > 0) setJobDuration(savedDur);
-  else syncDurationFromTimes();
+  else if (job) syncDurationFromTimes();
+  else {
+    // A NEW job is an hour long to begin with (v2026.11.22-0950); the end follows once a start
+    // is set. A tap on the day view's timeline passes the start it landed on.
+    if (opts.start) document.getElementById('job-start').value = opts.start;
+    setJobDuration(1);
+    syncEndFromDuration();
+  }
   document.getElementById('job-desc').value = (job && job.description) || '';
   document.getElementById('job-address').value = (job && job.address) || '';
   jobChosenCustomer = job && job.customerId
@@ -5027,13 +5082,20 @@ function renderPriceSelectBar() {
 // toEnd (v2026.11.19-2203): to the bottom / far right instead. Always the WHOLE
 // table, filter or not — rows the filter hides keep their order around them.
 async function movePriceSelection(toEnd) {
-  if (priceSelItems.size) {
+  const movedRows = priceSelItems.size > 0, movedCols = priceSelVendors.size > 0;
+  if (movedRows) {
+    // Only the ticked rows get new orders, just past either end of the rest (v2026.11.22-0950).
+    // It used to renumber the whole table one awaited write at a time, redrawing
+    // after each — the rows visibly crept up a spot at a time.
     const items = Storage.listPriceItems();
     const picked = items.filter(i => priceSelItems.has(i.id));
     const rest = items.filter(i => !priceSelItems.has(i.id));
-    const ordered = toEnd ? [...rest, ...picked] : [...picked, ...rest];
-    for (let i = 0; i < ordered.length; i++) {
-      if ((ordered[i].order ?? -1) !== i) await Storage.savePriceItem(ordered[i].id, { order: i });
+    if (picked.length && rest.length) {
+      const orders = {};
+      const ords = rest.map(i => i.order ?? 0);
+      const base = toEnd ? Math.max(...ords) + 1 : Math.min(...ords) - picked.length;
+      picked.forEach((it, k) => { orders[it.id] = base + k; });
+      Storage.setPriceItemOrders(orders);
     }
   }
   if (priceSelVendors.size) {
@@ -5045,6 +5107,11 @@ async function movePriceSelection(toEnd) {
   priceSelItems.clear();
   priceSelVendors.clear();
   renderPriceTable();
+  // Show where they landed (v2026.11.22-0950).
+  if (priceScrollEl) {
+    if (movedRows) priceScrollEl.scrollTop = toEnd ? priceScrollEl.scrollHeight : 0;
+    if (movedCols) priceScrollEl.scrollLeft = toEnd ? priceScrollEl.scrollWidth : 0;
+  }
 }
 const priceSearchInput = document.getElementById('price-search');
 if (priceSearchInput) priceSearchInput.addEventListener('input', () => {
@@ -12924,7 +12991,7 @@ function tutorialSteps(part) {
         // Back out of the job-editor steps must not leave it open over the +.
         setup: () => { if (jobModal && !jobModal.hidden) jobModal.hidden = true; return goMonth(); },
         target: () => document.getElementById('cal-fab'),
-        text: 'Add a job with +. Only the date is required — customer, address, times and who’s going can all come later. Tapping an empty day starts one on that day.',
+        text: 'Add a job with +. Only the date is required — customer, address, times and who’s going can all come later. Tapping an empty day starts one on that day; in the day view, tapping an empty time starts one at that time. A new job is an hour long until you change it.',
       },
       {
         // THE STEP THIS TOUR WAS MISSING. The Hours chart is built entirely
