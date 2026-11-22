@@ -760,6 +760,11 @@ select.iif-date-input { appearance: none; -webkit-appearance: none; padding-righ
   /* pan-y so a finger starting on a card can still scroll the day; JS switches
      this to `none` only once a long-press turns into a drag. */
   touch-action: pan-y;
+  /* A hold on the text used to start a text selection (and the phone's copy
+     menu), which cancelled the drag — so only blank spots worked. (v2026.11.22-0916) */
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
 }
 .cal-block-dragging { opacity: 0.85; box-shadow: 0 6px 18px rgba(0,0,0,0.3); z-index: 50 !important; }
 .cal-block-time { font-size: 10px; color: var(--ink-soft); }
@@ -1002,7 +1007,7 @@ select.iif-date-input { appearance: none; -webkit-appearance: none; padding-righ
 .cal-block-cust { opacity: 0.85; }
 .cal-untimed-cust { font-size: 0.85em; color: var(--ink-soft); }
 .cal-resize {
-  position: absolute; right: 0; bottom: 0; width: 22px; height: 18px;
+  position: absolute; right: 0; bottom: 0; width: 30px; height: 24px;   /* was 22×18 (v2026.11.22-0916) */
   touch-action: none;   /* the handle is only ever a drag */
   cursor: ns-resize;
   background: linear-gradient(135deg, transparent 55%, var(--accent) 55%, var(--accent) 70%, transparent 70%);

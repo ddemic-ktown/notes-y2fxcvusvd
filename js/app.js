@@ -20,6 +20,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 100, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.11.22-0916', 'Day view: press and hold anywhere on a job to move it, on phones and with a mouse; the length handle in the corner is bigger'],
   ['v2026.11.19-2214', 'Calendar: a swipe that starts sideways and turns up or down now scrolls the months (Android and iPhone)'],
   ['v2026.11.19-2203', 'Price table Layout: arrows gone — tick rows or columns, then Move to top/bottom (far left/right for columns); a filter that is on stays on'],
   ['v2026.11.19-2156', 'Price table: Filter and Layout on the toolbar (Finish layout while rearranging), Apply with nothing ticked cancels, Edit filter keeps your picks, new items and vendors join the filter, search inside the filter offers outside matches with + Filter; calendar always uses Scroll view and its columns always fit the screen'],
@@ -119,7 +120,6 @@ const CHANGELOG = [
   ['v2026.09.30-2112', 'Tutorials 3, 7 and 9 open by saying which screen you are on and how to get there yourself'],
   ['v2026.09.30-2107', 'Settings › Features: the Hours button hint says the switch above hides the whole feature, not removes it — nothing is deleted'],
   ['v2026.09.30-2105', 'Settings: every section opens and closes from its heading, all start closed, and Expand all / Collapse all sit at the top'],
-  ['v2026.09.30-2103', 'The home search bar says “Search customers and notes…”, since it finds both'],
 ];
 const APP_VERSION = CHANGELOG[0][0];
 
@@ -2328,8 +2328,14 @@ function wireDayInteractions(canEdit) {
         return;
       }
       downX = e.clientX; downY = e.clientY;
+      // Mouse (v2026.11.22-0916): a press on the text began selecting it, and the selection
+      // swallowed the drag. The click that opens the job menu still fires.
+      if (e.pointerType === 'mouse') e.preventDefault();
       pressTimer = setTimeout(() => { beginDrag(e.clientY); block.setPointerCapture(e.pointerId); }, 450);
     });
+    // Android's long-press menu fires about when the drag would start, and
+    // cancels the pointer — the drag died with it. (v2026.11.22-0916)
+    if (canEdit) block.addEventListener('contextmenu', (e) => e.preventDefault());
     block.addEventListener('pointermove', (e) => {
       if (resizing) {
         moved = true;
