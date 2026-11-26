@@ -745,6 +745,8 @@ select.iif-date-input { appearance: none; -webkit-appearance: none; padding-righ
 .cal-block-addr { font-size: 10px; color: var(--ink-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .cal-day-scroll { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+/* v2026.11.25-2104: two fingers zoom the TIMELINE here, not the page. */
+.cal-day-scroll { touch-action: pan-x pan-y; }
 .cal-timeline { position: relative; }
 .cal-hour {
   position: absolute; left: 0; right: 0; height: 0;

@@ -20,6 +20,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 100, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.11.25-2104', 'Day view zooms (pinch, − / +, Ctrl + wheel) down to the whole day; it no longer jumps after moving or resizing a job, and scrolls along when you drag a job to the edge. The calendar reopens where you left it for 10 minutes'],
   ['v2026.11.22-0950', 'Day view: tap an empty time for a new job there; new jobs start an hour long; a job being moved or resized is outlined, shows its new time live and dims the rest. Price table Move to top/bottom lands in one step and scrolls to it. Thicker calendar outlines on desktop'],
   ['v2026.11.22-0916', 'Day view: press and hold anywhere on a job to move it, on phones and with a mouse; the length handle in the corner is bigger'],
   ['v2026.11.19-2214', 'Calendar: a swipe that starts sideways and turns up or down now scrolls the months (Android and iPhone)'],
@@ -119,7 +120,6 @@ const CHANGELOG = [
   ['v2026.09.30-2137', 'Android: the keyboard no longer pushes the note editor’s toolbar off the top of the screen'],
   ['v2026.09.30-2127', 'Settings › Calendar swipe: change month or week by swiping sideways or up and down'],
   ['v2026.09.30-2112', 'Tutorials 3, 7 and 9 open by saying which screen you are on and how to get there yourself'],
-  ['v2026.09.30-2107', 'Settings › Features: the Hours button hint says the switch above hides the whole feature, not removes it — nothing is deleted'],
 ];
 const APP_VERSION = CHANGELOG[0][0];
 
@@ -1389,6 +1389,45 @@ function monthGridDays(cursor) {
   return days;
 }
 
+// CALENDAR MEMORY (v2026.11.25-2104). Leaving the calendar saves the view, the day and the
+// scroll position, per device. openCalendar() — the way IN from Home and the nav
+// bar — goes back there within 10 minutes, even across an app restart; after
+// that it opens on this month. Back/forward and the crumbs still go where they say.
+const CAL_MEMORY_MS = 10 * 60 * 1000;
+function saveCalMemory() {
+  let st = null;
+  if (calendarDayView && calendarDayView.classList.contains('active') && calSelectedDate) {
+    const sc = document.getElementById('cal-day-scroll');
+    st = { view: 'day', date: calSelectedDate, dayTop: sc ? sc.scrollTop : 0 };
+  } else if (calendarView && calendarView.classList.contains('active')) {
+    st = { view: 'month', ym: calYm(calCursor), anchor: calScrollAnchor };
+  }
+  if (!st) return;
+  st.at = Date.now();
+  try { localStorage.setItem('na-cal-memory', JSON.stringify(st)); } catch (e) {}
+}
+document.addEventListener('visibilitychange', () => { if (document.hidden) saveCalMemory(); });
+function openCalendar() {
+  let st = null;
+  try { st = JSON.parse(localStorage.getItem('na-cal-memory') || 'null'); } catch (e) {}
+  const fresh = st && Date.now() - (Number(st.at) || 0) < CAL_MEMORY_MS;
+  if (fresh && st.view === 'day' && /^\d{4}-\d{2}-\d{2}$/.test(st.date || '')) {
+    showCalendarDay(st.date);
+    const sc = document.getElementById('cal-day-scroll');
+    if (sc && Number.isFinite(st.dayTop)) sc.scrollTop = st.dayTop;
+    return;
+  }
+  if (fresh && st.view === 'month' && /^\d{4}-\d{2}$/.test(st.ym || '')) {
+    const [y, m] = st.ym.split('-').map(Number);
+    calCursor = new Date(y, m - 1, 1);
+    calScrollAnchor = st.anchor && st.anchor.ym ? st.anchor : null;
+  } else {
+    calCursor = new Date();
+    calScrollAnchor = null;
+  }
+  calScrollStart = null;
+  showCalendar();
+}
 function showCalendar() {
   if (!isFeatureOn('calendar')) { goHome(); return; }   // switched off in Features (v2026.10.02-1840)
   hideAllScreens();
@@ -1950,13 +1989,16 @@ function renderCalendar() {
   wireCalCells(calGrid);
 }
 
+let calDayScrolledFor = null;   // the day the day view's opening scroll was done for (v2026.11.25-2104)
 function showCalendarDay(dateStr) {
   if (!isFeatureOn('calendar')) { goHome(); return; }   // switched off in Features (v2026.10.02-1840)
   Storage.ensureJobMonth(dateStr);
   calSelectedDate = dateStr;
   hideAllScreens();
   calendarDayView.classList.add('active');
+  calDayScrolledFor = null;      // opening a day: do the opening scroll (v2026.11.25-2104)
   renderCalendarDay();
+  updateDayZoomButtons();
   if (!handlingPopstate) history.pushState({ screen: 'calendar-day', date: dateStr }, '');
 }
 
@@ -1978,7 +2020,15 @@ function blockCalDragScroll(e) {
   if (calTouchOwned && e.cancelable) e.preventDefault();
 }
 
-const HOUR_PX = 56;          // one hour of timeline
+// DAY ZOOM (v2026.11.25-2104): one hour of timeline in px. Was a fixed 56. Pinch, the − / +
+// buttons or Ctrl + wheel change it, from "the whole day fits" up to DAY_ZOOM_MAX.
+// Remembered per device. Everything that positions or snaps reads it live.
+const DAY_ZOOM_DEFAULT = 56;
+const DAY_ZOOM_MAX = 160;
+let HOUR_PX = (() => {
+  const v = Number(localStorage.getItem('na-day-zoom'));
+  return Number.isFinite(v) && v >= 8 && v <= DAY_ZOOM_MAX ? v : DAY_ZOOM_DEFAULT;
+})();
 const SNAP_MIN = 15;         // dragging snaps to quarter hours
 const DEFAULT_LEN = 60;      // a job with a start but no end draws as an hour
 
@@ -2035,7 +2085,18 @@ function snapMinutes(min) { return Math.round(min / SNAP_MIN) * SNAP_MIN; }
 // The same snap in PIXELS, for the live drag preview. Both ends already snapped
 // on DROP, but the block followed the finger smoothly and then jumped, which
 // reads as "it doesn't snap". (v2026.09.24-2001)
-const SNAP_PX = HOUR_PX * SNAP_MIN / 60;          // 14px at 56px/hour
+let SNAP_PX = HOUR_PX * SNAP_MIN / 60;          // 14px at 56px/hour
+function setHourPx(px) {
+  HOUR_PX = px;
+  SNAP_PX = HOUR_PX * SNAP_MIN / 60;
+  try { localStorage.setItem('na-day-zoom', String(Math.round(px * 100) / 100)); } catch (e) {}
+}
+// The smallest zoom: all 24 hours in the visible part of the scroller.
+function dayFitPx() {
+  const sc = document.getElementById('cal-day-scroll');
+  const h = sc ? sc.clientHeight : 0;
+  return h > 0 ? Math.max(8, Math.floor((h - 8) / 24 * 100) / 100) : 8;
+}
 function snapPx(px) { return Math.round(px / SNAP_PX) * SNAP_PX; }
 // An end EARLIER than the start means the job runs past midnight — a night
 // shift, not a mistake (v2026.09.21-2226). `end` is what the day timeline
@@ -2119,6 +2180,9 @@ function renderCalendarDay() {
   const timeline = document.getElementById('cal-day-timeline');
   const untimedWrap = document.getElementById('cal-day-untimed');
   if (!timeline || !calSelectedDate) return;
+  // A taller window can fit more than the saved zoom shows: never below "whole day". (v2026.11.25-2104)
+  const fit = dayFitPx();
+  if (HOUR_PX < fit) { HOUR_PX = fit; SNAP_PX = HOUR_PX * SNAP_MIN / 60; }
   // Home › August › Thursday 15th. The middle crumb names the MONTH rather than
   // saying "Calendar" — it goes to the same place, and a trail reads better as
   // where you are than as what the screen is called.
@@ -2275,13 +2339,84 @@ function renderCalendarDay() {
   };
   else timeline.onclick = null;
 
-  // Open on the first job rather than at midnight
+  // Open on the first job rather than at midnight — but only when a day is
+  // OPENED or changed (v2026.11.25-2104). Every move, resize, save or delete redraws too,
+  // and jumping back to the first job each time read as a random scroll.
   const scroller = document.getElementById('cal-day-scroll');
-  if (scroller) {
+  if (scroller && calDayScrolledFor !== calSelectedDate) {
     const firstStart = spans.length ? Math.min(...spans.map(s => s.start)) : 8 * 60;
     scroller.scrollTop = Math.max(0, (firstStart / 60) * HOUR_PX - HOUR_PX);
+    calDayScrolledFor = calSelectedDate;
   }
 }
+
+// Zoom to px, keeping the time under focusY (a clientY; default the middle) still. (v2026.11.25-2104)
+function zoomDay(px, focusY) {
+  const sc = document.getElementById('cal-day-scroll');
+  const tl = document.getElementById('cal-day-timeline');
+  if (!sc || !tl) return;
+  px = Math.max(dayFitPx(), Math.min(DAY_ZOOM_MAX, px));
+  if (Math.abs(px - HOUR_PX) < 0.25) return;
+  const fy = focusY == null ? sc.clientHeight / 2 : focusY - sc.getBoundingClientRect().top;
+  const min = ((sc.scrollTop + fy - tl.offsetTop) / HOUR_PX) * 60;
+  setHourPx(px);
+  renderCalendarDay();
+  sc.scrollTop = Math.max(0, (min / 60) * HOUR_PX + tl.offsetTop - fy);
+  updateDayZoomButtons();
+}
+function updateDayZoomButtons() {
+  const out = document.getElementById('calday-zoom-out');
+  const inn = document.getElementById('calday-zoom-in');
+  if (out) out.disabled = HOUR_PX <= dayFitPx() + 0.25;
+  if (inn) inn.disabled = HOUR_PX >= DAY_ZOOM_MAX - 0.25;
+}
+(() => {
+  const STEP = 1.4;
+  const out = document.getElementById('calday-zoom-out');
+  const inn = document.getElementById('calday-zoom-in');
+  if (out) out.addEventListener('click', () => zoomDay(HOUR_PX / STEP));
+  if (inn) inn.addEventListener('click', () => zoomDay(HOUR_PX * STEP));
+  const sc = document.getElementById('cal-day-scroll');
+  const tl = document.getElementById('cal-day-timeline');
+  if (!sc || !tl) return;
+  // Ctrl + wheel — also what a Mac trackpad pinch sends.
+  sc.addEventListener('wheel', (e) => {
+    if (!e.ctrlKey) return;
+    e.preventDefault();
+    zoomDay(HOUR_PX * Math.exp(-e.deltaY * 0.01), e.clientY);
+  }, { passive: false });
+  // Two-finger pinch. The page's own pinch-zoom is off here (CSS touch-action and
+  // gesturestart on iPhone). While the fingers are down the timeline is only
+  // STRETCHED — re-drawing would remove the element a finger is on, and its touch
+  // events would stop reaching us — then drawn properly at the new zoom on release.
+  let pinch = null;
+  const dist = (t) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+  sc.addEventListener('gesturestart', (e) => e.preventDefault());
+  sc.addEventListener('touchstart', (e) => {
+    if (e.touches.length !== 2 || calTouchOwned) return;
+    const midY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+    const fy = midY - sc.getBoundingClientRect().top;
+    pinch = { d0: dist(e.touches), midY, origin: sc.scrollTop + fy - tl.offsetTop, scale: 1 };
+    tl.style.transformOrigin = `0 ${pinch.origin}px`;
+  }, { passive: true });
+  sc.addEventListener('touchmove', (e) => {
+    if (!pinch || e.touches.length !== 2) return;
+    const fit = dayFitPx();
+    const raw = dist(e.touches) / pinch.d0;
+    pinch.scale = Math.max(fit / HOUR_PX, Math.min(DAY_ZOOM_MAX / HOUR_PX, raw));
+    tl.style.transform = `scaleY(${pinch.scale})`;
+  }, { passive: true });
+  const endPinch = () => {
+    if (!pinch) return;
+    const p = pinch;
+    pinch = null;
+    tl.style.transform = '';
+    tl.style.transformOrigin = '';
+    if (Math.abs(p.scale - 1) > 0.02) zoomDay(HOUR_PX * p.scale, p.midY);
+  };
+  sc.addEventListener('touchend', (e) => { if (e.touches.length < 2) endPinch(); }, { passive: true });
+  sc.addEventListener('touchcancel', endPinch, { passive: true });
+})();
 
 // Tap opens the editor; long-press drags the block to a new time; the corner
 // handle changes its length. Admin only — employees can't write jobs.
@@ -2341,7 +2476,52 @@ function wireDayInteractions(canEdit) {
       block.classList.remove('cal-block-dragging');
       timeline.classList.remove('cal-lifting');
       if (liveTag) { liveTag.remove(); liveTag = null; }
+      stopEdgeScroll();
     };
+    // Apply the finger's position (v2026.11.25-2104: shared by pointermove and the edge scroll).
+    let lastY = 0;
+    const applyMove = (clientY) => {
+      lastY = clientY;
+      if (resizing) {
+        // A block is drawn 2px shorter than it really is (the gap between
+        // stacked blocks), so snap the TRUE height and take the gap off again —
+        // otherwise the preview sits 2px out of step and shifts on release.
+        const maxH = 24 * HOUR_PX - parseFloat(block.style.top) - 2;
+        const h = Math.min(maxH, Math.max(SNAP_PX - 2, snapPx(origH + 2 + (clientY - startY)) - 2));
+        block.style.height = `${h}px`;
+      } else {
+        // `top` is exactly (start / 60) * HOUR_PX with no offset, so this snaps
+        // cleanly. Clamped after snapping: at the very bottom of the day that can
+        // leave a non-multiple, which is better than letting the block overhang.
+        const next = Math.max(0, Math.min(24 * HOUR_PX - origH, snapPx(origTop + (clientY - startY))));
+        block.style.top = `${next}px`;
+      }
+      showLive();
+    };
+    // EDGE SCROLL (v2026.11.25-2104): near the top or bottom of the day, scroll it and carry
+    // the job along — faster the closer to the edge. Stops at midnight either end.
+    const daySc = document.getElementById('cal-day-scroll');
+    let edgeRaf = null;
+    const EDGE = 48;
+    const edgeStep = () => {
+      edgeRaf = null;
+      if ((!dragging && !resizing) || !daySc) return;
+      const r = daySc.getBoundingClientRect();
+      let v = 0;
+      if (lastY < r.top + EDGE) v = -Math.ceil(((r.top + EDGE - lastY) / EDGE) * 14);
+      else if (lastY > r.bottom - EDGE) v = Math.ceil(((lastY - (r.bottom - EDGE)) / EDGE) * 14);
+      if (!v) return;
+      const before = daySc.scrollTop;
+      daySc.scrollTop = before + v;
+      const d = daySc.scrollTop - before;
+      if (d) {
+        if (resizing) origH += d; else origTop += d;
+        applyMove(lastY);
+      }
+      edgeRaf = requestAnimationFrame(edgeStep);
+    };
+    const kickEdgeScroll = () => { if (!edgeRaf) edgeRaf = requestAnimationFrame(edgeStep); };
+    function stopEdgeScroll() { if (edgeRaf) { cancelAnimationFrame(edgeRaf); edgeRaf = null; } }
 
     const beginDrag = (y) => {
       dragging = true;
@@ -2385,12 +2565,8 @@ function wireDayInteractions(canEdit) {
     block.addEventListener('pointermove', (e) => {
       if (resizing) {
         moved = true;
-        // A block is drawn 2px shorter than it really is (the gap between
-        // stacked blocks), so snap the TRUE height and take the gap off again —
-        // otherwise the preview sits 2px out of step and shifts on release.
-        const h = Math.max(SNAP_PX - 2, snapPx(origH + 2 + (e.clientY - startY)) - 2);
-        block.style.height = `${h}px`;
-        showLive();
+        applyMove(e.clientY);
+        kickEdgeScroll();
         return;
       }
       if (!dragging) {
@@ -2405,12 +2581,8 @@ function wireDayInteractions(canEdit) {
         return;
       }
       moved = true;
-      // `top` is exactly (start / 60) * HOUR_PX with no offset, so this snaps
-      // cleanly. Clamped after snapping: at the very bottom of the day that can
-      // leave a non-multiple, which is better than letting the block overhang.
-      const next = Math.max(0, Math.min(24 * HOUR_PX - origH, snapPx(origTop + (e.clientY - startY))));
-      block.style.top = `${next}px`;
-      showLive();
+      applyMove(e.clientY);
+      kickEdgeScroll();
     });
     const finish = async (e) => {
       if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
@@ -5532,6 +5704,7 @@ function restoreScroll(key) {
 }
 
 function hideAllScreens() {
+  saveCalMemory();   // v2026.11.25-2104
   rememberScroll();
   // Don't come back to a home screen full of layout controls
   if (homeLayoutMode && listView.classList.contains('active')) {
@@ -6641,7 +6814,7 @@ function getScreenNavs() {
       if (b.dataset.nav !== 'home' && editorView.classList.contains('active')) rememberNoteForBack();
       if (b.dataset.nav === 'home') { if (editorView.classList.contains('active')) commitAndCleanupEditor(); goHome(); return; }
       if (b.dataset.nav === 'customers') setTimeout(showCustomers, 0);
-      else if (b.dataset.nav === 'calendar') showCalendar();
+      else if (b.dataset.nav === 'calendar') { if (dayToGrid) showCalendar(); else openCalendar(); }
       else if (b.dataset.nav === 'price') showPriceTable();
       else if (b.dataset.nav === 'myhours') showMyHours();
     });
@@ -6682,7 +6855,7 @@ document.querySelectorAll('.screen').forEach(sec => {
     if (!b) return;
     if (b.dataset.nav === 'home') return;   // already Home
     if (b.dataset.nav === 'customers') setTimeout(showCustomers, 0);
-    else if (b.dataset.nav === 'calendar') showCalendar();
+    else if (b.dataset.nav === 'calendar') openCalendar();
     else if (b.dataset.nav === 'price') showPriceTable();
     else if (b.dataset.nav === 'myhours') showMyHours();
   });
@@ -6715,7 +6888,7 @@ function renderNotesList() {
       : '<p class="section-label">Your notes:</p>' + assigned.map(n => renderNoteCard(n)).join(''));
     notesList.querySelectorAll('.note-card[data-nav]').forEach(card => {
       card.addEventListener('click', () => {
-        if (card.dataset.nav === 'calendar') showCalendar();
+        if (card.dataset.nav === 'calendar') openCalendar();
         else if (card.dataset.nav === 'price') showPriceTable();
       });
     });
@@ -6925,7 +7098,7 @@ function renderNotesList() {
       }
       else if (card.dataset.keyword) showAggregator(card.dataset.keyword);
       else if (card.dataset.nav === 'price') showPriceTable();
-      else if (card.dataset.nav === 'calendar') showCalendar();
+      else if (card.dataset.nav === 'calendar') openCalendar();
       else if (card.dataset.nav === 'hours') showHoursView();
       else if (card.dataset.nav === 'orphans') {
         const count = Storage.listOrphanedNotes().length;
@@ -12924,6 +13097,15 @@ function tutorialSteps(part) {
         setup: goDay,
         target: () => document.querySelector('#calendar-day-view .cal-day-cues .cal-cue-side'),
         text: 'Swipe sideways for the next or previous day. The cue on each side names the day you’re going to.',
+      },
+      {
+        // v2026.11.25-2104
+        screen: 'calendar-day',
+        group: 'caljobs',
+        requires: () => Storage.listJobs().length > 0,
+        setup: goDay,
+        target: () => document.getElementById('calday-zoom-out'),
+        text: 'Pinch with two fingers, or use − and +, to zoom the day out until all 24 hours fit, and back in. On a computer, Ctrl + mouse wheel does the same. The zoom is kept on this device.',
       },
       {
         screen: 'calendar-day',

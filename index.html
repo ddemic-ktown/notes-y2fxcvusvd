@@ -315,6 +315,11 @@
       <div class="customers-header-top">
         <button class="icon-btn date-btn app-back-btn" aria-label="Back">‹ Back</button>
         <nav class="crumbs" id="crumbs-calendar-day" aria-label="Breadcrumb"></nav>
+        <!-- Day zoom (v2026.11.25-2104): also pinch, and Ctrl + wheel on a computer. -->
+        <div class="price-zoom" role="group" aria-label="Zoom the day">
+          <button id="calday-zoom-out" class="icon-btn zoom-btn" type="button" aria-label="Zoom out">−</button>
+          <button id="calday-zoom-in" class="icon-btn zoom-btn" type="button" aria-label="Zoom in">+</button>
+        </div>
         <!-- Day view's own ⋯ (v2026.11.10-2054): it had none, so today / filter / help meant
              going back to the month first. -->
         <div class="editor-more-wrap">
