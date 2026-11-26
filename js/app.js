@@ -20,6 +20,8 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 100, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.11.25-2357', 'Pinch: no zoom buttons on phones; price table zooms around your fingers; a pinch never picks up a job or opens a cell, and lifting one finger keeps scrolling. Day view: hold a job and let go to select it on top of the others. Customer list pinch-zooms. More room around Undo/Redo'],
+  ['v2026.11.25-2126', 'Desktop month view: a busy day makes its week taller instead of getting its own scroll bars'],
   ['v2026.11.25-2104', 'Day view zooms (pinch, − / +, Ctrl + wheel) down to the whole day; it no longer jumps after moving or resizing a job, and scrolls along when you drag a job to the edge. The calendar reopens where you left it for 10 minutes'],
   ['v2026.11.22-0950', 'Day view: tap an empty time for a new job there; new jobs start an hour long; a job being moved or resized is outlined, shows its new time live and dims the rest. Price table Move to top/bottom lands in one step and scrolls to it. Thicker calendar outlines on desktop'],
   ['v2026.11.22-0916', 'Day view: press and hold anywhere on a job to move it, on phones and with a mouse; the length handle in the corner is bigger'],
@@ -118,8 +120,6 @@ const CHANGELOG = [
   ['v2026.09.30-2250', 'Restore from backup (adds back only what is missing), backups now include jobs and hours, a Cancel filter button on the calendar and Clear filter in the filter box, pinch-zoom no longer flips the month, a dark keyboard gap in dark mode, crew note boxes sized right, and pasting a checkbox line onto a checkbox gives one box'],
   ['v2026.09.30-2205', 'Fixes the app sticking on the loading screen after the last update'],
   ['v2026.09.30-2137', 'Android: the keyboard no longer pushes the note editor’s toolbar off the top of the screen'],
-  ['v2026.09.30-2127', 'Settings › Calendar swipe: change month or week by swiping sideways or up and down'],
-  ['v2026.09.30-2112', 'Tutorials 3, 7 and 9 open by saying which screen you are on and how to get there yourself'],
 ];
 const APP_VERSION = CHANGELOG[0][0];
 
@@ -1996,6 +1996,7 @@ function showCalendarDay(dateStr) {
   calSelectedDate = dateStr;
   hideAllScreens();
   calendarDayView.classList.add('active');
+  calDaySelectedId = null;
   calDayScrolledFor = null;      // opening a day: do the opening scroll (v2026.11.25-2104)
   renderCalendarDay();
   updateDayZoomButtons();
@@ -2298,7 +2299,7 @@ function renderCalendarDay() {
     // 📍 directions (v2026.10.03-0725) — its own tap target; see the stopPropagation below.
     // (The 📍 pin went in v2026.10.04-1840 — Directions is in the job menu a tap opens.)
     const pin = '';
-    return `<div class="cal-block${tight ? ' cal-block-tight' : ''}${addrFirst ? ' cal-block-addrhead' : ''}${sizeClass}${j.noWork ? ' cal-nowork' : ' cal-working'}" data-job="${escapeHtml(j.id)}" style="top:${top}px;height:${height}px;left:${left};width:${width};z-index:${1 + depth}">
+    return `<div class="cal-block${j.id === calDaySelectedId ? ' cal-block-selected' : ''}${tight ? ' cal-block-tight' : ''}${addrFirst ? ' cal-block-addrhead' : ''}${sizeClass}${j.noWork ? ' cal-nowork' : ' cal-working'}" data-job="${escapeHtml(j.id)}" style="top:${top}px;height:${height}px;left:${left};width:${width};z-index:${1 + depth}">
       ${tight ? '' : `<div class="cal-block-time">${escapeHtml(timeTxt)}</div>`}
       <div class="cal-block-head">
         <div class="cal-block-who">${escapeHtml(who)}</div>
@@ -2389,34 +2390,108 @@ function updateDayZoomButtons() {
   // gesturestart on iPhone). While the fingers are down the timeline is only
   // STRETCHED — re-drawing would remove the element a finger is on, and its touch
   // events would stop reaching us — then drawn properly at the new zoom on release.
+  // (v2026.11.25-2357) Moving both fingers also scrolls, and lifting one carries on scrolling
+  // with the other; the new zoom is drawn only once EVERY finger is up. All of it
+  // only when the browser isn't already scrolling (touchmove still cancelable) —
+  // a scroll that was under way when the second finger landed keeps going natively.
   let pinch = null;
   const dist = (t) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+  const midOf = (t) => (t[0].clientY + t[1].clientY) / 2;
   sc.addEventListener('gesturestart', (e) => e.preventDefault());
   sc.addEventListener('touchstart', (e) => {
-    if (e.touches.length !== 2 || calTouchOwned) return;
-    const midY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
-    const fy = midY - sc.getBoundingClientRect().top;
-    pinch = { d0: dist(e.touches), midY, origin: sc.scrollTop + fy - tl.offsetTop, scale: 1 };
-    tl.style.transformOrigin = `0 ${pinch.origin}px`;
+    if (calTouchOwned) return;
+    if (e.touches.length === 2 && !pinch) {
+      const midY = midOf(e.touches);
+      const fy = midY - sc.getBoundingClientRect().top;
+      pinch = { d0: dist(e.touches), origin: sc.scrollTop + fy - tl.offsetTop, scale: 1, oneY: null };
+      tl.style.transformOrigin = `0 ${pinch.origin}px`;
+    } else if (e.touches.length === 2 && pinch) {
+      // A finger back down after lifting one: carry on from the current stretch.
+      pinch.d0 = dist(e.touches) / pinch.scale;
+      pinch.oneY = null;
+    }
   }, { passive: true });
   sc.addEventListener('touchmove', (e) => {
-    if (!pinch || e.touches.length !== 2) return;
-    const fit = dayFitPx();
-    const raw = dist(e.touches) / pinch.d0;
-    pinch.scale = Math.max(fit / HOUR_PX, Math.min(DAY_ZOOM_MAX / HOUR_PX, raw));
-    tl.style.transform = `scaleY(${pinch.scale})`;
+    if (!pinch) return;
+    const top = sc.getBoundingClientRect().top;
+    if (e.touches.length === 2) {
+      const fit = dayFitPx();
+      pinch.scale = Math.max(fit / HOUR_PX, Math.min(DAY_ZOOM_MAX / HOUR_PX, dist(e.touches) / pinch.d0));
+      tl.style.transform = `scaleY(${pinch.scale})`;
+      // Keep the pinched point between the fingers as they move up or down.
+      if (e.cancelable) sc.scrollTop = tl.offsetTop + pinch.origin - (midOf(e.touches) - top);
+    } else if (e.touches.length === 1) {
+      const y = e.touches[0].clientY;
+      if (pinch.oneY != null && e.cancelable) sc.scrollTop -= y - pinch.oneY;
+      pinch.oneY = y;
+    }
   }, { passive: true });
   const endPinch = () => {
     if (!pinch) return;
     const p = pinch;
     pinch = null;
+    // Where the pinched point sits on screen now, and the time it stands for.
+    const atScreen = tl.offsetTop + p.origin - sc.scrollTop;
+    const min = (p.origin / HOUR_PX) * 60;
     tl.style.transform = '';
     tl.style.transformOrigin = '';
-    if (Math.abs(p.scale - 1) > 0.02) zoomDay(HOUR_PX * p.scale, p.midY);
+    if (Math.abs(p.scale - 1) <= 0.02) { sc.scrollTop = tl.offsetTop + p.origin - atScreen; return; }
+    setHourPx(Math.max(dayFitPx(), Math.min(DAY_ZOOM_MAX, HOUR_PX * p.scale)));
+    renderCalendarDay();
+    sc.scrollTop = Math.max(0, (min / 60) * HOUR_PX + tl.offsetTop - atScreen);
+    updateDayZoomButtons();
   };
-  sc.addEventListener('touchend', (e) => { if (e.touches.length < 2) endPinch(); }, { passive: true });
+  sc.addEventListener('touchend', (e) => {
+    if (!pinch) return;
+    if (e.touches.length === 0) endPinch();
+    else if (e.touches.length === 1) pinch.oneY = e.touches[0].clientY;
+  }, { passive: true });
   sc.addEventListener('touchcancel', endPinch, { passive: true });
 })();
+
+// DAY MULTI-TOUCH GUARD (v2026.11.25-2357). A pinch that began with a finger resting on a job
+// turned into a long-press and picked the job up. From the moment a second
+// finger lands until EVERY finger is up, nothing can be picked up, and the tap
+// a pinch leaves behind is swallowed (it used to open the job menu).
+// Also: a SELECTED job (long-press and let go without moving) — the next press
+// anywhere outside it only cancels the selection and does nothing else.
+let dayPtrs = 0;
+let dayMulti = false;
+let daySwallowClickUntil = 0;
+let dayIgnorePointer = null;
+const dayLongPressCancels = new Set();
+let calDaySelectedId = null;
+function clearDaySelection() {
+  if (!calDaySelectedId) return;
+  calDaySelectedId = null;
+  document.querySelectorAll('#cal-day-timeline .cal-block-selected').forEach(b => b.classList.remove('cal-block-selected'));
+}
+if (calendarDayView) {
+  calendarDayView.addEventListener('pointerdown', (e) => {
+    if (e.isPrimary) { dayPtrs = 0; dayMulti = false; dayIgnorePointer = null; }
+    dayPtrs++;
+    if (dayPtrs >= 2) {
+      dayMulti = true;
+      dayLongPressCancels.forEach(fn => { try { fn(); } catch (err) {} });
+    }
+    if (calDaySelectedId && dayPtrs === 1) {
+      const sel = e.target.closest && e.target.closest('.cal-block-selected');
+      if (!sel) { clearDaySelection(); dayIgnorePointer = e.pointerId; }
+    }
+  }, true);
+  const up = (e) => {
+    if (dayMulti || e.pointerId === dayIgnorePointer) daySwallowClickUntil = Date.now() + 400;
+    dayPtrs = Math.max(0, dayPtrs - 1);
+    if (!dayPtrs) dayMulti = false;
+  };
+  calendarDayView.addEventListener('pointerup', up, true);
+  calendarDayView.addEventListener('pointercancel', up, true);
+  calendarDayView.addEventListener('click', (e) => {
+    if (!dayMulti && Date.now() >= daySwallowClickUntil) return;
+    e.stopPropagation();
+    e.preventDefault();
+  }, true);
+}
 
 // Tap opens the editor; long-press drags the block to a new time; the corner
 // handle changes its length. Admin only — employees can't write jobs.
@@ -2428,9 +2503,11 @@ function wireDayInteractions(canEdit) {
     el.addEventListener('click', () => openJobMenu(el.dataset.job));
   });
 
+  dayLongPressCancels.clear();
   timeline.querySelectorAll('.cal-block').forEach(block => {
     const jobId = block.dataset.job;
     let pressTimer = null, dragging = false, resizing = false;
+    dayLongPressCancels.add(() => { if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; } });
     let startY = 0, origTop = 0, origH = 0, moved = false;
     let downX = 0, downY = 0;   // where the finger landed, to tell scroll from press
     const takeOverCalTouch = () => {
@@ -2542,6 +2619,7 @@ function wireDayInteractions(canEdit) {
 
     block.addEventListener('pointerdown', (e) => {
       if (!canEdit) return;
+      if (dayMulti || e.pointerId === dayIgnorePointer) return;   // pinching / cancelling a selection (v2026.11.25-2357)
       if (e.target.classList.contains('cal-resize')) {
         resizing = true;
         startY = e.clientY;
@@ -2557,7 +2635,12 @@ function wireDayInteractions(canEdit) {
       // Mouse (v2026.11.22-0916): a press on the text began selecting it, and the selection
       // swallowed the drag. The click that opens the job menu still fires.
       if (e.pointerType === 'mouse') e.preventDefault();
-      pressTimer = setTimeout(() => { beginDrag(e.clientY); block.setPointerCapture(e.pointerId); }, 450);
+      pressTimer = setTimeout(() => {
+        pressTimer = null;
+        if (dayMulti) return;
+        beginDrag(e.clientY);
+        block.setPointerCapture(e.pointerId);
+      }, 450);
     });
     // Android's long-press menu fires about when the drag would start, and
     // cancels the pointer — the drag died with it. (v2026.11.22-0916)
@@ -2591,7 +2674,15 @@ function wireDayInteractions(canEdit) {
       dragging = resizing = false;
       drop();
       releaseCalTouch();              // hand scrolling back to the browser
-      if (!moved) { renderCalendarDay(); return; }
+      if (!moved) {
+        // Picked up and let go without moving (v2026.11.25-2357): it stays SELECTED — in
+        // front, outlined, handle showing — so a handle another job covers can be
+        // reached. The click this release leaves behind must not open the menu.
+        if (wasDragging) { calDaySelectedId = jobId; daySwallowClickUntil = Date.now() + 400; }
+        renderCalendarDay();
+        return;
+      }
+      calDaySelectedId = null;
       const job = Storage.getJob(jobId);
       if (!job) return;
       const span = jobSpan(job);
@@ -2617,6 +2708,8 @@ function wireDayInteractions(canEdit) {
     block.addEventListener('pointercancel', finish);
     block.addEventListener('click', () => {
       if (moved) { moved = false; return; }              // that was a drag, not a tap
+      // A tap on the selected job itself just lets it go (v2026.11.25-2357).
+      if (calDaySelectedId === jobId) { clearDaySelection(); return; }
       openJobMenu(jobId);                                // menu for every role (v2026.10.04-1840)
     });
   });
@@ -5003,7 +5096,10 @@ const priceScrollEl = document.getElementById('price-scroll');
 let pinchSuppressUntil = 0;
 let pricePointerCount = 0;
 const priceLongPressCancels = new Set();   // cancel callbacks for open timers
-function pinchJustHappened() { return pricePointerCount >= 2 || Date.now() < pinchSuppressUntil; }
+// priceMulti (v2026.11.25-2357): stays on from the second finger until EVERY finger is up,
+// so the finger left after a pinch can't long-press a cell or a header.
+let priceMulti = false;
+function pinchJustHappened() { return priceMulti || pricePointerCount >= 2 || Date.now() < pinchSuppressUntil; }
 // A long press (or right-click) has just opened the history sheet. The click
 // that a long press leaves behind must not also open the cell editor.
 let priceTapSuppressUntil = 0;
@@ -5015,13 +5111,15 @@ function cancelAllPriceLongPress() {
 const priceViewEl = document.getElementById('price-view');
 if (priceViewEl) {
   const bump = () => { pinchSuppressUntil = Date.now() + 500; };
-  priceViewEl.addEventListener('pointerdown', () => {
+  priceViewEl.addEventListener('pointerdown', (e) => {
+    if (e.isPrimary) { pricePointerCount = 0; priceMulti = false; }
     pricePointerCount++;
-    if (pricePointerCount >= 2) { bump(); cancelAllPriceLongPress(); }
+    if (pricePointerCount >= 2) { priceMulti = true; bump(); cancelAllPriceLongPress(); }
   }, true);
   const release = () => {
-    if (pricePointerCount >= 2) bump();       // keep suppressing past the release
+    if (pricePointerCount >= 2 || priceMulti) bump();       // keep suppressing past the release
     pricePointerCount = Math.max(0, pricePointerCount - 1);
+    if (!pricePointerCount) priceMulti = false;
   };
   priceViewEl.addEventListener('pointerup', release, true);
   priceViewEl.addEventListener('pointercancel', release, true);
@@ -5047,19 +5145,39 @@ if (priceScrollEl) {
       pinchSuppressUntil = Date.now() + 400;   // a pinch has begun
     }
   });
+  let carry = null;   // (v2026.11.25-2357) the finger left after a pinch: { id, x, y }
   priceScrollEl.addEventListener('pointermove', (e) => {
     if (!pts.has(e.pointerId)) return;
+    const prev = pts.get(e.pointerId);
     pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (pts.size === 2 && startDist > 0) {
       e.preventDefault();
       pinchSuppressUntil = Date.now() + 400;
+      // Centred on the fingers (v2026.11.25-2357): keep the point between them still while
+      // the table grows or shrinks — it used to zoom from the top-left corner.
+      const oldZ = priceZoom;
       setPriceZoom(startZoom * (dist() / startDist));
+      if (priceZoom !== oldZ) {
+        const [a, b] = [...pts.values()];
+        const r = priceScrollEl.getBoundingClientRect();
+        const mx = (a.x + b.x) / 2 - r.left, my = (a.y + b.y) / 2 - r.top;
+        const k = priceZoom / oldZ;
+        priceScrollEl.scrollLeft = (priceScrollEl.scrollLeft + mx) * k - mx;
+        priceScrollEl.scrollTop = (priceScrollEl.scrollTop + my) * k - my;
+      }
+    } else if (pts.size === 1 && carry && carry.id === e.pointerId && prev) {
+      // One finger lifted mid-pinch: the other carries on scrolling the table.
+      priceScrollEl.scrollLeft -= e.clientX - prev.x;
+      priceScrollEl.scrollTop -= e.clientY - prev.y;
     }
   });
   const dropPt = (e) => {
-    if (pts.size >= 2) pinchSuppressUntil = Date.now() + 400;  // keep it live past the release
+    const wasPinch = pts.size >= 2;
+    if (wasPinch) pinchSuppressUntil = Date.now() + 400;  // keep it live past the release
     pts.delete(e.pointerId);
     if (pts.size < 2) startDist = 0;
+    if (wasPinch && pts.size === 1) carry = { id: [...pts.keys()][0] };
+    if (!pts.size) carry = null;
   };
   priceScrollEl.addEventListener('pointerup', dropPt);
   priceScrollEl.addEventListener('pointercancel', dropPt);
@@ -7268,6 +7386,45 @@ function customerMatchesSearch(c, term) {
   return words.every(w => haystack.includes(w));
 }
 
+// CUSTOMER LIST PINCH ZOOM (v2026.11.25-2357): two fingers scale the list (CSS zoom),
+// centred on the fingers, remembered per device. The browser's own pinch is off
+// over the list (touch-action), and the tap a pinch leaves behind is swallowed so
+// it never opens a customer.
+let custZoom = (() => { const v = parseFloat(localStorage.getItem('na-cust-zoom') || '1'); return v >= 0.7 && v <= 1.8 ? v : 1; })();
+function applyCustZoom() { if (customersList) customersList.style.zoom = String(custZoom); }
+applyCustZoom();
+if (customersList) {
+  let cp = null;
+  let custSwallowUntil = 0;
+  const d = (t) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+  customersList.addEventListener('gesturestart', (e) => e.preventDefault());
+  customersList.addEventListener('touchstart', (e) => {
+    if (e.touches.length === 2) cp = { d0: d(e.touches), z0: custZoom };
+  }, { passive: true });
+  customersList.addEventListener('touchmove', (e) => {
+    if (!cp || e.touches.length !== 2) return;
+    const z = Math.max(0.7, Math.min(1.8, Math.round(cp.z0 * (d(e.touches) / cp.d0) * 20) / 20));
+    if (z === custZoom) return;
+    const midY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+    const k = z / custZoom;
+    const listTop = customersList.getBoundingClientRect().top + window.scrollY;
+    const at = window.scrollY + midY - listTop;          // px into the list under the fingers
+    custZoom = z;
+    applyCustZoom();
+    window.scrollTo(0, Math.max(0, listTop + at * k - midY));
+  }, { passive: true });
+  customersList.addEventListener('touchend', (e) => {
+    if (!cp) return;
+    if (e.touches.length === 0) {
+      cp = null;
+      custSwallowUntil = Date.now() + 400;
+      try { localStorage.setItem('na-cust-zoom', String(custZoom)); } catch (err) {}
+    }
+  }, { passive: true });
+  customersList.addEventListener('click', (e) => {
+    if (cp || Date.now() < custSwallowUntil) { e.stopPropagation(); e.preventDefault(); }
+  }, true);
+}
 function renderCustomersList() {
   updateSortButtons();
   if (!Storage.isReady()) {
@@ -12781,7 +12938,7 @@ function tutorialSteps(part) {
       screen: 'customers',
       setup: () => { if (!customersView.classList.contains('active')) showCustomers(); return true; },
       target: () => document.getElementById('customers-more-btn'),
-      text: 'The ⋯ here sorts the list A–Z, or by the customers you worked on most recently.',
+      text: 'The ⋯ here sorts the list A–Z, or by the customers you worked on most recently. Pinch the list to make it bigger or smaller.',
     },
     {
       screen: 'customer-notes',
@@ -13088,7 +13245,8 @@ function tutorialSteps(part) {
         },
         setup: goDay,
         target: () => document.querySelector('#calendar-day-view .cal-block'),
-        text: 'This is one day as a timeline — tap any day in the month to open it. Each job sits at its start time and is as tall as it is long, so a clash is something you can see rather than work out.',
+        text: 'This is one day as a timeline — tap any day in the month to open it. Each job sits at its start time and is as tall as it is long, so a clash is something you can see rather than work out.'
+          + (isAdminRole() ? ' Press and hold a job to move it. Let go without moving and it stays selected, in front of the others, so you can drag its corner even where another job covers it; tap anywhere to let it go.' : ''),
       },
       {
         screen: 'calendar-day',
@@ -13104,8 +13262,11 @@ function tutorialSteps(part) {
         group: 'caljobs',
         requires: () => Storage.listJobs().length > 0,
         setup: goDay,
-        target: () => document.getElementById('calday-zoom-out'),
-        text: 'Pinch with two fingers, or use − and +, to zoom the day out until all 24 hours fit, and back in. On a computer, Ctrl + mouse wheel does the same. The zoom is kept on this device.',
+        // Phones have no − / + (v2026.11.25-2357): point at the day itself there.
+        target: () => isPhoneWidth() ? document.getElementById('cal-day-scroll') : document.getElementById('calday-zoom-out'),
+        text: isPhoneWidth()
+          ? 'Pinch with two fingers to zoom the day out until all 24 hours fit, and back in. The zoom is kept on this device.'
+          : 'Pinch with two fingers, or use − and +, to zoom the day out until all 24 hours fit, and back in. On a computer, Ctrl + mouse wheel does the same. The zoom is kept on this device.',
       },
       {
         screen: 'calendar-day',

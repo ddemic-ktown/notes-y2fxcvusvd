@@ -705,6 +705,11 @@ select.iif-date-input { appearance: none; -webkit-appearance: none; padding-righ
 /* A week row is as tall as its busiest day (v2026.10.28-2322), but one day may only take
    about 30% of the screen — past that it scrolls inside its own box. */
 .cal-scroll .cal-cell { max-height: calc(var(--app-vh, 100vh) * 0.3); overflow-y: auto; }
+/* Desktop (v2026.11.25-2126): no cap and no little scroll bars — the week row grows to
+   fit its busiest day. Phones keep the cap above. */
+@media (min-width: 431px) {
+  .cal-scroll .cal-cell { max-height: none; overflow: hidden; }
+}
 .cal-cell.cal-blank { background: transparent; border-color: transparent; cursor: default; }
 .cal-job-who { font-size: 10px; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Desktop grid: one entry per job, customer on its own line with the crew
@@ -747,6 +752,12 @@ select.iif-date-input { appearance: none; -webkit-appearance: none; padding-righ
 .cal-day-scroll { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; }
 /* v2026.11.25-2104: two fingers zoom the TIMELINE here, not the page. */
 .cal-day-scroll { touch-action: pan-x pan-y; }
+/* Phones (v2026.11.25-2357): pinch does the zooming, so no − / + (day) or A− / A+ (price table). */
+@media (max-width: 430px) {
+  #calendar-day-view .price-zoom, #price-view .price-zoom { display: none; }
+}
+/* Customer list (v2026.11.25-2357): two fingers zoom the LIST, not the page. */
+#customers-list { touch-action: pan-x pan-y; }
 .cal-timeline { position: relative; }
 .cal-hour {
   position: absolute; left: 0; right: 0; height: 0;
@@ -775,6 +786,9 @@ select.iif-date-input { appearance: none; -webkit-appearance: none; padding-righ
   user-select: none;
   -webkit-touch-callout: none;
 }
+/* Selected (v2026.11.25-2357): long-pressed and let go without moving — in front of the
+   other jobs so a handle they cover can be reached. */
+.cal-block-selected { outline: 3px solid var(--accent); z-index: 45 !important; box-shadow: 0 6px 18px rgba(0,0,0,0.3); }
 /* Picked up to move or resize (v2026.11.22-0950): outlined and lifted, the rest dimmed. */
 .cal-block-dragging { opacity: 1; outline: 3px solid var(--accent); outline-offset: 0; box-shadow: 0 8px 22px rgba(0,0,0,0.35); z-index: 50 !important; }
 .cal-timeline.cal-lifting .cal-block:not(.cal-block-dragging) { opacity: 0.35; transition: opacity 0.15s; }
@@ -1760,6 +1774,10 @@ body.dark-mode input[type="date"], body.dark-mode input[type="time"] { color-sch
 .editor-row-nav > .shared-pills { flex: 0 1 auto; max-width: 45%; margin: 0; }
 .editor-row-nav > .crumbs { flex: 1 1 auto; min-width: 0; }
 .editor-row-tools { width: 100%; }
+/* (v2026.11.25-2357) Room between ☐ and Undo, and a little between Undo and Redo — the
+   search box gives up the space. */
+.editor-row-tools #undo-btn { margin-left: 12px; }
+.editor-row-tools #redo-btn { margin-left: 6px; }
 .editor-header .note-search-input { font-size: 16px; padding: 7px 12px; flex: 1; min-width: 0; }
 .editor-header .search-count { font-size: 12px; color: var(--ink-soft); min-width: 30px; text-align: center; flex-shrink: 0; }
 .editor-header .icon-btn:not(.date-btn) { padding: 4px 6px; font-size: 18px; }
