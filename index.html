@@ -646,6 +646,18 @@
     </div>
   </div>
 
+  <!-- View as (v2026.11.27-0333) -->
+  <div id="view-as-modal" class="modal-overlay" hidden>
+    <div class="modal-panel">
+      <div class="modal-header">
+        <h2 class="modal-title">View as…</h2>
+        <button id="view-as-close" class="icon-btn" aria-label="Close">✕</button>
+      </div>
+      <p class="modal-hint">See the app the way someone else does. Nothing can be changed while you look, and it changes nothing for them.</p>
+      <ul id="view-as-list" class="members-list"></ul>
+    </div>
+  </div>
+
   <!-- HOURS VIEW
        The hours entered on calendar jobs, as a grid. A full SCREEN, not a
        modal: it's a working surface you check row by row, and a sheet on top of
@@ -805,6 +817,8 @@
 
       <div class="setting-row setting-list-row" data-staff-only>
         <h3 class="setting-list-title">Users &amp; access</h3>
+        <!-- View as (v2026.11.27-0333): admins only; shown by applyRoleUI. -->
+        <button id="view-as-btn" class="secondary setting-wide-btn" type="button" hidden>View as…</button>
         <ul id="members-list" class="members-list"></ul>
         <h4 class="setting-sub-title">Waiting to accept</h4>
         <ul id="invites-list" class="members-list"></ul>

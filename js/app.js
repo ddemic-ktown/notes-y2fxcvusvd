@@ -20,6 +20,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 100, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.11.27-0333', 'Settings › View as… (admins): preview the app as one of your people, or as a role; read-only, with a bar to come back'],
   ['v2026.11.27-0307', 'Fix: a zoomed-in month view pans left and right'],
   ['v2026.11.27-0244', 'Zoomed-in month view pans sideways again; day view text grows with the zoom; Home pinch-zooms like the customer list'],
   ['v2026.11.27-0229', 'Phone month view: text at half size (pinch to read), and each day shows its crew once beside the date instead of on every job'],
@@ -119,7 +120,6 @@ const CHANGELOG = [
   ['v2026.10.01-1646', 'Customers, Calendar and Price Table moved to a row at the top of Home; Hours lives in Settings › QuickBooks; a blue line marks the current time in week and day view; copying a job no longer copies the hours; date and time icons are visible in dark mode'],
   ['v2026.09.30-2326', 'Week view: overlapping jobs stack over each other like the day view when their text still shows, and less space between days'],
   ['v2026.09.30-2322', 'The home screen’s See all links are readable again in dark mode'],
-  ['v2026.09.30-2316', 'The job description box grows to show all its text, pasting a checkbox line onto a checkbox gives one box however you paste, and Insert a date opens the date picker on Android and desktop'],
 ];
 const APP_VERSION = CHANGELOG[0][0];
 
@@ -10094,9 +10094,91 @@ if (unseedBtn) {
 // ---------- role-based UI ----------
 const ROLE_LABELS = { admin: 'Admin', employee: 'Employee', bookkeeper: 'Bookkeeper', customer: 'Customer' };
 
+// ---------- View as (v2026.11.27-0333) ----------
+// Settings › View as… (admins): preview the app as one person, or as a role with
+// nobody in particular. Storage answers reads as that person (getRole, getUid and
+// the lists) and refuses writes; here the screens follow, the + buttons go, the
+// editor turns read-only, and a strip across every header says who you're
+// viewing as — tap it to go back. Never saved: a reload ends it.
+function applyPreviewChrome() {
+  const v = Storage.getViewAs();
+  document.body.classList.toggle('previewing', !!v);
+  document.querySelectorAll('.app-header > .preview-strip').forEach(el => el.remove());
+  if (!v) return;
+  const label = `👁 Viewing as ${v.name || ROLE_LABELS[v.role] || v.role} — tap to go back`;
+  document.querySelectorAll('.app-header').forEach(h => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'preview-strip';
+    b.textContent = label;
+    h.insertBefore(b, h.firstChild);
+  });
+}
+function startViewAs(v) {
+  if (Storage.getRealRole() !== 'admin') return;
+  if (editorView && editorView.classList.contains('active')) commitAndCleanupEditor();
+  const modal = document.getElementById('view-as-modal');
+  if (modal) modal.hidden = true;
+  Storage.setViewAs(v);
+  applyPreviewChrome();
+  applyRoleUI(Storage.getRole());
+  goHome();
+}
+function stopViewAs() {
+  if (editorView && editorView.classList.contains('active')) commitAndCleanupEditor();
+  Storage.setViewAs(null);
+  applyPreviewChrome();
+  applyRoleUI(Storage.getRole());
+  goHome();
+}
+document.addEventListener('click', (e) => {
+  if (e.target.closest && e.target.closest('.preview-strip')) { e.preventDefault(); stopViewAs(); }
+});
+let previewBlockedAt = 0;
+Storage.onPreviewBlocked(() => {
+  if (Date.now() - previewBlockedAt < 2500) return;
+  previewBlockedAt = Date.now();
+  showEditorToast('Previewing — nothing is saved. Tap the bar at the top to go back.');
+});
+function openViewAsModal() {
+  const modal = document.getElementById('view-as-modal');
+  const list = document.getElementById('view-as-list');
+  if (!modal || !list || Storage.getRealRole() !== 'admin') return;
+  const order = { employee: 0, bookkeeper: 1, customer: 2 };
+  const people = Storage.listMembers()
+    .filter(m => m.role && m.role !== 'admin')
+    .sort((a, b) => (order[a.role] ?? 9) - (order[b.role] ?? 9)
+      || String(a.name || a.email || '').localeCompare(String(b.name || b.email || '')));
+  const row = (attrs, main, sub) => `<li class="member-item view-as-row" ${attrs}><span class="member-email">${escapeHtml(main)}</span>${sub ? `<span class="muted view-as-sub">${escapeHtml(sub)}</span>` : ''}</li>`;
+  list.innerHTML =
+    '<li class="view-as-label">A person — sees only what they would</li>'
+    + (people.length
+      ? people.map(m => row(`data-va-uid="${escapeHtml(m.uid)}" data-va-role="${escapeHtml(m.role)}" data-va-name="${escapeHtml(m.name || m.email || '')}"`,
+          m.name || m.email || m.uid, ROLE_LABELS[m.role] || m.role)).join('')
+      : '<li class="muted view-as-label">Nobody else has an account yet.</li>')
+    + '<li class="view-as-label">A role — for checking the layout; shows everyone’s data</li>'
+    + ['employee', 'bookkeeper', 'customer'].map(r => row(`data-va-role="${r}" data-va-name="any ${ROLE_LABELS[r].toLowerCase()}"`,
+        `Any ${ROLE_LABELS[r].toLowerCase()}`, '')).join('');
+  list.querySelectorAll('.view-as-row').forEach(li => li.addEventListener('click', () => {
+    startViewAs({ uid: li.dataset.vaUid || null, role: li.dataset.vaRole, name: li.dataset.vaName || '' });
+  }));
+  modal.hidden = false;
+}
+(() => {
+  const btn = document.getElementById('view-as-btn');
+  if (btn) btn.addEventListener('click', openViewAsModal);
+  const modal = document.getElementById('view-as-modal');
+  const close = document.getElementById('view-as-close');
+  if (close && modal) close.addEventListener('click', () => { modal.hidden = true; });
+  if (modal) modal.addEventListener('click', (e) => { if (e.target === modal) modal.hidden = true; });
+})();
+
 function applyRoleUI(role) {
   const isAdminRole = role === 'admin';
   const isCustomer = role === 'customer';
+  // View as… : real admins only, and not while already previewing (v2026.11.27-0333).
+  const vaBtn = document.getElementById('view-as-btn');
+  if (vaBtn) vaBtn.hidden = Storage.getRealRole() !== 'admin' || Storage.isPreviewing();
   // Admin-only controls: customer creation, per-customer note creation, delete
   const adminControls = [
     document.getElementById('customers-fab'),
@@ -10304,7 +10386,8 @@ function isCustomerRole() { return Storage.getRole() === 'customer'; }
 function isAdminRole() { return Storage.getRole() === 'admin'; }
 function isBookkeeperRole() { return Storage.getRole() === 'bookkeeper'; }
 // Bookkeeper and customer can never modify anything
-function isReadOnlyRole() { return isCustomerRole() || isBookkeeperRole(); }
+// Previewing (View as, v2026.11.27-0333) is read-only for every role: nothing is saved under the wrong person.
+function isReadOnlyRole() { return Storage.isPreviewing() || isCustomerRole() || isBookkeeperRole(); }
 // Admin and bookkeeper see all notes and customers
 function canViewAllRole() { return isAdminRole() || isBookkeeperRole(); }
 
@@ -11083,6 +11166,7 @@ onAuthStateChanged(auth, async (user) => {
     // Leave the editor first — a demoted user must not keep typing into a
     // note the server will now reject (saves are flushed on the way out).
     if (editorView.classList.contains('active')) commitAndCleanupEditor();
+    applyPreviewChrome();   // a demoted admin's preview ends with their admin role (View as)
     applyRoleUI(newRole);
     // Land on home: the previous screen (customers, a note list) may no longer
     // be readable under the new role.
@@ -13549,6 +13633,8 @@ function tutorialSteps(part) {
         'Your crew — the names you schedule on jobs. Link a name to someone’s account and they can open JobPilot and see their own jobs; leave it unlinked for a subcontractor who doesn’t use the app. Apprentice or journeyman is not just a label — it picks which QuickBooks item their hours are billed against, so getting it wrong makes the import land in the wrong place. Anyone on payroll needs their QuickBooks payroll item typed in exactly, or QuickBooks rejects their hours — and an overtime item if they get it: hours past 8 in a day go there. Rename fixes a spelling everywhere at once, including on jobs from last year.'),
       step(() => document.getElementById('members-list'),
         'Everyone with access to this company, and what each can do. Admin does everything. Bookkeeper sees everything but changes nothing. Employee sees only the notes and jobs given to them. Customer sees only their own. You can change your own role too, as long as somebody else is an admin — the last admin is locked so the company can never be left without one.'),
+      step(() => document.getElementById('view-as-btn'),
+        'View as… shows the app the way one of your people sees it — their jobs, their notes, their buttons — or the way a role looks in general. Nothing can be changed while you look; tap the bar across the top to come back.'),
       step(() => document.getElementById('invites-list'),
         'Invitations you have sent that nobody has accepted yet. Cancel one with ✕ if you invited the wrong address.'),
       step(() => document.getElementById('invite-email'),

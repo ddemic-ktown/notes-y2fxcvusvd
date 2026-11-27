@@ -32,6 +32,18 @@ const _cache = {
 const _listeners = new Set();
 let _lastReconnect = 0;      // throttles Storage.reconnect()
 let _onRoleChange = null;
+// VIEW AS (v2026.11.27-0333): an admin previewing the app as one person ({ uid, role, name })
+// or as a role with nobody in particular ({ uid: null, role, name }). Only the
+// READ side changes — getRole/getUid and the list functions answer as that
+// person would see it. Listeners, maintenance and the server are untouched
+// (they read _role / _uid directly), and every user-facing write is refused
+// while it is on (see PREVIEW_BLOCKED at the end of this file). Admins only,
+// never saved: a reload or sign-out ends it.
+let _viewAs = null;
+let _onPreviewBlocked = null;
+function pv() { return _role === 'admin' ? _viewAs : null; }
+function pvRole() { const v = pv(); return v ? v.role : _role; }
+function pvPerson() { const v = pv(); return v && v.uid ? v.uid : null; }   // a specific person
 let _uid = null;
 let _orgId = null;
 let _role = null; // 'admin' | 'employee' | 'customer'
@@ -695,9 +707,19 @@ export const Storage = {
 
   // Resolves once the member list has arrived (see _membersLoaded).
   whenMembersLoaded() { return _membersLoaded ? Promise.resolve() : new Promise(r => _membersWaiters.push(r)); },
-  getRole() { return _role; },
+  getRole() { return pvRole(); },
+  getRealRole() { return _role; },
   getOrgId() { return _orgId; },
-  getUid() { return _uid; },
+  getUid() { return pvPerson() || _uid; },
+  // ---- view as (v2026.11.27-0333) ----
+  setViewAs(v) {
+    if (_role !== 'admin') return;
+    _viewAs = v && v.role ? { uid: v.uid || null, role: v.role, name: v.name || '' } : null;
+    emit();
+  },
+  getViewAs() { return pv() ? { ..._viewAs } : null; },
+  isPreviewing() { return !!pv(); },
+  onPreviewBlocked(fn) { _onPreviewBlocked = fn; },
 
   async init(userId, userEmail) {
     _uid = userId;
@@ -782,6 +804,7 @@ export const Storage = {
   },
 
   signedOut() {
+    _viewAs = null;
     detachListeners();
     _uid = null; _orgId = null; _role = null;
     _userEmail = null; _orgName = ''; _orgCreatedAt = null;
@@ -805,8 +828,20 @@ export const Storage = {
   // with only a confirm dialog in the way). Every list filters them out; the
   // Trash screen is the only place they appear, and a sweep on admin sign-in
   // purges anything older than TRASH_DAYS.
-  liveNotes() { return _cache.notes.filter(n => !n.deletedAt); },
-  liveCustomers() { return _cache.customers.filter(c => !c.deletedAt); },
+  liveNotes() {
+    const live = _cache.notes.filter(n => !n.deletedAt);
+    // Previewing an employee or customer: only the notes assigned to them, as the
+    // server's notes query does for them. (v2026.11.27-0333)
+    const who = pvPerson();
+    const r = pvRole();
+    if (who && (r === 'employee' || r === 'customer')) return live.filter(n => Array.isArray(n.assignedTo) && n.assignedTo.includes(who));
+    return live;
+  },
+  liveCustomers() {
+    const r = pvRole();
+    if (r === 'employee' || r === 'customer') return [];      // they can't read customers
+    return _cache.customers.filter(c => !c.deletedAt);
+  },
   listNotes() {
     return this.liveNotes()
       .filter(n => !n.customerId)
@@ -1056,12 +1091,14 @@ export const Storage = {
   },
   // Admins always; employees when the table is shared with them.
   canEditPriceTable() {
-    if (_role === 'admin') return true;
-    if (_role === 'employee') return this.getPriceConfig().sharedWith.includes(_uid);
+    const r = pvRole();
+    if (r === 'admin') return true;
+    if (r === 'employee') return this.getPriceConfig().sharedWith.includes(pvPerson() || _uid);
     return false;
   },
   canViewPriceTable() {
-    return _role === 'admin' || _role === 'bookkeeper' || this.canEditPriceTable();
+    const r = pvRole();
+    return r === 'admin' || r === 'bookkeeper' || this.canEditPriceTable();
   },
   // Newest entry in a cell, by date then insertion time
   latestPriceEntry(item, vendorId) {
@@ -1293,7 +1330,19 @@ export const Storage = {
     } catch (err) { console.warn('fetchCustomerJobs', err); }
   },
   listJobs() {
-    return _cache.jobs.filter(j => !j.deletedAt);
+    const live = _cache.jobs.filter(j => !j.deletedAt);
+    const v = pv();
+    if (!v) return live;
+    // Previewing (v2026.11.27-0333): an employee sees the jobs they're on; a customer sees
+    // the customer-safe copies of theirs, as the server gives them.
+    if (v.role === 'employee' && v.uid) return live.filter(j => Array.isArray(j.employeeUids) && j.employeeUids.includes(v.uid));
+    if (v.role === 'customer') {
+      return live
+        .filter(j => Array.isArray(j.customerUids) && (v.uid ? j.customerUids.includes(v.uid) : j.customerUids.length))
+        .map(j => { const c = custSafeCopy(j); return c ? { ...c, id: j.id } : null; })
+        .filter(Boolean);
+    }
+    return live;
   },
   // ---- customer-safe copies & access (v2026.10.03-2042) ----
   // Rebuild every custJobs doc from the jobs on the server: writes a copy for
@@ -1377,7 +1426,19 @@ export const Storage = {
     if (!!before.canSee !== !!next.canSee) await this.resyncCustJobs(customerId);
   },
   // A customer's own flags (their account only).
-  getMyCustAccess() { return { ...(_cache.custAccess || {}) }; },
+  getMyCustAccess() {
+    const v = pv();
+    if (v) {
+      // Previewing a customer (v2026.11.27-0333): the flags their own custAccess doc would hold.
+      if (v.role !== 'customer' || !v.uid) return {};
+      const links = _cache.settings.customerLinks || {};
+      const cid = Object.keys(links).find(k => links[k] === v.uid);
+      if (!cid) return {};
+      const h = custHoursFor(cid);
+      return { customerId: cid, canSeeHours: !!h.canSee, started: h.started || '' };
+    }
+    return { ...(_cache.custAccess || {}) };
+  },
 
   // Who you're most likely to be booking next. Ranked by how many jobs you
   // scheduled for them inside the window, then by how recently — a customer you
@@ -1409,7 +1470,10 @@ export const Storage = {
   listJobsInRange(fromStr, toStr) {
     return this.listJobs().filter(j => j.date >= fromStr && j.date <= toStr);
   },
-  getJob(id) { return _cache.jobs.find(j => j.id === id && !j.deletedAt) || null; },
+  getJob(id) {
+    if (pv()) return this.listJobs().find(j => j.id === id) || null;   // v2026.11.27-0333
+    return _cache.jobs.find(j => j.id === id && !j.deletedAt) || null;
+  },
   // settings.employeeLinks: { [employeeName]: uid }
   employeeUidsFor(names) {
     const links = _cache.settings.employeeLinks || {};
@@ -2340,7 +2404,14 @@ export const Storage = {
   },
 
   // ---------- Members ----------
-  listMembers() { return _cache.members.slice(); },
+  listMembers() {
+    const r = pvRole();
+    if (pv() && r !== 'admin' && r !== 'bookkeeper') {
+      const who = pvPerson();
+      return who ? _cache.members.filter(m => m.uid === who) : [];   // only their own (v2026.11.27-0333)
+    }
+    return _cache.members.slice();
+  },
 
   assignUsersToNote(noteId, uids) {
     const i = _cache.notes.findIndex(n => n.id === noteId);
@@ -2635,6 +2706,34 @@ export const Storage = {
     }
   },
 };
+
+// Every user-facing write, refused while previewing (v2026.11.27-0333): nothing is saved
+// under the wrong person. Async ones resolve to null; sync ones return null.
+// The app hides the + buttons and makes the editor read-only in preview, so the
+// sync creators aren't reachable in normal use.
+const PREVIEW_BLOCKED = [
+  'setOrgName', 'saveUserPrefs', 'createNote', 'updateNote', 'deleteNote', 'assignNoteToCustomer',
+  'createCustomer', 'deleteCustomer', 'restoreFromTrash', 'purgeFromTrash',
+  'savePriceConfig', 'addPriceVendor', 'renamePriceVendor', 'removePriceVendor', 'addPriceItem',
+  'setPriceItemOrders', 'savePriceItem', 'reorderPriceItem', 'removePriceItem', 'addPriceEntry',
+  'restorePriceItem', 'restorePriceVendor', 'restorePriceEntry', 'removePriceEntry',
+  'setCustomerHours', 'saveJob', 'renameEmployee', 'relinkJobEmployeeUids', 'deleteJob',
+  'applyRestore', 'seedSampleData', 'removeSampleData', 'setSettingLocal', 'writeSettings', 'setSetting',
+  'assignUsersToNote', 'dismissGettingStarted', 'updateMemberRole', 'removeMember',
+  'inviteUser', 'inviteNewOrg', 'cancelInvite', 'importCustomers',
+];
+PREVIEW_BLOCKED.forEach(name => {
+  const fn = Storage[name];
+  if (typeof fn !== 'function') return;
+  const isAsync = fn.constructor && fn.constructor.name === 'AsyncFunction';
+  Storage[name] = function (...args) {
+    if (pv()) {
+      if (_onPreviewBlocked) { try { _onPreviewBlocked(name); } catch (e) {} }
+      return isAsync ? Promise.resolve(null) : null;
+    }
+    return fn.apply(this, args);
+  };
+});
 
 function stripId(rec) {
   const { id, ...rest } = rec;
