@@ -20,6 +20,8 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 100, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.11.27-0532', 'Fix: the View as bar no longer covers the calendar toolbar'],
+  ['v2026.11.27-0429', 'Day view: every job shows all of its text at any zoom — it wraps, and shrinks to fit when the box is small'],
   ['v2026.11.27-0333', 'Settings › View as… (admins): preview the app as one of your people, or as a role; read-only, with a bar to come back'],
   ['v2026.11.27-0307', 'Fix: a zoomed-in month view pans left and right'],
   ['v2026.11.27-0244', 'Zoomed-in month view pans sideways again; day view text grows with the zoom; Home pinch-zooms like the customer list'],
@@ -118,8 +120,6 @@ const CHANGELOG = [
   ['v2026.10.01-1713', 'The Customers / Calendar / Price Table row is slimmer'],
   ['v2026.10.01-1710', 'Customers, Calendar and Price Table buttons are now at the top of every screen, with the one you are on highlighted'],
   ['v2026.10.01-1646', 'Customers, Calendar and Price Table moved to a row at the top of Home; Hours lives in Settings › QuickBooks; a blue line marks the current time in week and day view; copying a job no longer copies the hours; date and time icons are visible in dark mode'],
-  ['v2026.09.30-2326', 'Week view: overlapping jobs stack over each other like the day view when their text still shows, and less space between days'],
-  ['v2026.09.30-2322', 'The home screen’s See all links are readable again in dark mode'],
 ];
 const APP_VERSION = CHANGELOG[0][0];
 
@@ -1987,6 +1987,28 @@ function renderCalendar() {
   wireCalCells(calGrid);
 }
 
+// FIT TEXT (v2026.11.27-0429): every job shows ALL of its text. When it doesn't fit its box,
+// that box's text is shrunk (--fit, multiplied into the day zoom's text size)
+// until it does — a box can't grow, or it would show the wrong length.
+// Each box on its own, so a long job keeps full-size text.
+function fitDayBlock(b) {
+  if (!b || !b.clientHeight) return;
+  b.style.setProperty('--fit', '1');
+  if (b.scrollHeight <= b.clientHeight + 1) return;
+  let lo = 0.2, hi = 1;
+  for (let i = 0; i < 7; i++) {
+    const mid = (lo + hi) / 2;
+    b.style.setProperty('--fit', String(mid));
+    if (b.scrollHeight <= b.clientHeight + 1) lo = mid; else hi = mid;
+  }
+  b.style.setProperty('--fit', String(Math.round(lo * 1000) / 1000));
+}
+function fitDayBlocks() {
+  document.querySelectorAll('#cal-day-timeline .cal-block').forEach(fitDayBlock);
+}
+window.addEventListener('resize', () => {
+  if (calendarDayView && calendarDayView.classList.contains('active')) fitDayBlocks();
+});
 let calDayScrolledFor = null;   // the day the day view's opening scroll was done for (v2026.11.25-2104)
 function showCalendarDay(dateStr) {
   if (!isFeatureOn('calendar')) { goHome(); return; }   // switched off in Features (v2026.10.02-1840)
@@ -2283,10 +2305,6 @@ function renderCalendarDay() {
     // small type — every line wraps after two words.
     sizeTier = Math.max(0, sizeTier - (n >= 3 ? 2 : (n >= 2 ? 1 : 0)));
     const sizeClass = sizeTier === 2 ? ' cal-block-xl' : (sizeTier === 1 ? ' cal-block-lg' : '');
-    // Note lines scale with the tier, since each line is taller there too.
-    const noteLines = sizeTier === 2 ? (shown >= 210 ? 4 : 3)
-      : sizeTier === 1 ? (shown >= 130 ? 3 : 2)
-      : (shown >= 76 ? 2 : (shown >= 56 ? 1 : 0));
     // The customer and the crew share a line. Normally the row WRAPS, so the
     // chips sit beside a short name and drop underneath a long one. On a short
     // block there is no underneath — a half-hour job is ~24px — so `tight`
@@ -2294,20 +2312,21 @@ function renderCalendarDay() {
     // a name you can read the start of beats losing the chips entirely.
     const tight = shown < 52;
     // Employees: the second line is the customer name instead (see calAddrFirst).
-    const addr = tight ? ''
-      : addrFirst ? (jobTitle(j) ? `<div class="cal-block-addr cal-block-cust">${escapeHtml(jobTitle(j))}</div>` : '')
+    // All of the text, always (v2026.11.27-0429): nothing is left out on a short block any
+    // more — fitDayBlock() shrinks a box's text until it all fits instead.
+    const addr = addrFirst ? (jobTitle(j) ? `<div class="cal-block-addr cal-block-cust">${escapeHtml(jobTitle(j))}</div>` : '')
       : (j.address ? `<div class="cal-block-addr">${escapeHtml(j.address)}</div>` : '');
     // 📍 directions (v2026.10.03-0725) — its own tap target; see the stopPropagation below.
     // (The 📍 pin went in v2026.10.04-1840 — Directions is in the job menu a tap opens.)
     const pin = '';
     return `<div class="cal-block${j.id === calDaySelectedId ? ' cal-block-selected' : ''}${tight ? ' cal-block-tight' : ''}${addrFirst ? ' cal-block-addrhead' : ''}${sizeClass}${j.noWork ? ' cal-nowork' : ' cal-working'}" data-job="${escapeHtml(j.id)}" style="top:${top}px;height:${height}px;left:${left};width:${width};z-index:${1 + depth}">
-      ${tight ? '' : `<div class="cal-block-time">${escapeHtml(timeTxt)}</div>`}
+      <div class="cal-block-time">${escapeHtml(timeTxt)}</div>
       <div class="cal-block-head">
         <div class="cal-block-who">${escapeHtml(who)}</div>
         <div class="cal-block-chips">${chips}</div>
       </div>
       ${addr}
-      ${note && noteLines ? `<div class="cal-block-note" style="-webkit-line-clamp:${noteLines};line-clamp:${noteLines}">${escapeHtml(note)}</div>` : ''}
+      ${note ? `<div class="cal-block-note">${escapeHtml(note)}</div>` : ''}
       ${canEdit ? '<div class="cal-resize" aria-hidden="true"></div>' : ''}
       ${pin}
     </div>`;
@@ -2318,6 +2337,7 @@ function renderCalendarDay() {
   const nowLine = calSelectedDate === ymd(new Date())
     ? `<div class="cal-now" data-now="day" style="top:${(nowMin / 60) * HOUR_PX}px"><span class="cal-now-label">${nowTimeLabel(false)}</span></div>` : '';
   timeline.innerHTML = hours + blocks + nowLine;
+  fitDayBlocks();
   // The pin must not start a drag, open the job or count as a day swipe.
   timeline.querySelectorAll('.cal-pin').forEach(a => {
     ['pointerdown', 'pointerup', 'click', 'touchstart', 'touchend'].forEach(ev =>
@@ -2549,7 +2569,8 @@ function wireDayInteractions(canEdit) {
         : dragLen;
       const e = s + len;
       const txt = `${fmtClock(s)}–${fmtClock(e % (24 * 60))}${e > 24 * 60 ? ' +1' : ''}`;
-      if (timeEl) { timeEl.textContent = txt; return; }
+      // A short box shrinks its time line to fit, so it gets the tag above instead.
+      if (timeEl && !block.classList.contains('cal-block-tight')) { timeEl.textContent = txt; return; }
       if (!liveTag) {
         liveTag = document.createElement('div');
         liveTag.className = 'cal-live-time';
@@ -2592,6 +2613,7 @@ function wireDayInteractions(canEdit) {
         const maxH = 24 * HOUR_PX - parseFloat(block.style.top) - 2;
         const h = Math.min(maxH, Math.max(SNAP_PX - 2, snapPx(origH + 2 + (clientY - startY)) - 2));
         block.style.height = `${h}px`;
+        fitDayBlock(block);
       } else {
         // `top` is exactly (start / 60) * HOUR_PX with no offset, so this snaps
         // cleanly. Clamped after snapping: at the very bottom of the day that can

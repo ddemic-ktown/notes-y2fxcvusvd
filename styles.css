@@ -821,7 +821,6 @@ select.iif-date-input { appearance: none; -webkit-appearance: none; padding-righ
 }
 .cal-block-time { font-size: 10px; color: var(--ink-soft); }
 /* Day text follows the day zoom (v2026.11.27-0244, --day-text set in renderCalendarDay). */
-#cal-day-timeline .cal-block > :not(.cal-resize),
 #cal-day-timeline .cal-hour-label { zoom: var(--day-text, 1); }
 /* Customer + crew on ONE row when they fit. `flex: 0 1 auto` on the name is
    what allows it: the name takes only what it needs, so the chips sit beside a
@@ -3557,7 +3556,9 @@ a.job-menu-link[hidden] { display: none; }
 
 /* View as (v2026.11.27-0333): the strip across every header, and no + buttons while previewing. */
 .app-header > .preview-strip {
-  flex: 0 0 100%; order: -1; align-self: stretch; width: 100%;
+  /* flex: none, not a 100% basis (v2026.11.27-0532): in the column-direction headers a 100%
+     basis meant 100% of the header's HEIGHT, so the strip covered the toolbar. */
+  flex: none; order: -1; align-self: stretch; width: 100%; box-sizing: border-box;
   margin: 0 0 4px; padding: 4px 10px; border: none; border-radius: 6px;
   background: #f59e0b; color: #1f1300; font-size: 13px; font-weight: 700; text-align: center; cursor: pointer;
 }
@@ -3566,3 +3567,15 @@ body.previewing .fab, body.previewing #fab-menu, body.previewing #price-fab-menu
 .view-as-row { cursor: pointer; }
 .view-as-row .view-as-sub { margin-left: auto; font-size: 12px; }
 .view-as-label { list-style: none; font-size: 12px; font-weight: 700; color: var(--ink-soft); margin: 10px 2px 4px; }
+
+/* Day view: ALL of a job's text, always (v2026.11.27-0429). Nothing trims or clamps; when it
+   doesn't fit, fitDayBlock() shrinks that box's text (--fit) until it does. */
+#cal-day-timeline .cal-block > :not(.cal-resize) { zoom: calc(var(--day-text, 1) * var(--fit, 1)); }
+#cal-day-timeline .cal-block .cal-block-who,
+#cal-day-timeline .cal-block .cal-block-addr,
+#cal-day-timeline .cal-block .cal-block-note {
+  white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere;
+  display: block; -webkit-line-clamp: unset; line-clamp: none;
+}
+#cal-day-timeline .cal-block .cal-block-head,
+#cal-day-timeline .cal-block .cal-block-chips { flex-wrap: wrap; }
