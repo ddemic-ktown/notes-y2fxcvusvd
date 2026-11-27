@@ -758,6 +758,15 @@ select.iif-date-input { appearance: none; -webkit-appearance: none; padding-righ
 }
 /* Customer list (v2026.11.25-2357): two fingers zoom the LIST, not the page. */
 #customers-list { touch-action: pan-x pan-y; }
+/* (v2026.11.27-0155) The name and address never get cut off — they wrap and the card grows.
+   The date grows about a third as much as the rest (the list is CSS-zoomed, so
+   it is counter-scaled), and past 1.3× it goes on its own line under the name. */
+#customers-list .note-card .note-title { white-space: normal; overflow: visible; overflow-wrap: anywhere; }
+#customers-list .note-card .note-preview { display: block; -webkit-line-clamp: unset; line-clamp: none; }
+#customers-list .note-card .note-date {
+  font-size: calc(12px * (0.67 + 0.33 * var(--cust-zoom, 1)) / var(--cust-zoom, 1));
+}
+#customers-list.cust-zoom-big .note-card .note-head { flex-direction: column; align-items: flex-start; gap: 2px; }
 .cal-timeline { position: relative; }
 .cal-hour {
   position: absolute; left: 0; right: 0; height: 0;
@@ -3190,15 +3199,18 @@ body.vv-zoomed-pinch .editor-new-actions { display: none !important; }
    what you can see, so pinching in magnified it but left you unable to pan to
    the rows now off-screen — the whole point of zooming into a month. Static,
    it becomes part of the page and pans like everything else. */
-body.vv-zoomed-pinch #calendar-view.active {
+/* (v2026.11.27-0155) Swipe view only. In Scroll view the months scroll inside the calendar,
+   and going static reset that scroll to the first loaded month — a pinch jumped
+   you to what looked like a random date. */
+body.vv-zoomed-pinch #calendar-view.active:not(:has(.cal-grid-scroll)) {
   position: static;
   height: auto;
   max-height: none;
   min-height: 100%;
   overflow: visible;
 }
-body.vv-zoomed-pinch #calendar-view.active .app-header { position: static; }
-body.vv-zoomed-pinch .cal-cells { overflow-y: visible; }
+body.vv-zoomed-pinch #calendar-view.active:not(:has(.cal-grid-scroll)) .app-header { position: static; }
+body.vv-zoomed-pinch #calendar-view.active:not(:has(.cal-grid-scroll)) .cal-cells { overflow-y: visible; }
 #calendar-view .app-header { flex-shrink: 0; }
 .cal-day-main { overflow: hidden; }
 #editor-view .app-header,

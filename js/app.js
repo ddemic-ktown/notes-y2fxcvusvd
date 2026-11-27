@@ -20,6 +20,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 100, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.11.27-0155', 'Month view pinch stays on the same dates; customer list zoom keeps names and addresses whole (date grows less, drops under the name); day view: a second finger puts a picked-up job back, and lift-and-let-go now really selects'],
   ['v2026.11.25-2357', 'Pinch: no zoom buttons on phones; price table zooms around your fingers; a pinch never picks up a job or opens a cell, and lifting one finger keeps scrolling. Day view: hold a job and let go to select it on top of the others. Customer list pinch-zooms. More room around Undo/Redo'],
   ['v2026.11.25-2126', 'Desktop month view: a busy day makes its week taller instead of getting its own scroll bars'],
   ['v2026.11.25-2104', 'Day view zooms (pinch, − / +, Ctrl + wheel) down to the whole day; it no longer jumps after moving or resizing a job, and scrolls along when you drag a job to the edge. The calendar reopens where you left it for 10 minutes'],
@@ -119,7 +120,6 @@ const CHANGELOG = [
   ['v2026.09.30-2312', 'Week view is now a timeline: each day is divided into hours, from the week’s earliest start to its latest finish, with jobs drawn as blocks'],
   ['v2026.09.30-2250', 'Restore from backup (adds back only what is missing), backups now include jobs and hours, a Cancel filter button on the calendar and Clear filter in the filter box, pinch-zoom no longer flips the month, a dark keyboard gap in dark mode, crew note boxes sized right, and pasting a checkbox line onto a checkbox gives one box'],
   ['v2026.09.30-2205', 'Fixes the app sticking on the loading screen after the last update'],
-  ['v2026.09.30-2137', 'Android: the keyboard no longer pushes the note editor’s toolbar off the top of the screen'],
 ];
 const APP_VERSION = CHANGELOG[0][0];
 
@@ -2507,7 +2507,21 @@ function wireDayInteractions(canEdit) {
   timeline.querySelectorAll('.cal-block').forEach(block => {
     const jobId = block.dataset.job;
     let pressTimer = null, dragging = false, resizing = false;
-    dayLongPressCancels.add(() => { if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; } });
+    dayLongPressCancels.add(() => {
+      if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
+      // A second finger while this job is picked up (v2026.11.27-0155): put it back exactly
+      // as it was, save nothing, and let the pinch have the gesture. No redraw —
+      // that would pull the element out from under a finger mid-pinch.
+      if (dragging || resizing) {
+        dragging = resizing = false;
+        block.style.top = `${liftTop}px`;
+        block.style.height = `${liftH}px`;
+        if (timeEl) timeEl.textContent = liftTimeTxt;
+        moved = false;
+        drop();
+        releaseCalTouch();
+      }
+    });
     let startY = 0, origTop = 0, origH = 0, moved = false;
     let downX = 0, downY = 0;   // where the finger landed, to tell scroll from press
     const takeOverCalTouch = () => {
@@ -2544,7 +2558,14 @@ function wireDayInteractions(canEdit) {
       liveTag.style.left = block.style.left;
       liveTag.style.top = `${Math.max(0, block.offsetTop - 20)}px`;
     };
+    // Where it was when picked up (v2026.11.27-0155). A job only counts as MOVED once it
+    // sits on a different time or length than this — finger wobble used to count,
+    // so a lift-and-let-go was saved unchanged instead of leaving the job selected.
+    let liftTop = 0, liftH = 0, liftTimeTxt = '';
     const lift = () => {
+      liftTop = parseFloat(block.style.top);
+      liftH = parseFloat(block.style.height);
+      liftTimeTxt = timeEl ? timeEl.textContent : '';
       block.classList.add('cal-block-dragging');
       timeline.classList.add('cal-lifting');
       showLive();
@@ -2559,6 +2580,10 @@ function wireDayInteractions(canEdit) {
     let lastY = 0;
     const applyMove = (clientY) => {
       lastY = clientY;
+      const done = () => {
+        moved = parseFloat(block.style.top) !== liftTop || parseFloat(block.style.height) !== liftH;
+        showLive();
+      };
       if (resizing) {
         // A block is drawn 2px shorter than it really is (the gap between
         // stacked blocks), so snap the TRUE height and take the gap off again —
@@ -2573,7 +2598,7 @@ function wireDayInteractions(canEdit) {
         const next = Math.max(0, Math.min(24 * HOUR_PX - origH, snapPx(origTop + (clientY - startY))));
         block.style.top = `${next}px`;
       }
-      showLive();
+      done();
     };
     // EDGE SCROLL (v2026.11.25-2104): near the top or bottom of the day, scroll it and carry
     // the job along — faster the closer to the edge. Stops at midnight either end.
@@ -2647,7 +2672,6 @@ function wireDayInteractions(canEdit) {
     if (canEdit) block.addEventListener('contextmenu', (e) => e.preventDefault());
     block.addEventListener('pointermove', (e) => {
       if (resizing) {
-        moved = true;
         applyMove(e.clientY);
         kickEdgeScroll();
         return;
@@ -2663,7 +2687,6 @@ function wireDayInteractions(canEdit) {
         }
         return;
       }
-      moved = true;
       applyMove(e.clientY);
       kickEdgeScroll();
     });
@@ -7391,7 +7414,13 @@ function customerMatchesSearch(c, term) {
 // over the list (touch-action), and the tap a pinch leaves behind is swallowed so
 // it never opens a customer.
 let custZoom = (() => { const v = parseFloat(localStorage.getItem('na-cust-zoom') || '1'); return v >= 0.7 && v <= 1.8 ? v : 1; })();
-function applyCustZoom() { if (customersList) customersList.style.zoom = String(custZoom); }
+function applyCustZoom() {
+  if (!customersList) return;
+  customersList.style.zoom = String(custZoom);
+  // The date grows less than the rest, and past 1.3× drops under the name (v2026.11.27-0155).
+  customersList.style.setProperty('--cust-zoom', String(custZoom));
+  customersList.classList.toggle('cust-zoom-big', custZoom > 1.3);
+}
 applyCustZoom();
 if (customersList) {
   let cp = null;
