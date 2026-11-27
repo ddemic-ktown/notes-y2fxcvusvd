@@ -767,7 +767,10 @@ select.iif-date-input { appearance: none; -webkit-appearance: none; padding-righ
 .cal-day-scroll { touch-action: pan-x pan-y; }
 /* (v2026.11.27-0540) The rest of the day view screen — header, toolbar, day cues — no page
    pinch-zoom either: only the day itself zooms. */
-#calendar-day-view { touch-action: pan-x pan-y; }
+#calendar-day-view,
+/* (v2026.11.27-0546) Same for the other screens that zoom one area themselves: only that
+   area zooms (the list, the table, the chart); a pinch anywhere else does nothing. */
+#list-view, #customers-view, #price-view, #hours-view { touch-action: pan-x pan-y; }
 /* Phones (v2026.11.25-2357): pinch does the zooming, so no − / + (day) or A− / A+ (price table). */
 @media (max-width: 430px) {
   #calendar-day-view .price-zoom, #price-view .price-zoom { display: none; }

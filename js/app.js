@@ -20,6 +20,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 100, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.11.27-0546', 'Pinch only zooms the area that has its own zoom (Home and customer lists, price table, hours chart) — headers no longer zoom the page; leftover page zoom resets when you change screen'],
   ['v2026.11.27-0540', 'Day view: pinching the header or toolbar no longer zooms the whole page'],
   ['v2026.11.27-0532', 'Fix: the View as bar no longer covers the calendar toolbar'],
   ['v2026.11.27-0429', 'Day view: every job shows all of its text at any zoom — it wraps, and shrinks to fit when the box is small'],
@@ -119,7 +120,6 @@ const CHANGELOG = [
   ['v2026.10.01-1827', 'A shared note shows a pill for each person it is shared with instead of “Shared” — as many as fit, then +N'],
   ['v2026.10.01-1756', 'The nav bar is now the top line of every screen, above the breadcrumb and search; it stays put while typing, which fixes the checkbox button in the note editor'],
   ['v2026.10.01-1713', 'The Customers / Calendar / Price Table row is slimmer'],
-  ['v2026.10.01-1710', 'Customers, Calendar and Price Table buttons are now at the top of every screen, with the one you are on highlighted'],
 ];
 const APP_VERSION = CHANGELOG[0][0];
 
@@ -5869,7 +5869,25 @@ function restoreScroll(key) {
   requestAnimationFrame(() => { apply(); requestAnimationFrame(apply); });
 }
 
+// (v2026.11.27-0546) Leftover PAGE zoom — from month view, which still uses it — can't be
+// pinched back out on the screens that block page zoom. Any navigation resets it:
+// briefly capping the viewport at 1× is what makes phone browsers let go of a
+// zoom. Best effort: a browser set to always allow zoom may ignore it.
+function resetPageZoom() {
+  if (viewportZoom() <= 1.01) return;
+  const m = document.querySelector('meta[name="viewport"]');
+  if (!m) return;
+  const orig = m.getAttribute('content') || '';
+  m.setAttribute('content', orig.replace(/,\s*maximum-scale=[^,]*/g, '') + ', maximum-scale=1');
+  setTimeout(() => { m.setAttribute('content', orig); }, 400);
+}
+// iPhone: block page pinch over the screens that zoom their own area.
+['list-view', 'customers-view', 'price-view', 'hours-view'].forEach(id => {
+  const el = document.getElementById(id);
+  if (el) el.addEventListener('gesturestart', (e) => e.preventDefault());
+});
 function hideAllScreens() {
+  resetPageZoom();
   saveCalMemory();   // v2026.11.25-2104
   rememberScroll();
   // Don't come back to a home screen full of layout controls
