@@ -688,7 +688,9 @@ select.iif-date-input { appearance: none; -webkit-appearance: none; padding-righ
 /* Up and down only (v2026.11.19-2214): nothing here scrolls sideways, so a swipe
    that starts sideways has no other way to go. The JS SCROLL RESCUE covers
    browsers that still lock it the wrong way. */
-.cal-scroll { overflow-x: hidden; overscroll-behavior-x: none; touch-action: pan-x pan-y pinch-zoom; }
+.cal-scroll { overflow-x: hidden; touch-action: pan-x pan-y pinch-zoom; }
+/* (v2026.11.27-0307) No overscroll-behavior-x: none here — it stopped a sideways swipe passing
+   on to the page, which is exactly how a zoomed-in page pans left and right. */
 /* (v2026.11.27-0244) pan-x is back: pan-y alone also stopped a zoomed-in page panning sideways.
    overflow-x stays hidden, so the months themselves still never scroll sideways. */
 .cal-mblock, .cal-scroll .cal-cells { max-width: 100%; }

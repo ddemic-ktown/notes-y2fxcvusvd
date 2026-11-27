@@ -20,6 +20,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 100, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.11.27-0307', 'Fix: a zoomed-in month view pans left and right'],
   ['v2026.11.27-0244', 'Zoomed-in month view pans sideways again; day view text grows with the zoom; Home pinch-zooms like the customer list'],
   ['v2026.11.27-0229', 'Phone month view: text at half size (pinch to read), and each day shows its crew once beside the date instead of on every job'],
   ['v2026.11.27-0155', 'Month view pinch stays on the same dates; customer list zoom keeps names and addresses whole (date grows less, drops under the name); day view: a second finger puts a picked-up job back, and lift-and-let-go now really selects'],
@@ -119,7 +120,6 @@ const CHANGELOG = [
   ['v2026.09.30-2326', 'Week view: overlapping jobs stack over each other like the day view when their text still shows, and less space between days'],
   ['v2026.09.30-2322', 'The home screen’s See all links are readable again in dark mode'],
   ['v2026.09.30-2316', 'The job description box grows to show all its text, pasting a checkbox line onto a checkbox gives one box however you paste, and Insert a date opens the date picker on Android and desktop'],
-  ['v2026.09.30-2312', 'Week view is now a timeline: each day is divided into hours, from the week’s earliest start to its latest finish, with jobs drawn as blocks'],
 ];
 const APP_VERSION = CHANGELOG[0][0];
 
