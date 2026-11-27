@@ -20,6 +20,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 100, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.11.27-0540', 'Day view: pinching the header or toolbar no longer zooms the whole page'],
   ['v2026.11.27-0532', 'Fix: the View as bar no longer covers the calendar toolbar'],
   ['v2026.11.27-0429', 'Day view: every job shows all of its text at any zoom — it wraps, and shrinks to fit when the box is small'],
   ['v2026.11.27-0333', 'Settings › View as… (admins): preview the app as one of your people, or as a role; read-only, with a bar to come back'],
@@ -119,7 +120,6 @@ const CHANGELOG = [
   ['v2026.10.01-1756', 'The nav bar is now the top line of every screen, above the breadcrumb and search; it stays put while typing, which fixes the checkbox button in the note editor'],
   ['v2026.10.01-1713', 'The Customers / Calendar / Price Table row is slimmer'],
   ['v2026.10.01-1710', 'Customers, Calendar and Price Table buttons are now at the top of every screen, with the one you are on highlighted'],
-  ['v2026.10.01-1646', 'Customers, Calendar and Price Table moved to a row at the top of Home; Hours lives in Settings › QuickBooks; a blue line marks the current time in week and day view; copying a job no longer copies the hours; date and time icons are visible in dark mode'],
 ];
 const APP_VERSION = CHANGELOG[0][0];
 
@@ -2488,6 +2488,8 @@ function clearDaySelection() {
   document.querySelectorAll('#cal-day-timeline .cal-block-selected').forEach(b => b.classList.remove('cal-block-selected'));
 }
 if (calendarDayView) {
+  // iPhone ignores touch-action for pinch; this stops the page zooming there (v2026.11.27-0540).
+  calendarDayView.addEventListener('gesturestart', (e) => e.preventDefault());
   calendarDayView.addEventListener('pointerdown', (e) => {
     if (e.isPrimary) { dayPtrs = 0; dayMulti = false; dayIgnorePointer = null; }
     dayPtrs++;
