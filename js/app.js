@@ -20,6 +20,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 100, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.11.27-0244', 'Zoomed-in month view pans sideways again; day view text grows with the zoom; Home pinch-zooms like the customer list'],
   ['v2026.11.27-0229', 'Phone month view: text at half size (pinch to read), and each day shows its crew once beside the date instead of on every job'],
   ['v2026.11.27-0155', 'Month view pinch stays on the same dates; customer list zoom keeps names and addresses whole (date grows less, drops under the name); day view: a second finger puts a picked-up job back, and lift-and-let-go now really selects'],
   ['v2026.11.25-2357', 'Pinch: no zoom buttons on phones; price table zooms around your fingers; a pinch never picks up a job or opens a cell, and lifting one finger keeps scrolling. Day view: hold a job and let go to select it on top of the others. Customer list pinch-zooms. More room around Undo/Redo'],
@@ -119,7 +120,6 @@ const CHANGELOG = [
   ['v2026.09.30-2322', 'The home screen’s See all links are readable again in dark mode'],
   ['v2026.09.30-2316', 'The job description box grows to show all its text, pasting a checkbox line onto a checkbox gives one box however you paste, and Insert a date opens the date picker on Android and desktop'],
   ['v2026.09.30-2312', 'Week view is now a timeline: each day is divided into hours, from the week’s earliest start to its latest finish, with jobs drawn as blocks'],
-  ['v2026.09.30-2250', 'Restore from backup (adds back only what is missing), backups now include jobs and hours, a Cancel filter button on the calendar and Clear filter in the filter box, pinch-zoom no longer flips the month, a dark keyboard gap in dark mode, crew note boxes sized right, and pasting a checkbox line onto a checkbox gives one box'],
 ];
 const APP_VERSION = CHANGELOG[0][0];
 
@@ -2182,6 +2182,9 @@ function renderCalendarDay() {
   // A taller window can fit more than the saved zoom shows: never below "whole day". (v2026.11.25-2104)
   const fit = dayFitPx();
   if (HOUR_PX < fit) { HOUR_PX = fit; SNAP_PX = HOUR_PX * SNAP_MIN / 60; }
+  // Text follows the zoom (v2026.11.27-0244): up to 1.6× zoomed in, down to 0.85× zoomed out.
+  if (calendarDayView) calendarDayView.style.setProperty('--day-text',
+    String(Math.round(Math.max(0.85, Math.min(1.6, Math.sqrt(HOUR_PX / DAY_ZOOM_DEFAULT))) * 100) / 100));
   // Home › August › Thursday 15th. The middle crumb names the MONTH rather than
   // saying "Calendar" — it goes to the same place, and a trail reads better as
   // where you are than as what the screen is called.
@@ -7407,51 +7410,54 @@ function customerMatchesSearch(c, term) {
   return words.every(w => haystack.includes(w));
 }
 
-// CUSTOMER LIST PINCH ZOOM (v2026.11.25-2357): two fingers scale the list (CSS zoom),
-// centred on the fingers, remembered per device. The browser's own pinch is off
-// over the list (touch-action), and the tap a pinch leaves behind is swallowed so
-// it never opens a customer.
-let custZoom = (() => { const v = parseFloat(localStorage.getItem('na-cust-zoom') || '1'); return v >= 0.7 && v <= 1.8 ? v : 1; })();
-function applyCustZoom() {
-  if (!customersList) return;
-  customersList.style.zoom = String(custZoom);
-  // The date grows less than the rest, and past 1.3× drops under the name (v2026.11.27-0155).
-  customersList.style.setProperty('--cust-zoom', String(custZoom));
-  customersList.classList.toggle('cust-zoom-big', custZoom > 1.3);
-}
-applyCustZoom();
-if (customersList) {
+// LIST PINCH ZOOM (v2026.11.25-2357; shared with Home in v2026.11.27-0244): two fingers scale
+// a list (CSS zoom), centred on the fingers, remembered per device under its own
+// key. The browser's own pinch is off over the list (touch-action), and the tap a
+// pinch leaves behind is swallowed so it never opens anything. The list gets
+// .zoom-list, --list-zoom and, past 1.3×, .zoom-list-big — see the CSS.
+function setupListZoom(el, key) {
+  if (!el) return;
+  let zoom = (() => { const v = parseFloat(localStorage.getItem(key) || '1'); return v >= 0.7 && v <= 1.8 ? v : 1; })();
+  const apply = () => {
+    el.style.zoom = String(zoom);
+    el.style.setProperty('--list-zoom', String(zoom));
+    el.classList.toggle('zoom-list-big', zoom > 1.3);
+  };
+  el.classList.add('zoom-list');
+  apply();
   let cp = null;
-  let custSwallowUntil = 0;
+  let swallowUntil = 0;
   const d = (t) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
-  customersList.addEventListener('gesturestart', (e) => e.preventDefault());
-  customersList.addEventListener('touchstart', (e) => {
-    if (e.touches.length === 2) cp = { d0: d(e.touches), z0: custZoom };
+  el.addEventListener('gesturestart', (e) => e.preventDefault());
+  el.addEventListener('touchstart', (e) => {
+    if (e.touches.length === 2) cp = { d0: d(e.touches), z0: zoom };
   }, { passive: true });
-  customersList.addEventListener('touchmove', (e) => {
+  el.addEventListener('touchmove', (e) => {
     if (!cp || e.touches.length !== 2) return;
     const z = Math.max(0.7, Math.min(1.8, Math.round(cp.z0 * (d(e.touches) / cp.d0) * 20) / 20));
-    if (z === custZoom) return;
+    if (z === zoom) return;
     const midY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
-    const k = z / custZoom;
-    const listTop = customersList.getBoundingClientRect().top + window.scrollY;
+    const k = z / zoom;
+    const listTop = el.getBoundingClientRect().top + window.scrollY;
     const at = window.scrollY + midY - listTop;          // px into the list under the fingers
-    custZoom = z;
-    applyCustZoom();
+    zoom = z;
+    apply();
     window.scrollTo(0, Math.max(0, listTop + at * k - midY));
   }, { passive: true });
-  customersList.addEventListener('touchend', (e) => {
+  el.addEventListener('touchend', (e) => {
     if (!cp) return;
     if (e.touches.length === 0) {
       cp = null;
-      custSwallowUntil = Date.now() + 400;
-      try { localStorage.setItem('na-cust-zoom', String(custZoom)); } catch (err) {}
+      swallowUntil = Date.now() + 400;
+      try { localStorage.setItem(key, String(zoom)); } catch (err) {}
     }
   }, { passive: true });
-  customersList.addEventListener('click', (e) => {
-    if (cp || Date.now() < custSwallowUntil) { e.stopPropagation(); e.preventDefault(); }
+  el.addEventListener('click', (e) => {
+    if (cp || Date.now() < swallowUntil) { e.stopPropagation(); e.preventDefault(); }
   }, true);
 }
+setupListZoom(customersList, 'na-cust-zoom');
+setupListZoom(notesList, 'na-home-zoom');   // Home (v2026.11.27-0244)
 function renderCustomersList() {
   updateSortButtons();
   if (!Storage.isReady()) {
@@ -12949,6 +12955,13 @@ function tutorialSteps(part) {
       screen: 'home',
       target: () => document.getElementById('settings-btn'),
       text: 'Settings live here — keywords, users, your QuickBooks export.',
+    },
+    {
+      // v2026.11.27-0244 — touch screens only.
+      screen: 'home',
+      requires: () => 'ontouchstart' in window,
+      target: () => document.getElementById('notes-list'),
+      text: 'Pinch Home with two fingers to make everything bigger or smaller. It’s kept on this device, and the customer list has its own.',
     },
     {
       screen: 'home',
