@@ -20,6 +20,7 @@ import { LocalFiles } from "./files.js";
 // delete entries beyond 100, and set sw.js VERSION to match.
 // Commit message format: "vYYYY.MM.DD-HHMM: description" — version prefix always comes before the description.
 const CHANGELOG = [
+  ['v2026.11.27-0229', 'Phone month view: text at half size (pinch to read), and each day shows its crew once beside the date instead of on every job'],
   ['v2026.11.27-0155', 'Month view pinch stays on the same dates; customer list zoom keeps names and addresses whole (date grows less, drops under the name); day view: a second finger puts a picked-up job back, and lift-and-let-go now really selects'],
   ['v2026.11.25-2357', 'Pinch: no zoom buttons on phones; price table zooms around your fingers; a pinch never picks up a job or opens a cell, and lifting one finger keeps scrolling. Day view: hold a job and let go to select it on top of the others. Customer list pinch-zooms. More room around Undo/Redo'],
   ['v2026.11.25-2126', 'Desktop month view: a busy day makes its week taller instead of getting its own scroll bars'],
@@ -119,7 +120,6 @@ const CHANGELOG = [
   ['v2026.09.30-2316', 'The job description box grows to show all its text, pasting a checkbox line onto a checkbox gives one box however you paste, and Insert a date opens the date picker on Android and desktop'],
   ['v2026.09.30-2312', 'Week view is now a timeline: each day is divided into hours, from the week’s earliest start to its latest finish, with jobs drawn as blocks'],
   ['v2026.09.30-2250', 'Restore from backup (adds back only what is missing), backups now include jobs and hours, a Cancel filter button on the calendar and Clear filter in the filter box, pinch-zoom no longer flips the month, a dark keyboard gap in dark mode, crew note boxes sized right, and pasting a checkbox line onto a checkbox gives one box'],
-  ['v2026.09.30-2205', 'Fixes the app sticking on the loading screen after the last update'],
 ];
 const APP_VERSION = CHANGELOG[0][0];
 
@@ -1787,26 +1787,24 @@ function calCellHtml(d, refMonth, shortPills, todayStr, noCap) {
       </div>`;
     }).join('');
 
-    // PHONE (v2026.11.09-1718): one line per job, in start-time order. The first
-    // job's crew sits as dots beside the date; after that a line only starts
-    // with dots when the crew differs from the job above. One letter per person.
+    // PHONE (v2026.11.09-1718): one line per job, in start-time order.
+    // Crew (v2026.11.27-0229): shown ONCE per day, beside the date — everyone on any of the
+    // day's jobs, each person once, in the order they first appear. The job lines
+    // no longer carry dots. One letter per person.
     let headDots = '';
-    let prevKey = null;
-    const groupedLines = !shortPills ? '' : jobs.slice(0, phoneCap).map((j, i) => {
-      shown++;
-      const names = crewNames(jobCrew(j));
-      const key = names.join('|');
-      const dots = names.length
-        ? names.map(n => {
+    if (shortPills && jobs.length) {
+      const dayNames = [];
+      jobs.forEach(j => crewNames(jobCrew(j)).forEach(n => { if (!dayNames.includes(n)) dayNames.push(n); }));
+      headDots = dayNames.length
+        ? dayNames.map(n => {
             const first = n.split(/[\s(]+/)[0];
             return `<span class="cal-chip cal-chip-initial" style="${chipStyle(n)}" title="${escapeHtml(n)}">${escapeHtml(first.slice(0, 1).toUpperCase())}</span>`;
           }).join('')
         : '<span class="cal-chip cal-chip-none">—</span>';
-      let lead = '';
-      if (i === 0) headDots = dots;
-      else if (key !== prevKey) lead = dots;
-      prevKey = key;
-      return `<div class="cal-job cal-job-line${j.noWork ? ' cal-nowork-text' : ''}">${lead}<span class="cal-job-who">${escapeHtml(calHeadLabel(j) || '—')}</span></div>`;
+    }
+    const groupedLines = !shortPills ? '' : jobs.slice(0, phoneCap).map(j => {
+      shown++;
+      return `<div class="cal-job cal-job-line${j.noWork ? ' cal-nowork-text' : ''}"><span class="cal-job-who">${escapeHtml(calHeadLabel(j) || '—')}</span></div>`;
     }).join('');
 
     const more = jobs.length > shown ? `<div class="cal-more">+${jobs.length - shown}</div>` : '';
@@ -13230,7 +13228,7 @@ function tutorialSteps(part) {
         screen: 'calendar',
         setup: goMonth,
         target: () => document.querySelector('#cal-grid .cal-cells'),
-        text: 'A month at a time. Each day lists its jobs, and everyone on a job gets a coloured tag — the same colour every time, so you can read the week without reading the names. On a phone the dots by the date are the first job’s crew; a job only shows dots again when the crew changes.',
+        text: 'A month at a time. Each day lists its jobs, and everyone on a job gets a coloured tag — the same colour every time, so you can read the week without reading the names. On a phone the dots by the date are everyone working that day, each person once; pinch in to read the jobs.',
       },
       {
         screen: 'calendar',
